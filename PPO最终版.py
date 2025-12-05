@@ -411,6 +411,7 @@ class Env:
         self.angular_vel = 0.0  # 当前角速度
         self.angular_acc = 0.0  # 当前角加速度
         self.angular_jerk = 0.0  # 当前角加加速度
+        self.kcm_intervention = 0.0  # 运动学约束干预程度
         
         self.state = np.array([
             0.0,  # 初始theta_prime
@@ -447,6 +448,11 @@ class Env:
         prev_ang_acc = self.angular_acc
         #解包动作
         theta_prime, length_prime = action
+        
+        # === 保存网络输出的原始意图（raw intent） ===
+        raw_angular_vel_intent = theta_prime  # 网络输出的原始角速度意图
+        raw_linear_vel_intent = length_prime  # 网络输出的原始线速度意图
+        
         # 使用Numba优化的约束计算
         (self.velocity, self.acceleration, self.jerk,
          self.angular_vel, self.angular_acc, self.angular_jerk) = apply_kinematic_constraints(
@@ -455,6 +461,12 @@ class Env:
             self.MAX_VEL, self.MAX_ACC, self.MAX_JERK,
             self.MAX_ANG_VEL, self.MAX_ANG_ACC, self.MAX_ANG_JERK
         )
+        
+        # === 计算KCM干预程度：原始意图与实际执行动作的差值 ===
+        velocity_diff = abs(self.velocity - raw_linear_vel_intent)
+        angular_vel_diff = abs(self.angular_vel - raw_angular_vel_intent)
+        self.kcm_intervention = velocity_diff + angular_vel_diff
+        
         # === 使用修正后的动作执行状态转移 ===
         # 构建最终安全动作
         safe_action = (self.angular_vel, self.velocity)  # final_vel是线速度
@@ -477,6 +489,8 @@ class Env:
         "contour_error": self.get_contour_error(self.current_position),
         "segment_idx": self.current_segment_idx,
         "progress": next_state[4],  # 添加进度信息
+        "jerk": self.jerk,  # 添加当前捷度值
+        "kcm_intervention": self.kcm_intervention,  # 添加运动学约束干预程度
         }
         normalized_state = self.normalize_state(next_state)
         self.state = next_state
@@ -937,6 +951,9 @@ class Env:
         ang_jerk_penalty = -2.0 * np.clip(abs(self.angular_jerk) / self.MAX_ANG_JERK, 0, 1)
         smoothness_reward = jerk_penalty + ang_jerk_penalty
         
+        # 运动学约束干预惩罚 - 惩罚约束对动作的过度修正
+        constraint_penalty = -2.0 * self.kcm_intervention
+        
         # 终点到达奖励 - 大幅提升
         completion_reward = 0
         end_point = np.array(self.Pm[-1])
@@ -965,7 +982,8 @@ class Env:
         
         # 组合总奖励，确保合理的数值范围
         total_reward = (tracking_reward + progress_reward + direction_reward + 
-                       velocity_reward + smoothness_reward + completion_reward + survival_reward)
+                       velocity_reward + smoothness_reward + constraint_penalty + 
+                       completion_reward + survival_reward)
         
         # 限制总奖励范围，防止梯度爆炸
         total_reward = np.clip(total_reward, -20, 100)
@@ -1631,6 +1649,68 @@ class PPOContinuous:
         
         return actor_loss.item(), critic_loss.item()
 
+# ===== 论文指标统计类 =====
+class PaperMetrics:
+    """用于记录和计算论文实验数据的指标类"""
+    def __init__(self):
+        self.reset()
+    
+    def reset(self):
+        """重置episode级别的指标记录"""
+        self.errors = []  # 每步的轮廓误差
+        self.jerks = []   # 每步的捷度（线性捷度）
+        self.velocities = []  # 每步的速度
+        self.kcm_interventions = []  # 每步的运动学约束干预程度
+    
+    def update(self, contour_error, jerk, velocity, kcm_intervention=0.0):
+        """在每个step后更新指标"""
+        self.errors.append(contour_error)
+        self.jerks.append(abs(jerk))  # 使用绝对值
+        self.velocities.append(velocity)
+        self.kcm_interventions.append(kcm_intervention)
+    
+    def compute(self):
+        """计算episode结束时的统计指标"""
+        if len(self.errors) == 0:
+            return {
+                'rmse_error': 0.0,
+                'mean_jerk': 0.0,
+                'roughness_proxy': 0.0,
+                'mean_velocity': 0.0,
+                'max_error': 0.0,
+                'mean_kcm_intervention': 0.0,
+                'steps': 0
+            }
+        
+        # 计算RMSE Error（均方根误差）
+        rmse_error = np.sqrt(np.mean(np.array(self.errors) ** 2))
+        
+        # 计算Mean Jerk（平均捷度）
+        mean_jerk = np.mean(self.jerks)
+        
+        # 计算Roughness Proxy（表面粗糙度代理指标）
+        # 公式：捷度序列的一阶差分绝对值之和
+        if len(self.jerks) > 1:
+            jerk_diff = np.diff(self.jerks)  # 一阶差分
+            roughness_proxy = np.sum(np.abs(jerk_diff))
+        else:
+            roughness_proxy = 0.0
+        
+        # 其他有用的统计指标
+        mean_velocity = np.mean(self.velocities)
+        max_error = np.max(self.errors)
+        mean_kcm_intervention = np.mean(self.kcm_interventions)
+        
+        return {
+            'rmse_error': rmse_error,
+            'mean_jerk': mean_jerk,
+            'roughness_proxy': roughness_proxy,
+            'mean_velocity': mean_velocity,
+            'max_error': max_error,
+            'mean_kcm_intervention': mean_kcm_intervention,
+            'steps': len(self.errors)
+        }
+
 # ===== 实时监控类 - 显示训练过程，只保存最佳结果 =====
 class TrainingMonitor:
     def __init__(self, env, save_dir="best_results"):
@@ -1911,10 +1991,14 @@ def run_training():
 
     step_log = open('logs/step_log.csv', 'w', newline='')
     episode_log = open('logs/episode_log.csv', 'w', newline='')
+    paper_metrics_log = open('logs/paper_metrics.csv', 'w', newline='')
     step_writer = csv.writer(step_log)
     episode_writer = csv.writer(episode_log)
+    paper_metrics_writer = csv.writer(paper_metrics_log)
     step_writer.writerow(['episode', 'step', 'action_theta', 'action_vel', 'reward'])
     episode_writer.writerow(['episode', 'total_reward', 'avg_actor_loss', 'avg_critic_loss', 'epsilon'])
+    paper_metrics_writer.writerow(['episode', 'rmse_error', 'mean_jerk', 'roughness_proxy', 
+                                     'mean_velocity', 'max_error', 'mean_kcm_intervention', 'steps', 'progress'])
 
     # ===== 使用固定路径和允差 =====
     env_config = {
@@ -1955,12 +2039,16 @@ def run_training():
     smoothed_rewards = []
     smoothing_factor = 0.2
     
-    # 在创建环境后初始化监控器
+    # 在创建环境后初始化监控器和论文指标统计
     monitor = TrainingMonitor(env)
+    paper_metrics = PaperMetrics()
     avg_actor_loss = 0
     avg_critic_loss = 0
     with tqdm(total=total_episodes, desc="Training Progress") as pbar:
         for episode in range(total_episodes):
+            # 重置论文指标统计
+            paper_metrics.reset()
+            
             transition_dict = {
                 'states': [], 
                 'positions': [],
@@ -1988,6 +2076,14 @@ def run_training():
                 transition_dict['rewards'].append(reward)
                 transition_dict['dones'].append(done)
                 transition_dict['steps'].append(info['step'])
+                
+                # 更新论文指标
+                paper_metrics.update(
+                    contour_error=info['contour_error'],
+                    jerk=info['jerk'],
+                    velocity=env.velocity,
+                    kcm_intervention=info['kcm_intervention']
+                )
                 
                 step_writer.writerow([
                     episode,
@@ -2019,6 +2115,9 @@ def run_training():
                 new_smoothed = smoothing_factor * episode_reward + (1 - smoothing_factor) * smoothed_rewards[-1]
                 smoothed_rewards.append(new_smoothed)
             
+            # 计算论文指标
+            metrics = paper_metrics.compute()
+            
             # 记录回合信息
             episode_writer.writerow([
                 episode,
@@ -2027,6 +2126,35 @@ def run_training():
                 avg_critic_loss,
                 env_config["epsilon"]
             ])
+            
+            # 记录论文指标到CSV
+            paper_metrics_writer.writerow([
+                episode,
+                metrics['rmse_error'],
+                metrics['mean_jerk'],
+                metrics['roughness_proxy'],
+                metrics['mean_velocity'],
+                metrics['max_error'],
+                metrics['mean_kcm_intervention'],
+                metrics['steps'],
+                final_progress
+            ])
+            
+            # 每50个episode打印详细指标
+            if (episode + 1) % 50 == 0:
+                print(f"\n{'='*80}")
+                print(f"Episode {episode + 1} - Paper Metrics Summary:")
+                print(f"{'='*80}")
+                print(f"  RMSE Error:              {metrics['rmse_error']:.6f}")
+                print(f"  Mean Jerk:               {metrics['mean_jerk']:.6f}")
+                print(f"  Roughness Proxy:         {metrics['roughness_proxy']:.6f}")
+                print(f"  Mean Velocity:           {metrics['mean_velocity']:.4f}")
+                print(f"  Max Error:               {metrics['max_error']:.6f}")
+                print(f"  Mean KCM Intervention:   {metrics['mean_kcm_intervention']:.6f}")
+                print(f"  Steps:                   {metrics['steps']}")
+                print(f"  Progress:                {final_progress:.4f}")
+                print(f"  Total Reward:            {episode_reward:.2f}")
+                print(f"{'='*80}\n")
             
             # 在episode结束时更新监控数据
             monitor.update(
@@ -2049,6 +2177,11 @@ def run_training():
     
     step_log.close()
     episode_log.close()
+    paper_metrics_log.close()
+    
+    print("\n" + "="*80)
+    print("训练完成！论文指标已保存到 logs/paper_metrics.csv")
+    print("="*80 + "\n")
     
     # 保存模型
     torch.save({

@@ -213,6 +213,9 @@ class Env:
         self.angular_acc = 0.0  # 当前角加速度
         self.angular_jerk = 0.0  # 当前角加加速度
 
+        # 最近一步的奖励分解，便于日志记录
+        self.last_reward_components = {}
+
         self.Pm = [np.array(p) for p in Pm]
         # 检查路径是否闭合
         self.closed = len(Pm) > 2 and np.allclose(Pm[0], Pm[-1], atol=1e-6)
@@ -988,6 +991,18 @@ class Env:
         # 限制总奖励范围，防止梯度爆炸
         total_reward = np.clip(total_reward, -20, 100)
         
+        self.last_reward_components = {
+            'tracking': float(tracking_reward),
+            'progress': float(progress_reward),
+            'direction': float(direction_reward),
+            'velocity': float(velocity_reward),
+            'smoothness': float(smoothness_reward),
+            'constraint': float(constraint_penalty),
+            'completion': float(completion_reward),
+            'survival': float(survival_reward),
+            'total': float(total_reward),
+        }
+
         self.last_progress = progress
         return total_reward
 

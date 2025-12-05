@@ -1,0 +1,61 @@
+# 蝶形路径实验配置
+# 用于测试尖锐转角和复杂曲线的跟踪性能
+
+# 环境配置
+environment:
+  epsilon: 0.3              # 更小的带宽以适应复杂路径
+  interpolation_period: 0.1
+  max_steps: 5000           # 更多步数以完成复杂路径
+
+# 运动学约束参数
+kinematic_constraints:
+  MAX_VEL: 0.8              # 降低最大速度以应对尖锐转角
+  MAX_ACC: 1.5
+  MAX_JERK: 2.5
+  MAX_ANG_VEL: 2.0          # 增加角速度以处理急转弯
+  MAX_ANG_ACC: 4.0
+  MAX_ANG_JERK: 6.0
+
+# 奖励函数权重
+reward_weights:
+  w_e: 1.5                  # 增加跟踪误差权重
+  w_c: 0.6
+  w_j: 0.4
+  w_progress: 2.0
+  w_direction: 0.8          # 增加方向权重
+  w_velocity: 0.2
+  w_constraint: 0.3
+
+# PPO算法参数
+ppo:
+  actor_lr: 0.0002
+  critic_lr: 0.0008
+  hidden_dim: 128
+  gamma: 0.99
+  lmbda: 0.95
+  epochs: 10
+  eps: 0.2
+  batch_size: 64
+
+# 训练配置
+training:
+  num_episodes: 800
+  smoothing_factor: 0.9
+  save_interval: 100
+  log_interval: 50
+
+# 路径定义 - 蝶形路径
+path:
+  type: 'butterfly'
+  scale: 5.0
+  num_points: 500           # 更密集的采样以捕捉细节
+  closed: true
+  
+  butterfly:
+    sharpness: 1.0
+    center: [0.0, 0.0]
+
+# 实验模式配置
+experiment:
+  mode: 'train'
+  enable_kcm: true

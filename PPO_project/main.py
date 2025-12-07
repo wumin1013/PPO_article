@@ -5,10 +5,11 @@
 from __future__ import annotations
 
 import argparse
+import csv
 import os
 import time
 from pathlib import Path
-from typing import Mapping, Optional, Tuple
+from typing import Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -165,6 +166,40 @@ def _init_loggers(manager: ExperimentManager, log_tag: str) -> tuple[CSVLogger, 
         ]
     )
     return step_logger, episode_logger, paper_logger, training_logger
+
+
+def _write_latest_trajectory(logs_dir: Path, trajectory_points: Sequence[Sequence[float]]) -> None:
+    """将单回合轨迹覆盖写入 logs/latest_trajectory.csv（失败时静默跳过）。"""
+    target_path = Path(logs_dir) / "latest_trajectory.csv"
+    tmp_path = target_path.with_suffix(".csv.tmp")
+
+    rows = []
+    for point in trajectory_points:
+        if not point or len(point) < 2:
+            continue
+        try:
+            x, y = point
+            rows.append((float(x), float(y)))
+        except Exception:
+            continue
+
+    if not rows:
+        return
+
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with tmp_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["x", "y"])
+            writer.writerows(rows)
+        tmp_path.replace(target_path)
+    except Exception as exc:
+        print(f"写入 latest_trajectory.csv 失败，已跳过本回合: {exc}")
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            pass
 
 
 def _build_path(path_config: dict) -> list[np.ndarray]:
@@ -367,6 +402,10 @@ def train(
         for episode in range(start_episode, num_episodes):
             state = env.reset()
             paper_metrics = PaperMetrics()
+            current_episode_trace: list[tuple[float, float]] = []
+            start_pos = getattr(env, "current_position", None)
+            if start_pos is not None and len(start_pos) >= 2:
+                current_episode_trace.append((float(start_pos[0]), float(start_pos[1])))
 
             transition_dict = {
                 "states": [],
@@ -384,6 +423,10 @@ def train(
                 action = agent.take_action(state)
                 next_state, reward, done, info = env.step(action)
                 global_step += 1
+
+                pos_sample = getattr(env, "current_position", None)
+                if pos_sample is not None and len(pos_sample) >= 2:
+                    current_episode_trace.append((float(pos_sample[0]), float(pos_sample[1])))
 
                 transition_dict["states"].append(state)
                 transition_dict["actions"].append(action)
@@ -465,6 +508,10 @@ def train(
                 critic_loss=avg_critic_loss,
                 wall_time=time.perf_counter() - wall_time_start,
             )
+
+            should_dump_trace = (episode + 1) % log_interval == 0 or (episode + 1) == num_episodes
+            if should_dump_trace:
+                _write_latest_trajectory(manager.logs_dir, current_episode_trace)
 
             eval_reward = smoothed_rewards[-1] if smoothed_rewards else episode_reward
             if hasattr(agent, "actor") and eval_reward > best_eval_reward:

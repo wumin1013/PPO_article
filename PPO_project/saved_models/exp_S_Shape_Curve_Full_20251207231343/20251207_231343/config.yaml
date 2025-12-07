@@ -3,10 +3,10 @@ environment:
   interpolation_period: 0.1
   max_steps: 3000
 experiment:
-  category: exp_S_Shape_Curve_Full_20251207223020
+  category: exp_S_Shape_Curve_Full_20251207231343
   enable_kcm: true
   mode: train
-  name: exp_S_Shape_Curve_Full_20251207223020
+  name: exp_S_Shape_Curve_Full_20251207231343
 kinematic_constraints:
   MAX_ACC: 2.0
   MAX_ANG_ACC: 3.0

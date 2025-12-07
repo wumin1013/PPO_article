@@ -2,6 +2,7 @@ import os
 import signal
 import sys
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -25,6 +26,7 @@ BASE_DIR = Path(__file__).resolve().parent
 CONFIG_DIR = BASE_DIR / "configs"
 SAVED_MODELS_DIR = BASE_DIR / "saved_models"
 MAIN_SCRIPT = BASE_DIR / "main.py"
+AUTO_REFRESH_KEY = "auto_refresh_enabled"
 
 CONFIG_OPTIONS: Dict[str, Path] = {
     "S-Shape Curve (S形曲线)": CONFIG_DIR / "s_shape.yaml",
@@ -49,11 +51,30 @@ def _load_kcm_defaults(config_path: str, mtime: float) -> Dict[str, float]:
     return config.get("kinematic_constraints", {})
 
 
+@st.cache_data(ttl=2, show_spinner=False)
+def load_data_safe(path: str, retries: int = 5, delay: float = 0.1, **kwargs) -> pd.DataFrame:
+    """无锁CSV读取：容错+短缓存，避免训练写入时卡死。"""
+    kwargs.setdefault("engine", "python")
+    kwargs.setdefault("on_bad_lines", "skip")
+    last_error: Optional[Exception] = None
+    for _ in range(retries):
+        try:
+            return pd.read_csv(path, **kwargs)
+        except (PermissionError, OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
+            last_error = exc
+            time.sleep(delay)
+    return pd.DataFrame()
+
+
 def init_session_state() -> None:
     """Initialize session state for multi-process tracking."""
-    st.session_state.setdefault("running_processes", [])
-    if "last_launch" in st.session_state:
-        st.session_state.pop("last_launch")
+    try:
+        st.session_state.setdefault("running_processes", [])
+        if "last_launch" in st.session_state:
+            st.session_state.pop("last_launch")
+    except Exception:
+        # 非 Streamlit 运行时（如直接 python 执行）不使用 session_state
+        return
 
 
 def _trigger_rerun() -> None:
@@ -62,8 +83,37 @@ def _trigger_rerun() -> None:
         rerun()
 
 
+def render_auto_refresh_toggle() -> bool:
+    """全局自动刷新开关，默认开启。"""
+    try:
+        default = st.session_state.get(AUTO_REFRESH_KEY, True)
+        enabled = st.toggle("开启实时监控 (Auto-Refresh)", value=default, key=AUTO_REFRESH_KEY)
+        st.session_state[AUTO_REFRESH_KEY] = enabled
+        return enabled
+    except Exception:
+        # 在非 Streamlit 运行环境时安全返回
+        return False
+
+
 def _remove_process(pid: str) -> None:
-    st.session_state["running_processes"] = [p for p in st.session_state.get("running_processes", []) if p.get("pid") != pid]
+    try:
+        st.session_state["running_processes"] = [p for p in st.session_state.get("running_processes", []) if p.get("pid") != pid]
+    except Exception:
+        return
+
+
+def get_running_processes() -> List[Dict[str, str]]:
+    """Return tracked running processes from session state."""
+    init_session_state()
+    try:
+        return list(st.session_state.get("running_processes", []))
+    except Exception:
+        return []
+
+
+def _safe_read_csv(path: Path, retries: int = 5, delay: float = 0.1, **kwargs) -> pd.DataFrame:
+    """Backward-compatible wrapper -> load_data_safe with caching and parser fallback."""
+    return load_data_safe(str(path), retries=retries, delay=delay, **kwargs)
 
 
 def kill_process(pid_value: str) -> None:
@@ -102,23 +152,33 @@ def generate_experiment_name(trajectory_label: str, disable_kcm: bool, disable_s
 
 
 def ensure_experiment_name(auto_name: str) -> str:
-    if "experiment_name_user_edit" not in st.session_state:
-        st.session_state["experiment_name_user_edit"] = False
-    if not st.session_state["experiment_name_user_edit"]:
-        st.session_state["experiment_name"] = auto_name
+    try:
+        if "experiment_name_user_edit" not in st.session_state:
+            st.session_state["experiment_name_user_edit"] = False
+        if not st.session_state["experiment_name_user_edit"]:
+            st.session_state["experiment_name"] = auto_name
+    except Exception:
+        # 非 Streamlit 环境下简单返回自动名
+        return auto_name
 
     def _mark_user_edit() -> None:
-        st.session_state["experiment_name_user_edit"] = True
+        try:
+            st.session_state["experiment_name_user_edit"] = True
+        except Exception:
+            return
 
     exp_name = st.text_input(
         "Experiment Name",
-        value=st.session_state.get("experiment_name", auto_name),
+        value=st.session_state.get("experiment_name", auto_name) if hasattr(st, "session_state") else auto_name,
         on_change=_mark_user_edit,
         key="experiment_name_input",
     )
     if st.button("重置自动命名", type="secondary"):
-        st.session_state["experiment_name_user_edit"] = False
-        st.session_state["experiment_name"] = auto_name
+        try:
+            st.session_state["experiment_name_user_edit"] = False
+            st.session_state["experiment_name"] = auto_name
+        except Exception:
+            pass
         exp_name = auto_name
     return exp_name or auto_name
 
@@ -214,8 +274,15 @@ def launch_training_process(
     return launch_info
 
 
-def render_training_monitor(default_exp: Optional[str] = None, default_run: Optional[Path] = None) -> None:
-    st.subheader("训练监控 · Passive Monitoring")
+def render_training_monitor(default_exp: Optional[str] = None, default_run: Optional[Path] = None, auto_refresh_enabled: bool = False) -> None:
+    st.divider()
+    st.subheader("📊 训练监控 · Real-time Monitoring")
+    
+    if auto_refresh_enabled:
+        st.success("✅ 实时监控已启用 - 页面每2秒自动刷新")
+    else:
+        st.info("💡 提示：开启顶部的「实时监控」开关，页面将自动刷新")
+    
     experiments = list_experiment_runs()
     if not experiments:
         st.info("尚未发现 saved_models 下的训练记录。")
@@ -240,29 +307,33 @@ def render_training_monitor(default_exp: Optional[str] = None, default_run: Opti
     run_choice = st.selectbox("选择时间戳", run_labels, index=default_run_idx, key="monitor_run_choice")
     run_dir = runs[run_labels.index(run_choice)]
     log_path = pick_log_file(run_dir)
-    st.caption(f"日志文件: {log_path or '未找到 training_log.csv'}")
-    st.button("手动刷新日志", key=f"refresh_{exp_choice}_{run_choice}")
+    st.caption(f"📁 日志文件: {log_path or '未找到 training_log.csv'}")
 
     if log_path is None or not log_path.exists():
         st.info("等待日志产生中...")
         return
 
-    df = pd.read_csv(log_path)
-    if df.empty:
-        st.info("日志文件为空，可能训练尚未写入。")
-        return
+    try:
+        df = _safe_read_csv(log_path)
+        if df.empty:
+            st.info("日志文件为空，可能训练尚未写入。")
+            return
 
-    df["reward_smooth"] = df["reward"].ewm(alpha=0.1).mean()
-    fig = make_subplots(rows=1, cols=2, subplot_titles=["Reward", "Actor/Critic Loss"])
-    fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["reward"], name="Reward", line=dict(color="#1f77b4")), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["reward_smooth"], name="Reward (EMA)", line=dict(color="#ff7f0e", dash="dash")), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["actor_loss"], name="Actor Loss", line=dict(color="#2ca02c")), row=1, col=2)
-    fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["critic_loss"], name="Critic Loss", line=dict(color="#d62728")), row=1, col=2)
-    fig.update_layout(height=420, margin=dict(l=20, r=20, t=40, b=20), legend=dict(orientation="h"))
-    st.plotly_chart(fig, use_container_width=True)
-    latest_episode_idx = int(df["episode_idx"].iloc[-1]) if "episode_idx" in df.columns else None
-    st.dataframe(df.tail(15), use_container_width=True)
-    render_realtime_trajectory(run_dir, latest_episode_idx)
+        df["reward_smooth"] = df["reward"].ewm(alpha=0.1).mean()
+        fig = make_subplots(rows=1, cols=2, subplot_titles=["Reward", "Actor/Critic Loss"])
+        fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["reward"], name="Reward", line=dict(color="#1f77b4")), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["reward_smooth"], name="Reward (EMA)", line=dict(color="#ff7f0e", dash="dash")), row=1, col=1)
+        fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["actor_loss"], name="Actor Loss", line=dict(color="#2ca02c")), row=1, col=2)
+        fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["critic_loss"], name="Critic Loss", line=dict(color="#d62728")), row=1, col=2)
+        fig.update_layout(height=420, margin=dict(l=20, r=20, t=40, b=20), legend=dict(orientation="h"))
+        st.plotly_chart(fig, use_container_width=True)
+        latest_episode_idx = int(df["episode_idx"].iloc[-1]) if "episode_idx" in df.columns else None
+        st.dataframe(df.tail(15), use_container_width=True)
+        render_realtime_trajectory(run_dir, latest_episode_idx)
+    except Exception as e:
+        st.warning("📊 数据同步中，下一帧即将显示...")
+        st.caption(f"详情: {e}")
+        return
 
 
 def render_realtime_trajectory(run_dir: Path, latest_episode: Optional[int] = None) -> None:
@@ -280,7 +351,7 @@ def render_realtime_trajectory(run_dir: Path, latest_episode: Optional[int] = No
     st.subheader(f"最新回合轨迹 (Episode {latest_episode})" if latest_episode is not None else "最新回合轨迹")
 
     try:
-        traj_df = pd.read_csv(traj_path)
+        traj_df = _safe_read_csv(traj_path)
         if traj_df.empty or not {"x", "y"}.issubset(traj_df.columns):
             st.info("轨迹文件为空或缺少 x,y 列，等待下一次更新。")
             return
@@ -343,7 +414,8 @@ def render_realtime_trajectory(run_dir: Path, latest_episode: Optional[int] = No
         )
         st.plotly_chart(traj_fig, use_container_width=True)
     except Exception as e:  # pragma: no cover - UI 防御
-        st.warning(f"可视化渲染挂起 (数据同步中...): {e}")
+        st.warning("数据同步中，下一帧即将显示...")
+        st.caption(f"详情: {e}")
 
 
 def _load_effective_config(model_path: Path) -> Tuple[dict, Path]:
@@ -596,37 +668,78 @@ def _make_motion_fig(trace: Dict[str, List[float]], kcm_cfg: dict):
     return fig
 
 
-def render_sidebar_process_manager() -> None:
-    st.sidebar.subheader("进行中任务 · Running Tasks")
-    processes = st.session_state.get("running_processes", [])
+def render_running_tasks_panel() -> Dict[str, Dict[str, str]]:
+    """在主区域展示运行中的训练并可一键终止。"""
+    processes = get_running_processes()
+    active: Dict[str, Dict[str, str]] = {}
     if not processes:
-        st.sidebar.caption("暂无运行中的训练。")
-        return
+        return active
 
-    for idx, proc in enumerate(list(processes)):
-        pid = proc.get("pid", "?")
-        exp_name = proc.get("experiment_name", "Unknown")
-        with st.sidebar.expander(f"{exp_name} · PID {pid}", expanded=False):
-            st.caption(f"启动时间: {proc.get('start_time', '未知')}")
-            st.caption(f"命令: {proc.get('cmd', '')}")
-            if st.button("终止任务 (Kill)", key=f"kill_{pid}_{idx}", type="secondary"):
+    st.info("🟢 当前有运行中的训练任务")
+    with st.expander("📋 查看所有进行中任务 (Running Tasks)", expanded=False):
+        for idx, proc in enumerate(processes):
+            pid = proc.get("pid", "?")
+            exp_name = proc.get("experiment_name", "Unknown")
+            active[exp_name] = proc
+            st.markdown(f"**{exp_name}** (PID: {pid})")
+            cmd = proc.get('cmd', '')
+            display_cmd = cmd[:80] + "..." if len(cmd) > 80 else cmd
+            st.caption(f"启动: {proc.get('start_time', '未知')} | 命令: `{display_cmd}`")
+            if st.button("⛔ 终止此任务", key=f"kill_{pid}_{idx}", type="secondary"):
                 kill_process(str(pid))
+                st.success(f"已终止 PID {pid}")
+                return active
+            st.divider()
+    return active
 
 
-def render_training_ops() -> None:
+def render_training_ops(auto_refresh_enabled: bool, active_processes: Optional[Dict[str, Dict[str, str]]] = None) -> None:
+    active_processes = active_processes or {}
     st.header("模式 A · Training Ops")
-    st.markdown("面向任务的实验向导 + 异步训练发射 + 被动监控。")
+    st.markdown("面向任务的实验向导 + 异步训练发射 + 实时监控。")
+    st.caption("提示：开启实时监控后,检测到训练进程会每2秒自动刷新。")
 
-    col1, col2 = st.columns(2)
-    trajectory_label = col1.selectbox("Step 1 · 选择训练场景 (Trajectory Selection)", list(CONFIG_OPTIONS.keys()))
-    disable_kcm = col2.checkbox("Disable KCM (禁用运动学约束)", value=False)
-    disable_smooth = col2.checkbox("Disable Smoothness Reward (禁用平滑奖励)", value=False)
-
+    # Step 1: 场景选择 + 状态指示器
+    st.subheader("Step 1 · 选择训练场景")
+    col1, col2 = st.columns([3, 1])
+    trajectory_label = col1.selectbox("Trajectory Selection", list(CONFIG_OPTIONS.keys()), label_visibility="collapsed")
+    
+    # 检查该场景是否有运行中的训练（通过配置路径匹配）
     config_path = CONFIG_OPTIONS[trajectory_label]
+    config_name = config_path.stem
+    running_for_scene = None
+    for exp_name, proc in active_processes.items():
+        if config_name.lower() in exp_name.lower():
+            running_for_scene = proc
+            break
+    
+    if running_for_scene:
+        pid = running_for_scene.get("pid", "?")
+        col2.success(f"🟢 训练中 (PID: {pid})")
+    else:
+        col2.info("⚪ 未运行")
+    
+    # Step 2: 消融设置
+    st.subheader("Step 2 · 消融设置")
+    col_a, col_b = st.columns(2)
+    disable_kcm = col_a.checkbox("Disable KCM (禁用运动学约束)", value=False)
+    disable_smooth = col_b.checkbox("Disable Smoothness Reward (禁用平滑奖励)", value=False)
+
     kcm_overrides, is_custom_kcm = _render_kcm_tuner(config_path)
 
     auto_name = generate_experiment_name(trajectory_label, disable_kcm, disable_smooth, customized=is_custom_kcm)
     exp_name = ensure_experiment_name(auto_name)
+    
+    # Red Zone: 如果当前实验正在运行，显示红色警告区
+    running_for_exp = active_processes.get(exp_name)
+    if running_for_exp:
+        pid = running_for_exp.get("pid", "?")
+        st.error(f"⚠️ 当前实验 `{exp_name}` 正在训练中 (PID: {pid})")
+        st.caption(f"启动时间: {running_for_exp.get('start_time', '未知')} | 实验目录: {running_for_exp.get('experiment_dir', 'N/A')}")
+        if st.button("⛔ 立即结束训练 (Stop Training)", key=f"stop_active_{pid}", type="primary", use_container_width=True):
+            kill_process(str(pid))
+            st.success("任务已终止！页面即将刷新...")
+            return
 
     with st.expander("Step 4 · 高级选项"):
         resume_path = st.text_input("Resume Checkpoint (.pth)", value="")
@@ -648,19 +761,21 @@ def render_training_ops() -> None:
                 kcm_overrides=kcm_overrides,
             )
 
-    running = st.session_state.get("running_processes", [])
+    running = get_running_processes()
     if running:
         latest = running[-1]
         st.info(
             f"最近启动: {latest.get('experiment_name')} (PID: {latest.get('pid')}) · "
             f"实验目录: {latest.get('experiment_dir')}\n\n命令: `{latest.get('cmd')}`"
         )
+        if auto_refresh_enabled:
+            st.caption("实时监控已开启：训练进行时页面将自动每2秒刷新一次。")
         default_exp = latest.get("experiment_name")
         default_run = Path(latest["experiment_dir"]) if latest.get("experiment_dir") else None
     else:
         default_exp, default_run = None, None
 
-    render_training_monitor(default_exp, default_run)
+    render_training_monitor(default_exp, default_run, auto_refresh_enabled=auto_refresh_enabled)
 
 
 def render_paper_mode() -> None:
@@ -709,10 +824,14 @@ def render_paper_mode() -> None:
 
         if sample_trace:
             st.subheader("论文级图表预览")
-            path_fig = _make_path_fig(sample_trace, env)
-            motion_fig = _make_motion_fig(sample_trace, config["kinematic_constraints"])
-            st.plotly_chart(path_fig, use_container_width=True)
-            st.plotly_chart(motion_fig, use_container_width=True)
+            try:
+                path_fig = _make_path_fig(sample_trace, env)
+                motion_fig = _make_motion_fig(sample_trace, config["kinematic_constraints"])
+                st.plotly_chart(path_fig, use_container_width=True)
+                st.plotly_chart(motion_fig, use_container_width=True)
+            except Exception as viz_err:
+                st.warning(f"图表生成失败: {viz_err}")
+                st.caption("可能原因：数据格式异常或环境边界未正确初始化")
 
             def _buffer_pdf(fig_obj) -> bytes:
                 buf = io.BytesIO()
@@ -743,21 +862,36 @@ def render_paper_mode() -> None:
 
             col_dl1, col_dl2 = st.columns(2)
             with col_dl1:
-                st.pyplot(mpl_fig1)
+                st.caption("Plotly 已预览；此处提供 PDF 下载")
                 st.download_button("Download Fig1 (PDF)", _buffer_pdf(mpl_fig1), file_name="fig1_path.pdf")
+                plt.close(mpl_fig1)
             with col_dl2:
-                st.pyplot(mpl_fig2)
                 st.download_button("Download Fig2 (PDF)", _buffer_pdf(mpl_fig2), file_name="fig2_dynamics.pdf")
+                plt.close(mpl_fig2)
 
 
 def main() -> None:
     init_session_state()
+    
+    # 全局实时监控开关
+    auto_refresh = render_auto_refresh_toggle()
+    
+    # 模式选择
     mode = st.sidebar.radio("选择模式", ["Training Ops", "Paper Mode"], index=0)
-    render_sidebar_process_manager()
+    
+    # 运行中任务面板（仅 Training Ops 模式显示）
+    active_processes = render_running_tasks_panel() if mode == "Training Ops" else {}
+    
+    # 渲染主界面
     if mode == "Training Ops":
-        render_training_ops()
+        render_training_ops(auto_refresh_enabled=auto_refresh, active_processes=active_processes)
     else:
         render_paper_mode()
+
+    # 自动刷新循环：仅在启用监控、Training Ops模式、且有进程运行时触发
+    if auto_refresh and mode == "Training Ops" and get_running_processes():
+        time.sleep(2)  # 2秒刷新间隔
+        _trigger_rerun()
 
 
 if __name__ == "__main__":

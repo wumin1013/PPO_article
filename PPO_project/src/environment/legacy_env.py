@@ -1,5 +1,5 @@
-import os
-# 解决 OpenMP 多副本冲突问题 - 必须在所有其他导入之前设置
+﻿import os
+# 解决 OpenMP 多副本冲突问- 必须在所有其他导入之前设
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 import copy
@@ -26,7 +26,7 @@ from numba import jit
 import time
 from rtree import index
 
-# 添加 Numba JIT 编译优化运动学约束计算
+# 添加Numba JIT编译优化运动学约束计
 @jit(nopython=True)
 def apply_kinematic_constraints(prev_vel, prev_acc, prev_ang_vel, prev_ang_acc,
                                vel_action, ang_vel_action, dt,
@@ -115,7 +115,7 @@ def configure_chinese_font():
             raise RuntimeError("字体配置失败")
     except Exception as e:
         print(f"字体配置警告: {str(e)}")
-        print("将使用默认字体显示，中文可能显示为方块")
+        print("将使用默认字体显示，中文可能显示为方")
 
 configure_chinese_font()
 
@@ -228,18 +228,18 @@ class Env:
         
         # 闭合路径追踪相关
         self.accumulated_distance = 0.0  # 累计距离
-        self.previous_segment_idx = -1   # 上一个线段索引
-        self.reached_final_segment = False  # 是否到达最后一个线段
-        self.lap_completed = False       # 是否完成一圈
+        self.previous_segment_idx = -1   # 上一个线段索
+        self.reached_final_segment = False  # 是否到达最后一
+        self.lap_completed = False       # 是否完成一
         self.segment_transition_history = []  # 线段转换历史
         
-        # 轨迹误差历史记录（用于过弯后修正参考）
+        # 轨迹误差历史记录（用于过弯后修正
         self.error_history = []         # 最近的误差历史
-        self.max_error_history = 20     # 保存最近 N 步的误差
+        self.max_error_history = 20     # 保存最0步的误差
         self.last_corner_segment = -1   # 上一个过弯的线段
 
         
-        # 运动学状态变量
+        # 运动学状态变
         self.velocity = 0.0       # 当前速度
         self.acceleration = 0.0   # 当前加速度
         self.jerk = 0.0           # 当前捷度
@@ -247,7 +247,7 @@ class Env:
         self.angular_acc = 0.0  # 当前角加速度
         self.angular_jerk = 0.0  # 当前角加加速度
 
-        # 最近一步的奖励分解，便于日志记录
+        # 最近一步的奖励分解，便于日志记
         self.last_reward_components = {}
 
         self.Pm = [np.array(p) for p in Pm]
@@ -267,22 +267,20 @@ class Env:
             'Pr': pr,
             'polygons': None,
             'total_path_length': None,
-            'segment_info': {}  # 存储每个线段的缓存信息
+            'segment_info': {}  # 存储每个线段的缓存信
         }
-        # 预计算并缓存所有几何特征
-        self._precompute_and_cache_geometric_features()
+        # 预计算并缓存所有几何特        self._precompute_and_cache_geometric_features()
         self.curvature_profile, self.curvature_rate_profile = self._compute_curvature_profile()
         max_segment = max(self.cache['segment_lengths'] or [1.0])
         self.lookahead_longitudinal_scale = max(max_segment * self.lookahead_points, 1.0)
         self.lookahead_lateral_scale = max(self.half_epsilon, 1.0)
         max_curvature_rate = max([abs(v) for v in self.curvature_rate_profile] + [0.0])
         self.curvature_rate_scale = max(max_curvature_rate, 1e-3)
-        # 创建三角函数查找表
-        self._create_trig_lookup_table()
+        # 创建三角函数查找        self._create_trig_lookup_table()
         
         self.last_progress = 0.0
         
-        # 添加新属性用于跟踪线段信息
+        # 添加新属性用于跟踪线段信
         self.current_segment_idx = 0
         self.segment_count = len(self.Pm) - 1 if not self.closed else len(self.Pm)
         # 创建 R-tree 空间索引
@@ -295,13 +293,12 @@ class Env:
                 max_y = max(p[1] for p in polygon)
                 self.rtree_idx.insert(idx, (min_x, min_y, max_x, max_y))
         
-        # 现在缓存已经填充，可以安全地设置归一化参数
+        # 现在缓存已经填充，可以安全地设置归一化参        
         self.normalization_params = {
             'theta_prime': self.MAX_ANG_VEL,
             'length_prime': self.MAX_VEL,
             'tau_next': math.pi,
-            'distance_to_next_turn': self.cache['total_path_length'] or 10.0,  # 使用缓存的总长度
-            'overall_progress': 1.0,  # 本身就是[0,1]范围
+            'distance_to_next_turn': self.cache['total_path_length'] or 10.0,  # 使用缓存的总长            'overall_progress': 1.0,  # 本身就是[0,1]范围
             'next_angle': math.pi,
             'velocity': self.MAX_VEL,
             'acceleration': self.MAX_ACC,
@@ -320,8 +317,8 @@ class Env:
         self.reset()
     
     def _create_trig_lookup_table(self):
-        """创建三角函数查找表以加速计算"""
-        # 创建360个点的查找表（0-359度）
+        """Create trig lookup table for fast trig computation"""
+        # 创建360个点的查找表-359度）
         self.COS_TABLE = {}
         self.SIN_TABLE = {}
         
@@ -337,7 +334,7 @@ class Env:
             self.SIN_TABLE[rad] = math.sin(rad)
     
     def fast_cos(self, rad):
-        """快速余弦计算，优先使用查找表"""
+        """Fast cosine lookup"""
         # 尝试直接查找特殊角度
         if rad in self.COS_TABLE:
             return self.COS_TABLE[rad]
@@ -347,7 +344,7 @@ class Env:
         return self.COS_TABLE.get(deg, math.cos(rad))
     
     def fast_sin(self, rad):
-        """快速正弦计算，优先使用查找表"""
+        """Fast sine lookup"""
         # 尝试直接查找特殊角度
         if rad in self.SIN_TABLE:
             return self.SIN_TABLE[rad]
@@ -519,8 +516,8 @@ class Env:
         angular_vel_diff = abs(self.angular_vel - raw_angular_vel_intent)
         self.kcm_intervention = velocity_diff + angular_vel_diff
         
-        # === 使用修正后的动作执行状态转移 ===
-        # 构建最终安全动作
+        # === 使用修正后的动作执行状态转===
+        # 构建最终安全动
         safe_action = (self.angular_vel, self.velocity)  # final_vel是线速度
         next_state = self.apply_action(safe_action)
         self.trajectory_states.append(next_state)
@@ -533,16 +530,16 @@ class Env:
         
         reward = self.calculate_reward()
         done = self.is_done()
-        
+
         # 添加info字典作为第四个返回值
         info = {
-        "position": self.current_position.copy(),
-        "step": self.current_step,
-        "contour_error": self.get_contour_error(self.current_position),
-        "segment_idx": self.current_segment_idx,
-        "progress": next_state[4],  # 添加进度信息
-        "jerk": self.jerk,  # 添加当前捷度
-        "kcm_intervention": self.kcm_intervention,  # 添加运动学约束干预程度
+            "position": self.current_position.copy(),
+            "step": self.current_step,
+            "contour_error": self.get_contour_error(self.current_position),
+            "segment_idx": self.current_segment_idx,
+            "progress": next_state[4],  # 添加进度信息
+            "jerk": self.jerk,  # 添加当前捷度指标
+            "kcm_intervention": self.kcm_intervention,  # 添加运动学约束干预程度
         }
         normalized_state = self.normalize_state(next_state)
         self.state = next_state
@@ -558,7 +555,7 @@ class Env:
                 scaled = np.log1p(state[i]) / np.log1p(max_val)
                 normalized[i] = np.clip(scaled, 0, 1)
             elif key == 'overall_progress':
-                normalized[i] = state[i] 
+                normalized[i] = state[i]
             else:
                 normalized[i] = np.clip(state[i] / max_val, -1, 1)
 
@@ -621,7 +618,7 @@ class Env:
         return 0.0
     
     def _calculate_closed_path_progress(self, pt):
-        """闭合路径进度计算，使用线段跳转检测是否到达终点"""
+        """Closed-path progress using segment jump detection"""
         if not self.closed:
             return self._calculate_path_progress(pt)
         
@@ -674,7 +671,7 @@ class Env:
         return np.clip(raw_progress, 0.0, 0.99)  # 最.99，完成时才返.0
     
     def _detect_lap_completion(self, current_segment):
-        """简化的套圈检测，仅用于防止无限循环"""
+        """Simplified lap detection to prevent infinite loops"""
         # 只在非常明确的情况下才认为完成了一
         if current_segment != self.previous_segment:
             # 检测到回到起点附近且已经有很高的进
@@ -690,7 +687,7 @@ class Env:
             self.previous_segment = current_segment
     
     def _detect_lap_completion_by_segment_jump(self, current_segment_idx):
-        """通过线段跳转检测是否完成一圈"""
+        """Detect lap completion via segment jumps"""
         if self.lap_completed:
             return
         
@@ -954,7 +951,7 @@ class Env:
         return segment_lengths, angles
 
     def _compute_curvature_profile(self):
-        """基于三点法近似曲率，并计算曲率变化率 dκ/ds"""
+        """Approximate curvature via three-point method and compute d/ds"""
         points = [np.array(p) for p in self.Pm]
         n = len(points)
         curvatures = [0.0 for _ in range(n)]
@@ -987,7 +984,7 @@ class Env:
         return curvatures, curvature_rate
 
     def _get_lookahead_indices(self):
-        """获取前方若干路径点的索引，支持封闭或开放路径"""
+        """Get indices of forward path points for closed or open paths"""
         current_segment = self._find_containing_segment(self.current_position)
         if current_segment < 0:
             current_segment = max(self.current_segment_idx, 0)
@@ -1005,7 +1002,7 @@ class Env:
         return indices
 
     def _compute_lookahead_features(self):
-        """将前方路径点转换到车体坐标系，输出扁平的 [x_body, y_body, dκ/ds] 数组"""
+        """Transform forward path points to body frame as [x_body, y_body, d/ds]"""
         heading = self._current_direction_angle
         cos_h = self.fast_cos(heading)
         sin_h = self.fast_sin(heading)
@@ -1024,7 +1021,7 @@ class Env:
         return np.array(features, dtype=float)
 
     def _get_path_direction(self, pt):
-        """使用缓存的方向数据"""
+        """Use cached heading array"""
         segment_index = self._find_containing_segment(pt)
         if segment_index >= 0 and segment_index < len(self.cache['segment_directions']):
             return self.cache['segment_directions'][segment_index]
@@ -1046,7 +1043,8 @@ class Env:
         return tau
 
     def calculate_reward(self):
-        """改进的奖励函数，标准化奖励范围并改善价值函数学习"""
+        """Improved reward with normalization for value learning stability"""
+        
         # 基础跟踪奖励 - 标准化到[-10, 10]范围
         distance = self.get_contour_error(self.current_position)
         # 修正：使half_epsilon 作为归一化基准，因为有效边界±epsilon/2
@@ -1102,7 +1100,7 @@ class Env:
         # 存活奖励 - 防止早期终止
         survival_reward = 0.1  # 每步小额奖励
         
-        # 组合总奖励，确保合理的数值范围
+        # 组合总奖励，确保合理的数值范
         total_reward = (tracking_reward + progress_reward + direction_reward + 
                        velocity_reward + smoothness_reward + constraint_penalty + 
                        completion_reward + survival_reward)
@@ -1198,7 +1196,7 @@ class Env:
             return precision_penalty + precision_bonus + speed_bonus
 
     def _calculate_velocity_reward(self):
-        """速度奖励：直线段高速，拐弯处降低速度"""
+        """Speed reward: high on straights, low on turns"""
         distance_to_turn = self.state[3]
         next_angle = abs(self.state[5])
         
@@ -1216,19 +1214,19 @@ class Env:
         return -10.0 * speed_error
 
     def _calculate_smoothness_reward(self):
-        """平滑性奖励"""
+        """Smoothness reward"""
         jerk_penalty = -2.0 * (abs(self.jerk) / self.MAX_JERK) ** 2
         ang_jerk_penalty = -2.0 * (abs(self.angular_jerk) / self.MAX_ANG_JERK) ** 2
         return jerk_penalty + ang_jerk_penalty
 
     def _get_current_segment_angle(self):
-        """获取当前线段的角度信息"""
+        """Get angle info for the current segment"""
         if self.current_segment_idx < len(self.cache['angles']):
             return abs(self.cache['angles'][self.current_segment_idx])
         return 0.0
 
     def _calculate_corner_correction_reward(self):
-        """计算转弯后的轨迹修正奖励，使用误差历史判断修正趋势"""
+        """Turn-exit correction reward using error history trends"""
         distance_from_path = self.get_contour_error(self.current_position)
         current_segment = self.current_segment_idx
         
@@ -1280,7 +1278,7 @@ class Env:
         return 0.0
         
     def _calculate_path_progress(self, pt):
-        """修复的路径进度计算"""
+        """Fixed path progress calculation"""
         n = len(self.Pm)
         total_length = self.cache['total_path_length'] or 1.0
         
@@ -1349,17 +1347,17 @@ class Env:
         return self._traditional_shortest_distance(pt)
  
     def _find_containing_segment(self, pt):
-        """使用 R-tree 加速查找包含点的线段"""
+        """Use R-tree for faster queries"""
         x, y = pt
         candidate_idxs = list(self.rtree_idx.intersection((x, y, x, y)))
         
-        # 先检查当前线段
+        # 先检查当前线
         if self.current_segment_idx in candidate_idxs:
             polygon = self.cache['polygons'][self.current_segment_idx]
             if polygon and self.is_point_in_polygon((x,y), polygon):
                 return self.current_segment_idx
         
-        # 检查候选线段
+        # 检查候选线
         for idx in candidate_idxs:
             polygon = self.cache['polygons'][idx]
             if polygon and self.is_point_in_polygon((x,y), polygon):
@@ -1442,28 +1440,28 @@ class Env:
         return nearest_segment_index
 
     def _helen_formula_distance(self, pt, A, B):
-        """计算点到直线的距离（始终使用垂直距离）"""
+        """Compute perpendicular distance from point to line"""
         # 向量AB
         AB = np.array(B) - np.array(A)
         
         # 向量AP
         AP = np.array(pt) - np.array(A)
         
-        # 计算叉积的绝对值 |AB × AP|
+        # 计算叉积的绝对|AB × AP|
         cross_abs = abs(AB[0]*AP[1] - AB[1]*AP[0])
         
-        # 计算 AB 的长度
+        # 计算AB的长
         length_AB = np.linalg.norm(AB)
         
         # 避免除零错误
         if length_AB < 1e-6:
             return np.linalg.norm(AP)
         
-        # 点到直线的距离 = |AB × AP| / |AB|
+        # 点到直线的距= |AB × AP| / |AB|
         return cross_abs / length_AB
 
     def _traditional_path_progress(self, pt, total_length, closed):
-        """传统方法计算路径进度（当 pnpoly 方法失败时使用）"""
+        """Fallback path progress when pnpoly fails"""
         current_dist = 0.0
         n = len(self.Pm)
         found = False
@@ -1478,7 +1476,7 @@ class Env:
             projection = self._project_point_to_segment(pt, p1, p2)
             dist_to_segment = np.linalg.norm(pt - projection)
             
-            # 修正：使用 half_epsilon 作为容差范围
+            # 修正：使half_epsilon 作为容差范围
             if dist_to_segment < self.half_epsilon:
                 current_dist += np.linalg.norm(projection - p1)
                 found = True
@@ -1522,7 +1520,7 @@ class Env:
         return min_dist
     
     def is_point_in_polygon(self, point, polygon):
-        """优化的光线投射算法"""
+        """Optimized ray casting algorithm"""
         x, y = point
         n = len(polygon)
         inside = False
@@ -1783,23 +1781,23 @@ class PPOContinuous:
         
         return actor_loss.item(), critic_loss.item()
 
-# ===== 论文指标统计 =====
+# ===== 论文指标统计=====
 class PaperMetrics:
-    """用于记录和计算论文实验数据的指标"""
+    """Metrics collector for paper experiments"""
     def __init__(self):
         self.reset()
     
     def reset(self):
-        """重置 episode 级别的指标记录"""
-        self.errors = []  # 每步的轮廓误差
+        """Reset episode-level metrics"""
+        self.errors = []  # 每步的轮廓误
         self.jerks = []   # 每步的捷度（线性捷度）
         self.velocities = []  # 每步的速度
         self.kcm_interventions = []  # 每步的运动学约束干预程度
     
     def update(self, contour_error, jerk, velocity, kcm_intervention=0.0):
-        """在每个 step 后更新指标"""
+        """Update metrics after each step"""
         self.errors.append(contour_error)
-        self.jerks.append(abs(jerk))  # 使用绝对值
+        self.jerks.append(abs(jerk))  # 使用绝对
         self.velocities.append(velocity)
         self.kcm_interventions.append(kcm_intervention)
     
@@ -1867,7 +1865,7 @@ class TrainingMonitor:
         self.critic_losses = []
         
         # 创建图表
-        plt.ion()  # 开启交互模式
+        plt.ion()  # 开启交互模
         self.fig, ((self.ax1, self.ax2), (self.ax3, self.ax4)) = plt.subplots(2, 2, figsize=(15, 10))
         self.fig.suptitle('Training Monitor', fontsize=16)
         
@@ -1875,11 +1873,11 @@ class TrainingMonitor:
         self.episode_count = 0
         
     def clean_path(self, path):
-        """清理路径数据，移除 None 和 NaN"""
+        """Clean path data, removing None/NaN"""
         return np.array([p for p in path if p is not None and not np.isnan(p).any()])
 
     def update(self, episode, total_reward, progress, actor_loss, critic_loss, trajectory):
-        """更新监控数据并检查最佳结果"""
+        """Update monitor data and check for best result"""
         self.episode_count = episode
         
         # 更新实时数据
@@ -1888,11 +1886,11 @@ class TrainingMonitor:
         self.actor_losses.append(actor_loss)
         self.critic_losses.append(critic_loss)
         
-        # 每 10 个 episode 更新一次显示
+        # 0个episode更新一次显
         if episode % 10 == 0:
             self.update_display(trajectory)
         
-        # 评估当前结果的质量（综合考虑奖励、进度和终点距离）
+        # 评估当前结果的质量（综合考虑奖励、进度和终点距离
         quality_score = self._calculate_quality_score(total_reward, progress, trajectory)
         best_quality = self._calculate_quality_score(self.best_reward, self.best_progress, self.best_trajectory)
         
@@ -1975,13 +1973,13 @@ class TrainingMonitor:
                              fontsize=14)
             
             plt.tight_layout()
-            plt.pause(0.01)  # 短暂暂停以更新显示
+            plt.pause(0.01)  # 短暂暂停以更新显
             
         except Exception as e:
             print(f"Display update error: {e}")
     
     def plot_trajectory(self, ax, trajectory, title):
-        """绘制轨迹"""
+        """Plot trajectory"""
         # 清理路径数据
         pm = self.clean_path(self.env.Pm)
         pl = self.clean_path(self.env.cache['Pl'])
@@ -2330,6 +2328,11 @@ def run_training():
 
 if __name__ == "__main__":
     run_training()
+
+
+
+
+
 
 
 

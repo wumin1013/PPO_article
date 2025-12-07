@@ -9,6 +9,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
 import rl_utils
+from typing import Optional
 
 
 class ValueNet(nn.Module):
@@ -108,23 +109,25 @@ class PPOContinuous:
     """PPO算法 - 处理连续动作空间"""
     
     def __init__(self, 
-                 state_dim: int,
+                 state_dim: Optional[int],
                  hidden_dim: int,
-                 action_dim: int,
+                 action_dim: Optional[int],
                  actor_lr: float,
                  critic_lr: float,
                  lmbda: float,
                  epochs: int,
                  eps: float,
                  gamma: float,
-                 device: torch.device):
+                 device: torch.device,
+                 observation_space=None,
+                 action_space=None):
         """
         初始化PPO算法
         
         Args:
-            state_dim: 状态空间维度
+            state_dim: 状态空间维度（可为None，优先从observation_space推断）
             hidden_dim: 隐藏层维度
-            action_dim: 动作空间维度
+            action_dim: 动作空间维度（可为None，优先从action_space推断）
             actor_lr: Actor学习率
             critic_lr: Critic学习率
             lmbda: GAE参数
@@ -132,9 +135,24 @@ class PPOContinuous:
             eps: PPO clip参数
             gamma: 折扣因子
             device: 计算设备
+            observation_space: 可选的观测空间，用于自动推断输入维度
+            action_space: 可选的动作空间，用于自动推断输出维度
         """
-        self.actor = PolicyNetContinuous(state_dim, hidden_dim, action_dim).to(device)
-        self.critic = ValueNet(state_dim, hidden_dim).to(device)
+        resolved_state_dim = state_dim
+        if observation_space is not None and hasattr(observation_space, "shape"):
+            resolved_state_dim = int(np.prod(observation_space.shape))
+        resolved_action_dim = action_dim
+        if action_space is not None and hasattr(action_space, "shape"):
+            resolved_action_dim = int(np.prod(action_space.shape))
+        if resolved_state_dim is None:
+            raise ValueError("state_dim must be provided or inferable from observation_space")
+        if resolved_action_dim is None:
+            raise ValueError("action_dim must be provided or inferable from action_space")
+
+        self.state_dim = resolved_state_dim
+        self.action_dim = resolved_action_dim
+        self.actor = PolicyNetContinuous(resolved_state_dim, hidden_dim, resolved_action_dim).to(device)
+        self.critic = ValueNet(resolved_state_dim, hidden_dim).to(device)
         
         self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
         self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)

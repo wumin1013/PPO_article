@@ -1,9 +1,9 @@
-"""
+﻿"""
 CNC环境模块
 基于Gym的轨迹跟踪环境
 
 注意：由于环境类代码量巨大(1500+行)且高度优化，
-本重构版本通过包装方式复用原始PPO最终版.py中的Env类。
+本重构版本通过包装方式复用原始src/environment/legacy_env.py中的Env类。
 主要改进点：
 1. 集成了新的KCM模块
 2. 使用独立的RewardCalculator
@@ -53,7 +53,7 @@ class CNCEnvironment:
         # 这里提供接口说明
         
         print("环境模块已简化，请使用完整的Env类")
-        print("位置: PPO最终版.py中的Env类")
+        print("位置: src/environment/legacy_env.py中的Env类")
         print("主要特性:")
         print("  - R-tree空间索引加速")
         print("  - 缓存优化的几何计算")
@@ -74,10 +74,10 @@ def create_environment_from_config(config: Dict, device):
     """
     # 导入原始Env类
     try:
-        from PPO最终版 import Env
+        from src.environment.legacy_env import Env
     except ImportError:
-        print("错误: 无法导入PPO最终版.py中的Env类")
-        print("请确保PPO最终版.py在父目录中")
+        print("错误: 无法导入src/environment/legacy_env.py中的Env类")
+        print("请确保src/environment/legacy_env.py在父目录中")
         raise
     
     env_config = config['environment']
@@ -99,7 +99,8 @@ def create_environment_from_config(config: Dict, device):
         MAX_ANG_ACC=kcm_config['MAX_ANG_ACC'],
         MAX_ANG_JERK=kcm_config['MAX_ANG_JERK'],
         Pm=Pm,
-        max_steps=env_config['max_steps']
+        max_steps=env_config['max_steps'],
+        lookahead_points=env_config.get('lookahead_points', 5)
     )
     
     return env
@@ -107,3 +108,5 @@ def create_environment_from_config(config: Dict, device):
 
 # 添加__init__.py导出
 __all__ = ['CNCEnvironment', 'create_environment_from_config']
+
+

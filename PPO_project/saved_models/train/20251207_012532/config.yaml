@@ -1,0 +1,66 @@
+environment:
+  epsilon: 0.5
+  interpolation_period: 0.1
+  max_steps: 50
+experiment:
+  baseline_type: null
+  enable_kcm: true
+  mode: train
+  model_path: null
+kinematic_constraints:
+  MAX_ACC: 2.0
+  MAX_ANG_ACC: 3.0
+  MAX_ANG_JERK: 5.0
+  MAX_ANG_VEL: 1.5
+  MAX_JERK: 3.0
+  MAX_VEL: 1.0
+path:
+  butterfly:
+    center:
+    - 0.0
+    - 0.0
+    sharpness: 1.0
+  closed: true
+  num_points: 200
+  s_shape:
+    amplitude: 5.0
+    periods: 2.0
+  scale: 10.0
+  star:
+    inner_radius: 4.0
+    star_points: 5
+  type: waypoints
+  waypoints:
+  - - 0.0
+    - 0.0
+  - - 10.0
+    - 0.0
+  - - 10.0
+    - 10.0
+  - - 0.0
+    - 10.0
+  - - 0.0
+    - 0.0
+ppo:
+  actor_lr: 0.0003
+  batch_size: 64
+  critic_lr: 0.001
+  epochs: 10
+  eps: 0.2
+  gamma: 0.99
+  hidden_dim: 128
+  lmbda: 0.95
+reward_weights:
+  w_c: 0.5
+  w_constraint: 0.2
+  w_direction: 0.5
+  w_e: 1.0
+  w_j: 0.3
+  w_progress: 2.0
+  w_velocity: 0.2
+training:
+  checkpoint_interval_steps: 10
+  log_interval: 1
+  num_episodes: 2
+  save_interval: 1
+  smoothing_factor: 0.9

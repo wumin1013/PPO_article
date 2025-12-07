@@ -1,4 +1,4 @@
-"""
+﻿"""
 Streamlit仿真后端：封装不同模型/参数的单次轨迹仿真
 """
 from __future__ import annotations
@@ -21,7 +21,7 @@ for p in (BASE_DIR, ROOT_DIR):
         sys.path.insert(0, str(p))
 
 # 导入原有训练代码中的核心组件
-from PPO最终版 import Env  # type: ignore
+from src.environment.legacy_env import Env  # type: ignore
 from src.utils.path_generator import get_path_by_name  # type: ignore
 from src.algorithms.baselines import SCurvePlanner  # type: ignore
 
@@ -128,6 +128,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         MAX_ANG_JERK=constraints["MAX_ANG_JERK"],
         Pm=path_points,
         max_steps=env_cfg.get("max_steps", 3000),
+        lookahead_points=env_cfg.get("lookahead_points", 5),
     )
 
     # 兼容可视化所需的 Pl/Pr
@@ -242,3 +243,4 @@ def build_default_config() -> SimulationConfig:
         max_jerk=float(kcm_cfg.get("MAX_JERK", 3.0)),
         epsilon=float(env_cfg.get("epsilon", 0.5)),
     )
+

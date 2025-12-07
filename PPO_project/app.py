@@ -8,14 +8,12 @@ from plotly.subplots import make_subplots
 import streamlit as st
 
 BASE_DIR = Path(__file__).resolve().parent
-if str(BASE_DIR) not in sys.path:
-    sys.path.insert(0, str(BASE_DIR))
+SRC_DIR = BASE_DIR / "src"
+for p in (BASE_DIR, SRC_DIR):
+    if str(p) not in sys.path:
+        sys.path.append(str(p))
 
-from simulation_engine import (
-    SimulationConfig,
-    run_simulation,
-    build_default_config,
-)
+from src.environment.simulation import SimulationConfig, run_simulation, build_default_config
 
 # Paper figure utilities
 import io

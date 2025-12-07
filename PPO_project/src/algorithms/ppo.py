@@ -162,6 +162,7 @@ class PPOContinuous:
         self.epochs = epochs
         self.eps = eps
         self.device = device
+        self.max_grad_norm = 0.5
         
         # 学习率调度器
         self.actor_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -239,16 +240,16 @@ class PPOContinuous:
             
             # Critic损失
             critic_loss = F.smooth_l1_loss(self.critic(states), td_target.detach())
-
-            # 梯度裁剪
-            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=0.5)
-            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=0.5)
             
             # 反向传播
             self.actor_optimizer.zero_grad()
             self.critic_optimizer.zero_grad()
             actor_loss.backward()
             critic_loss.backward()
+
+            # 梯度裁剪
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.max_grad_norm)
             self.actor_optimizer.step()
             self.critic_optimizer.step()
             

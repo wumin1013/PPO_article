@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import csv
 import json
+import os
+import time
 import shutil
 from datetime import datetime
 from pathlib import Path
@@ -23,12 +25,17 @@ class ExperimentManager:
 
     def __init__(self, category: str, config_path: Path | str, experiment_dir: Path | str | None = None) -> None:
         if experiment_dir is not None:
-            self.experiment_dir = Path(experiment_dir)
-            self.experiment_dir.mkdir(parents=True, exist_ok=True)
+            base_dir = Path(experiment_dir)
         else:
+            override_root = os.environ.get("EXPERIMENT_DIR")
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            self.experiment_dir = PROJECT_ROOT / "saved_models" / category / timestamp
-            self.experiment_dir.mkdir(parents=True, exist_ok=True)
+            if override_root:
+                base_dir = Path(override_root) / category / timestamp
+            else:
+                base_dir = PROJECT_ROOT / "saved_models" / category / timestamp
+
+        self.experiment_dir = base_dir
+        self.experiment_dir.mkdir(parents=True, exist_ok=True)
 
         self.logs_dir = self.experiment_dir / "logs"
         self.logs_dir.mkdir(parents=True, exist_ok=True)
@@ -70,17 +77,30 @@ class CSVLogger:
     def _ensure_header(self) -> None:
         if self.path.exists() and self.path.stat().st_size > 0:
             return
-        with self.path.open("w", newline="", encoding="utf-8") as file:
-            writer = csv.DictWriter(file, fieldnames=self.fieldnames)
-            writer.writeheader()
-            file.flush()
+        self._write_row({}, write_header=True)
 
     def log(self, row: Mapping[str, object]) -> None:
         filtered_row = {name: row.get(name, "") for name in self.fieldnames}
-        with self.path.open("a", newline="", encoding="utf-8") as file:
-            writer = csv.DictWriter(file, fieldnames=self.fieldnames)
-            writer.writerow(filtered_row)
-            file.flush()
+        self._write_row(filtered_row)
+
+    def _write_row(self, row: Mapping[str, object], write_header: bool = False) -> None:
+        """写入一行，PermissionError 自动重试，缓解同步盘/杀毒占用。"""
+        attempts = 3
+        for attempt in range(attempts):
+            try:
+                mode = "w" if write_header else "a"
+                with self.path.open(mode, newline="", encoding="utf-8") as file:
+                    writer = csv.DictWriter(file, fieldnames=self.fieldnames)
+                    if write_header:
+                        writer.writeheader()
+                    if row:
+                        writer.writerow(row)
+                    file.flush()
+                return
+            except PermissionError:
+                if attempt == attempts - 1:
+                    raise
+                time.sleep(0.1)
 
     def log_step(self, **row: object) -> None:
         self.log(row)

@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 import numpy as np
-import rl_utils
+from src.utils import rl_utils
 from typing import Optional
 
 

@@ -18,157 +18,17 @@ import pandas as pd
 import matplotlib as mpl
 import torch.nn.functional as F
 from tqdm import tqdm
-import rl_utils
 import csv
 from math import degrees,acos,sqrt
 from typing import List, Tuple, Optional
-from numba import jit
 import time
 from rtree import index
-
-# 添加Numba JIT编译优化运动学约束计
-@jit(nopython=True)
-def apply_kinematic_constraints(prev_vel, prev_acc, prev_ang_vel, prev_ang_acc,
-                               vel_action, ang_vel_action, dt,
-                               MAX_VEL, MAX_ACC, MAX_JERK,
-                               MAX_ANG_VEL, MAX_ANG_ACC, MAX_ANG_JERK):
-    # 线速度约束 - 使用min/max替代np.clip
-    constrained_vel = vel_action
-    if constrained_vel < 0.0:
-        constrained_vel = 0.0
-    elif constrained_vel > MAX_VEL:
-        constrained_vel = MAX_VEL
-    
-    # 线加速度约束
-    raw_acc = (constrained_vel - prev_vel) / dt
-    # 使用min/max替代np.clip
-    constrained_acc = raw_acc
-    if constrained_acc < -MAX_ACC:
-        constrained_acc = -MAX_ACC
-    elif constrained_acc > MAX_ACC:
-        constrained_acc = MAX_ACC
-    
-    # 线加加速度约束
-    raw_jerk = (constrained_acc - prev_acc) / dt
-    # 使用min/max替代np.clip
-    constrained_jerk = raw_jerk
-    if constrained_jerk < -MAX_JERK:
-        constrained_jerk = -MAX_JERK
-    elif constrained_jerk > MAX_JERK:
-        constrained_jerk = MAX_JERK
-    
-    # 反向修正加速度和速度
-    final_acc = prev_acc + constrained_jerk * dt
-    final_vel = prev_vel + final_acc * dt
-    # 确保最终速度在允许范围内
-    if final_vel < 0.0:
-        final_vel = 0.0
-    elif final_vel > MAX_VEL:
-        final_vel = MAX_VEL
-    
-    # 角速度约束 - 使用min/max替代np.clip
-    constrained_ang_vel = ang_vel_action
-    if constrained_ang_vel < -MAX_ANG_VEL:
-        constrained_ang_vel = -MAX_ANG_VEL
-    elif constrained_ang_vel > MAX_ANG_VEL:
-        constrained_ang_vel = MAX_ANG_VEL
-    
-    # 角加速度约束
-    raw_ang_acc = (constrained_ang_vel - prev_ang_vel) / dt
-    # 使用min/max替代np.clip
-    constrained_ang_acc = raw_ang_acc
-    if constrained_ang_acc < -MAX_ANG_ACC:
-        constrained_ang_acc = -MAX_ANG_ACC
-    elif constrained_ang_acc > MAX_ANG_ACC:
-        constrained_ang_acc = MAX_ANG_ACC
-    
-    # 角加加速度约束
-    raw_ang_jerk = (constrained_ang_acc - prev_ang_acc) / dt
-    # 使用min/max替代np.clip
-    constrained_ang_jerk = raw_ang_jerk
-    if constrained_ang_jerk < -MAX_ANG_JERK:
-        constrained_ang_jerk = -MAX_ANG_JERK
-    elif constrained_ang_jerk > MAX_ANG_JERK:
-        constrained_ang_jerk = MAX_ANG_JERK
-    
-    # 反向修正
-    final_ang_acc = prev_ang_acc + constrained_ang_jerk * dt
-    final_ang_vel = prev_ang_vel + final_ang_acc * dt
-    # 确保角速度在允许范围内
-    if final_ang_vel < -MAX_ANG_VEL:
-        final_ang_vel = -MAX_ANG_VEL
-    elif final_ang_vel > MAX_ANG_VEL:
-        final_ang_vel = MAX_ANG_VEL
-            
-    return (final_vel, final_acc, constrained_jerk,
-            final_ang_vel, final_ang_acc, constrained_ang_jerk)
-
-def configure_chinese_font():
-    try:
-        system_fonts = ['Microsoft YaHei', 'SimHei', 'FangSong', 'STSong']
-        linux_fonts = ['WenQuanYi Micro Hei', 'AR PL UMing CN']
-        font_list = list(dict.fromkeys(system_fonts + linux_fonts))
-        mpl.rcParams['font.sans-serif'] = font_list + mpl.rcParams['font.sans-serif']
-        mpl.rcParams['axes.unicode_minus'] = False
-        test_font = mpl.font_manager.FontProperties(family=font_list) # type: ignore
-        if not test_font.get_name():
-            raise RuntimeError("字体配置失败")
-    except Exception as e:
-        print(f"字体配置警告: {str(e)}")
-        print("将使用默认字体显示，中文可能显示为方")
+from src.utils import rl_utils
+from src.environment.kinematics import apply_kinematic_constraints
+from src.utils.metrics import PaperMetrics
+from src.utils.plotter import configure_chinese_font, visualize_final_path
 
 configure_chinese_font()
-
-def visualize_final_path(env):
-    plt.figure(figsize=(10, 6), dpi=100)
-    
-    def clean_path(path):
-        return np.array([p for p in path if p is not None and not np.isnan(p).any()])
-
-    pm = clean_path(env.Pm)
-    plt.plot(pm[:,0], pm[:,1], 'k--', linewidth=2.5, label='Reference Path (Pm)')
-    plt.scatter(pm[:,0], pm[:,1], c='black', marker='*', s=150, edgecolor='gold', zorder=3)
-
-    pl = clean_path(env.Pl)
-    pr = clean_path(env.Pr)
-    plt.plot(pl[:,0], pl[:,1], 'g--', linewidth=1.8, label='Left Boundary (Pl)', alpha=0.7)
-    plt.plot(pr[:,0], pr[:,1], 'b--', linewidth=1.8, label='Right Boundary (Pr)', alpha=0.7)
-
-    pt = np.array(env.trajectory)
-    plt.plot(pt[:,0], pt[:,1], 'r-', linewidth=1.5, label='Actual Trajectory (Pt)')
-    
-    plt.scatter(pt[::20,0], pt[::20,1], c='purple', s=40, alpha=0.6, 
-                edgecolor='white', label='Sampled Points', zorder=2)
-
-    plt.annotate(f'Start\n({pm[0,0]:.1f}, {pm[0,1]:.1f})', 
-                 xy=pm[0], xytext=(-20, -30),
-                 textcoords='offset points',
-                 arrowprops=dict(arrowstyle="->", color='gray', alpha=0.6))
-    
-    if len(pm) > 1:
-        plt.annotate(f'End\n({pm[-1,0]:.1f}, {pm[-1,1]:.1f})', 
-                     xy=pm[-1], xytext=(-40, 20),
-                     textcoords='offset points',
-                     arrowprops=dict(arrowstyle="->", color='gray', alpha=0.6))
-
-    param_text = (
-        f'ε = {env.epsilon:.2f}\n'
-        f'MAX_VEL = {env.MAX_VEL:.1f}\n'
-        f'Δt = {env.interpolation_period:.2f}s\n'
-        f'Steps = {len(pt)}'
-    )
-    plt.gcf().text(0.88, 0.85, param_text, 
-                   fontfamily='monospace', 
-                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-
-    plt.axis('equal')
-    plt.xlabel('X Coordinate', fontsize=12)
-    plt.ylabel('Y Coordinate', fontsize=12)
-    plt.title('Final Trajectory Tracking Performance', fontsize=14, pad=20)
-    plt.legend(loc='upper left', framealpha=0.9)
-    plt.grid(True, color='gray', linestyle=':', alpha=0.4)
-    plt.tight_layout()
-    plt.show()
 
 class Env:
     def __init__(
@@ -269,14 +129,16 @@ class Env:
             'total_path_length': None,
             'segment_info': {}  # 存储每个线段的缓存信
         }
-        # 预计算并缓存所有几何特        self._precompute_and_cache_geometric_features()
+        # 预计算并缓存几何特征
+        self._precompute_and_cache_geometric_features()
         self.curvature_profile, self.curvature_rate_profile = self._compute_curvature_profile()
         max_segment = max(self.cache['segment_lengths'] or [1.0])
         self.lookahead_longitudinal_scale = max(max_segment * self.lookahead_points, 1.0)
         self.lookahead_lateral_scale = max(self.half_epsilon, 1.0)
         max_curvature_rate = max([abs(v) for v in self.curvature_rate_profile] + [0.0])
         self.curvature_rate_scale = max(max_curvature_rate, 1e-3)
-        # 创建三角函数查找        self._create_trig_lookup_table()
+        # 创建三角函数查找表
+        self._create_trig_lookup_table()
         
         self.last_progress = 0.0
         
@@ -298,7 +160,8 @@ class Env:
             'theta_prime': self.MAX_ANG_VEL,
             'length_prime': self.MAX_VEL,
             'tau_next': math.pi,
-            'distance_to_next_turn': self.cache['total_path_length'] or 10.0,  # 使用缓存的总长            'overall_progress': 1.0,  # 本身就是[0,1]范围
+            'distance_to_next_turn': self.cache['total_path_length'] or 10.0,  # 使用缓存的总长度
+            'overall_progress': 1.0,  # 本身就是[0,1]范围
             'next_angle': math.pi,
             'velocity': self.MAX_VEL,
             'acceleration': self.MAX_ACC,
@@ -1781,339 +1644,7 @@ class PPOContinuous:
         
         return actor_loss.item(), critic_loss.item()
 
-# ===== 论文指标统计=====
-class PaperMetrics:
-    """Metrics collector for paper experiments"""
-    def __init__(self):
-        self.reset()
-    
-    def reset(self):
-        """Reset episode-level metrics"""
-        self.errors = []  # 每步的轮廓误
-        self.jerks = []   # 每步的捷度（线性捷度）
-        self.velocities = []  # 每步的速度
-        self.kcm_interventions = []  # 每步的运动学约束干预程度
-    
-    def update(self, contour_error, jerk, velocity, kcm_intervention=0.0):
-        """Update metrics after each step"""
-        self.errors.append(contour_error)
-        self.jerks.append(abs(jerk))  # 使用绝对
-        self.velocities.append(velocity)
-        self.kcm_interventions.append(kcm_intervention)
-    
-    def compute(self):
-        """计算episode结束时的统计指标"""
-        if len(self.errors) == 0:
-            return {
-                'rmse_error': 0.0,
-                'mean_jerk': 0.0,
-                'roughness_proxy': 0.0,
-                'mean_velocity': 0.0,
-                'max_error': 0.0,
-                'mean_kcm_intervention': 0.0,
-                'steps': 0
-            }
-        
-        # 计算RMSE Error（均方根误差
-        rmse_error = np.sqrt(np.mean(np.array(self.errors) ** 2))
-        
-        # 计算Mean Jerk（平均捷度）
-        mean_jerk = np.mean(self.jerks)
-        
-        # 计算Roughness Proxy（表面粗糙度代理指标
-        # 公式：捷度序列的一阶差分绝对值之
-        if len(self.jerks) > 1:
-            jerk_diff = np.diff(self.jerks)  # 一阶差
-            roughness_proxy = np.sum(np.abs(jerk_diff))
-        else:
-            roughness_proxy = 0.0
-        
-        # 其他有用的统计指
-        mean_velocity = np.mean(self.velocities)
-        max_error = np.max(self.errors)
-        mean_kcm_intervention = np.mean(self.kcm_interventions)
-        
-        return {
-            'rmse_error': rmse_error,
-            'mean_jerk': mean_jerk,
-            'roughness_proxy': roughness_proxy,
-            'mean_velocity': mean_velocity,
-            'max_error': max_error,
-            'mean_kcm_intervention': mean_kcm_intervention,
-            'steps': len(self.errors)
-        }
 
-# ===== 实时监控- 显示训练过程，只保存最佳结=====
-class TrainingMonitor:
-    def __init__(self, env, save_dir="best_results"):
-        self.env = env
-        self.save_dir = save_dir
-        os.makedirs(save_dir, exist_ok=True)
-        
-        # 跟踪最佳结
-        self.best_reward = float('-inf')
-        self.best_trajectory = None
-        self.best_episode = 0
-        self.best_progress = 0.0
-        self.best_actor_loss = 0.0
-        self.best_critic_loss = 0.0
-        
-        # 实时显示相关
-        self.episode_rewards = []
-        self.episode_progress = []
-        self.actor_losses = []
-        self.critic_losses = []
-        
-        # 创建图表
-        plt.ion()  # 开启交互模
-        self.fig, ((self.ax1, self.ax2), (self.ax3, self.ax4)) = plt.subplots(2, 2, figsize=(15, 10))
-        self.fig.suptitle('Training Monitor', fontsize=16)
-        
-        # 统计信息
-        self.episode_count = 0
-        
-    def clean_path(self, path):
-        """Clean path data, removing None/NaN"""
-        return np.array([p for p in path if p is not None and not np.isnan(p).any()])
-
-    def update(self, episode, total_reward, progress, actor_loss, critic_loss, trajectory):
-        """Update monitor data and check for best result"""
-        self.episode_count = episode
-        
-        # 更新实时数据
-        self.episode_rewards.append(total_reward)
-        self.episode_progress.append(progress)
-        self.actor_losses.append(actor_loss)
-        self.critic_losses.append(critic_loss)
-        
-        # 0个episode更新一次显
-        if episode % 10 == 0:
-            self.update_display(trajectory)
-        
-        # 评估当前结果的质量（综合考虑奖励、进度和终点距离
-        quality_score = self._calculate_quality_score(total_reward, progress, trajectory)
-        best_quality = self._calculate_quality_score(self.best_reward, self.best_progress, self.best_trajectory)
-        
-        if quality_score > best_quality:
-            self.best_reward = total_reward
-            self.best_trajectory = trajectory.copy() if trajectory else None
-            self.best_episode = episode
-            self.best_progress = progress
-            self.best_actor_loss = actor_loss
-            self.best_critic_loss = critic_loss
-            
-            # 保存最佳轨迹图
-            self.save_best_trajectory()
-            
-            # 计算终点距离并显
-            if trajectory and len(trajectory) > 0:
-                final_position = np.array(trajectory[-1])
-                target_point = np.array(self.env.Pm[-1])  # 统一使用真正的终
-                target_name = "终点"
-                
-                end_distance = np.linalg.norm(final_position - target_point)
-                end_distance_ratio = end_distance / self.env.epsilon
-                
-                print(f"\n🎯 发现更好结果！Episode {episode}: Reward={total_reward:.1f}, Progress={progress:.3f}")
-                print(f"   距离{target_name}: {end_distance:.4f} (容差 {end_distance_ratio:.2f})")
-                
-                # 检查是否接近完
-                if end_distance < self.env.epsilon * 0.3:
-                    print(f"   🎉 非常接近{target_name}！距离小0%容差")
-                elif end_distance < self.env.epsilon * 0.5:
-                    print(f"   较接近{target_name}！距离小0%容差")
-            else:
-                print(f"\n🎯 发现更好结果！Episode {episode}: Reward={total_reward:.1f}, Progress={progress:.3f}")
-    
-    def update_display(self, current_trajectory):
-        """更新实时显示"""
-        try:
-            # 清除所有子
-            for ax in [self.ax1, self.ax2, self.ax3, self.ax4]:
-                ax.clear()
-            
-            # 子图1：当前轨
-            self.plot_trajectory(self.ax1, current_trajectory, "Current Trajectory")
-            
-            # 子图2：奖励曲
-            if self.episode_rewards:
-                self.ax2.plot(self.episode_rewards, 'b-', linewidth=1, alpha=0.7, label='Episode Reward')
-                if len(self.episode_rewards) > 10:
-                    # 平滑曲线
-                    window = min(50, len(self.episode_rewards))
-                    smooth_rewards = np.convolve(self.episode_rewards, np.ones(window)/window, mode='valid')
-                    self.ax2.plot(range(window-1, len(self.episode_rewards)), smooth_rewards, 'r-', linewidth=2, label='Smoothed')
-                self.ax2.set_title('Training Rewards')
-                self.ax2.set_xlabel('Episode')
-                self.ax2.set_ylabel('Reward')
-                self.ax2.legend()
-                self.ax2.grid(True, alpha=0.3)
-            
-            # 子图3：进度曲
-            if self.episode_progress:
-                self.ax3.plot(self.episode_progress, 'g-', linewidth=2)
-                self.ax3.set_title('Path Progress')
-                self.ax3.set_xlabel('Episode')
-                self.ax3.set_ylabel('Progress')
-                self.ax3.set_ylim(0, 1.1)
-                self.ax3.grid(True, alpha=0.3)
-            
-            # 子图4：损失曲
-            if self.actor_losses and self.critic_losses:
-                self.ax4.plot(self.actor_losses, 'r-', linewidth=1, label='Actor Loss', alpha=0.8)
-                self.ax4.plot(self.critic_losses, 'b-', linewidth=1, label='Critic Loss', alpha=0.8)
-                self.ax4.set_title('Training Losses')
-                self.ax4.set_xlabel('Episode')
-                self.ax4.set_ylabel('Loss')
-                self.ax4.legend()
-                self.ax4.grid(True, alpha=0.3)
-            
-            # 更新标题显示最佳结
-            self.fig.suptitle(f'Training Monitor - Episode {self.episode_count} | Best: Ep.{self.best_episode}, Reward={self.best_reward:.1f}, Progress={self.best_progress:.3f}', 
-                             fontsize=14)
-            
-            plt.tight_layout()
-            plt.pause(0.01)  # 短暂暂停以更新显
-            
-        except Exception as e:
-            print(f"Display update error: {e}")
-    
-    def plot_trajectory(self, ax, trajectory, title):
-        """Plot trajectory"""
-        # 清理路径数据
-        pm = self.clean_path(self.env.Pm)
-        pl = self.clean_path(self.env.cache['Pl'])
-        pr = self.clean_path(self.env.cache['Pr'])
-        
-        # 绘制参考路径和边界
-        ax.plot(pm[:,0], pm[:,1], 'k--', linewidth=2, label='Reference Path', alpha=0.8)
-        ax.scatter(pm[:,0], pm[:,1], c='black', marker='*', s=100, edgecolor='gold', zorder=3)
-        ax.plot(pl[:,0], pl[:,1], 'g--', linewidth=1.5, label='Left Boundary', alpha=0.6)
-        ax.plot(pr[:,0], pr[:,1], 'b--', linewidth=1.5, label='Right Boundary', alpha=0.6)
-        
-        # 绘制轨迹
-        if trajectory and len(trajectory) > 0:
-            pt = np.array(trajectory)
-            ax.plot(pt[:,0], pt[:,1], 'r-', linewidth=1.5, label='Actual Trajectory', alpha=0.9)
-            
-            # 标记起点和终
-            if len(pt) > 0:
-                ax.scatter(pt[0,0], pt[0,1], c='green', s=80, marker='o', label='Start', zorder=4)
-                ax.scatter(pt[-1,0], pt[-1,1], c='red', s=80, marker='x', label='End', zorder=4)
-        
-        ax.axis('equal')
-        ax.set_title(title)
-        ax.legend(loc='upper right', fontsize=8)
-        ax.grid(True, alpha=0.3)
-    
-    def _calculate_quality_score(self, reward, progress, trajectory):
-        """计算轨迹质量分数，考虑奖励、进度和终点距离"""
-        if not trajectory or len(trajectory) == 0:
-            return float('-inf')
-        
-        # 基础分数：奖+ 进度权重
-        base_score = reward + 1000 * progress
-        
-        # 终点距离奖励 - 统一使用真正的终
-        final_position = np.array(trajectory[-1])
-        target_point = np.array(self.env.Pm[-1])  # 统一使用最后一个点作为终点
-        
-        end_distance = np.linalg.norm(final_position - target_point)
-        end_distance_ratio = end_distance / self.env.epsilon
-        
-        # 距离奖励：越接近终点奖励越高
-        distance_bonus = 500.0 * np.exp(-10 * end_distance_ratio)
-        
-        # 如果非常接近终点，给予巨大奖
-        if end_distance < self.env.epsilon * 0.2:
-            distance_bonus += 1000.0 * np.exp(-50 * end_distance_ratio)
-        
-        return base_score + distance_bonus
-    
-    def save_best_trajectory(self):
-        """保存最佳轨迹图"""
-        plt.figure(figsize=(12, 8), dpi=150)
-        
-        # 清理路径数据
-        pm = self.clean_path(self.env.Pm)
-        pl = self.clean_path(self.env.cache['Pl'])
-        pr = self.clean_path(self.env.cache['Pr'])
-        
-        # 绘制参考路径和边界
-        plt.plot(pm[:,0], pm[:,1], 'k--', linewidth=3, label='Reference Path (Pm)', alpha=0.8)
-        plt.scatter(pm[:,0], pm[:,1], c='black', marker='*', s=200, edgecolor='gold', zorder=3)
-        plt.plot(pl[:,0], pl[:,1], 'g--', linewidth=2, label='Left Boundary (Pl)', alpha=0.7)
-        plt.plot(pr[:,0], pr[:,1], 'b--', linewidth=2, label='Right Boundary (Pr)', alpha=0.7)
-        
-        # 绘制最佳轨
-        if self.best_trajectory:
-            pt = np.array(self.best_trajectory)
-            plt.plot(pt[:,0], pt[:,1], 'r-', linewidth=2, label='Best Trajectory', alpha=0.9)
-            
-            # 标记起点和终
-            if len(pt) > 0:
-                plt.scatter(pt[0,0], pt[0,1], c='green', s=150, marker='o', label='Start', zorder=4)
-                plt.scatter(pt[-1,0], pt[-1,1], c='red', s=150, marker='x', label='End', zorder=4)
-            
-            # 计算误差统计
-            errors = []
-            for point in pt:
-                error = self.env.get_contour_error(point)
-                errors.append(error)
-            
-            max_error = max(errors) if errors else 0
-            avg_error = sum(errors) / len(errors) if errors else 0
-            
-            # 计算终点距离
-            final_position = np.array(pt[-1])
-            target_point = np.array(self.env.Pm[-1])  # 统一使用最后一个点作为终点
-            target_name = "End Point"
-            
-            end_distance = np.linalg.norm(final_position - target_point)
-            end_distance_ratio = end_distance / self.env.epsilon
-            
-            # 添加详细信息
-            info_text = (
-                f'Episode: {self.best_episode}\n'
-                f'Total Reward: {self.best_reward:.1f}\n'
-                f'Progress: {self.best_progress:.3f}\n'
-                f'Max Error: {max_error:.4f}\n'
-                f'Avg Error: {avg_error:.4f}\n'
-                f'Distance to {target_name}: {end_distance:.4f}\n'
-                f'Distance Ratio: {end_distance_ratio:.2f}\n'
-                f'ε = {self.env.epsilon:.3f}\n'
-                f'Steps: {len(pt)}'
-            )
-            
-            plt.text(0.02, 0.98, info_text, transform=plt.gca().transAxes, 
-                    fontfamily='monospace', verticalalignment='top',
-                    bbox=dict(boxstyle='round,pad=0.5', facecolor='white', alpha=0.9),
-                    fontsize=10)
-        
-        plt.axis('equal')
-        plt.xlabel('X Coordinate', fontsize=12)
-        plt.ylabel('Y Coordinate', fontsize=12)
-        plt.title(f'Best Trajectory - Episode {self.best_episode}', fontsize=14, pad=20)
-        plt.legend(loc='lower right', framealpha=0.9)
-        plt.grid(True, color='gray', linestyle=':', alpha=0.4)
-        plt.tight_layout()
-        
-        # 保存图片
-        plt.savefig(os.path.join(self.save_dir, f'best_trajectory_ep_{self.best_episode}.png'), 
-                   bbox_inches='tight', facecolor='white')
-        plt.close()  # 关闭图形释放内存
-    
-    def get_summary(self):
-        """获取训练总结"""
-        return {
-            'best_episode': self.best_episode,
-            'best_reward': self.best_reward,
-            'best_progress': self.best_progress,
-            'best_actor_loss': self.best_actor_loss,
-            'best_critic_loss': self.best_critic_loss,
-            'total_episodes': self.episode_count
-        }
-        
 def run_training():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -2171,8 +1702,7 @@ def run_training():
     smoothed_rewards = []
     smoothing_factor = 0.2
     
-    # 在创建环境后初始化监控器和论文指标统
-    monitor = TrainingMonitor(env)
+    # 初始化论文指标统计器
     paper_metrics = PaperMetrics()
     avg_actor_loss = 0
     avg_critic_loss = 0
@@ -2288,17 +1818,7 @@ def run_training():
                 print(f"  Total Reward:            {episode_reward:.2f}")
                 print(f"{'='*80}\n")
             
-            # 在episode结束时更新监控数
-            monitor.update(
-                episode=episode,
-                total_reward=episode_reward,
-                progress=final_progress,
-                actor_loss=avg_actor_loss,
-                critic_loss=avg_critic_loss,
-                trajectory=env.trajectory.copy()
-            )
-            
-            # 更新进度
+        # 更新进度
             pbar.set_postfix({
                 'Reward': f'{episode_reward:.1f}',
                 'Smoothed': f'{smoothed_rewards[-1]:.1f}',

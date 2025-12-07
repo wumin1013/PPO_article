@@ -5,7 +5,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import time
 import argparse
 from pathlib import Path
@@ -16,22 +15,16 @@ import torch
 import yaml
 from tqdm import tqdm
 
-# 添加父目录到路径，便于导入原始模块
-parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, parent_dir)
-
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
-# 导入重构后的模块（使用相对导入）
 from src.algorithms.baselines import NNCAgent, create_baseline_agent
 from src.algorithms.ppo import PPOContinuous
+from src.environment import Env
 from src.utils.checkpoint import CheckpointManager, load_for_resume
 from src.utils.logger import CSVLogger, DataLogger, ExperimentManager
+from src.utils.metrics import PaperMetrics
 from src.utils.path_generator import get_path_by_name
-
-# 导入原始模块（必须从父目录）
-from PPO最终版 import Env, PaperMetrics, configure_chinese_font, visualize_final_path
-import rl_utils  # noqa: F401
+from src.utils.plotter import configure_chinese_font, visualize_final_path
 
 
 def resolve_config_path(config_path: str) -> str:

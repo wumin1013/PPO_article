@@ -6,7 +6,6 @@ environment:
   epsilon: 0.5              # 总带宽(m) - Pl到Pr的距离
   interpolation_period: 0.1 # 插值周期(s)
   max_steps: 3000           # 最大步数
-  lookahead_points: 5       # 观测空间中的前瞻路径点数量
 
 # 运动学约束参数 (KCM模块)
 kinematic_constraints:

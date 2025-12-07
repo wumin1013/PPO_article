@@ -34,7 +34,9 @@ class NNCAgent(PPOContinuous):
                  gamma: float,
                  device: torch.device,
                  max_vel: float = 1.0,
-                 max_ang_vel: float = 1.5):
+                 max_ang_vel: float = 1.5,
+                 observation_space=None,
+                 action_space=None):
         """
         初始化NNC智能体
         
@@ -53,7 +55,9 @@ class NNCAgent(PPOContinuous):
             epochs=epochs,
             eps=eps,
             gamma=gamma,
-            device=device
+            device=device,
+            observation_space=observation_space,
+            action_space=action_space
         )
         
         self.max_vel = max_vel
@@ -371,7 +375,9 @@ def create_baseline_agent(baseline_type: str,
             gamma=ppo_config['gamma'],
             device=device,
             max_vel=kcm_config['MAX_VEL'],
-            max_ang_vel=kcm_config['MAX_ANG_VEL']
+            max_ang_vel=kcm_config['MAX_ANG_VEL'],
+            observation_space=config.get('observation_space'),
+            action_space=config.get('action_space')
         )
         
         return agent

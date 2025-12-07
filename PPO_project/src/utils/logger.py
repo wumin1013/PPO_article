@@ -1,15 +1,89 @@
 """
-Data logger for inference runs.
-Writes per-step state to CSV for paper figures and tables.
+Logging utilities.
+- ExperimentManager: create isolated experiment folders and config snapshots.
+- CSVLogger: atomic CSV appends for training telemetry.
+- DataLogger: inference-time trajectory logger.
 """
 from __future__ import annotations
 
 import csv
 import json
+import shutil
+from datetime import datetime
 from pathlib import Path
-from typing import Iterable, Optional, Sequence, Tuple
+from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
+class ExperimentManager:
+    """Manage experiment directory structure and config snapshots."""
+
+    def __init__(self, category: str, config_path: Path | str, experiment_dir: Path | str | None = None) -> None:
+        if experiment_dir is not None:
+            self.experiment_dir = Path(experiment_dir)
+            self.experiment_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            self.experiment_dir = PROJECT_ROOT / "saved_models" / category / timestamp
+            self.experiment_dir.mkdir(parents=True, exist_ok=True)
+
+        self.logs_dir = self.experiment_dir / "logs"
+        self.logs_dir.mkdir(parents=True, exist_ok=True)
+
+        self.models_dir = self.experiment_dir / "checkpoints"
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+
+        self.config_copy_path = self.experiment_dir / "config.yaml"
+        self._copy_config(config_path)
+
+    def _copy_config(self, config_path: Path | str) -> None:
+        source = Path(config_path)
+        if not source.exists():
+            return
+        if self.config_copy_path.exists():
+            return
+        if source.resolve() == self.config_copy_path.resolve():
+            return
+        shutil.copyfile(source, self.config_copy_path)
+
+    def create_logger(self, filename: str, fieldnames: Sequence[str]) -> "CSVLogger":
+        return CSVLogger(self.logs_dir / filename, fieldnames)
+
+
+class CSVLogger:
+    """
+    Atomic CSV logger.
+
+    Each call opens the file, writes, flushes, and closes immediately to avoid
+    descriptor contention with concurrent readers (e.g., Streamlit/Excel).
+    """
+
+    def __init__(self, path: Path | str, fieldnames: Sequence[str]) -> None:
+        self.path = Path(path)
+        self.fieldnames = list(fieldnames)
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self._ensure_header()
+
+    def _ensure_header(self) -> None:
+        if self.path.exists() and self.path.stat().st_size > 0:
+            return
+        with self.path.open("w", newline="", encoding="utf-8") as file:
+            writer = csv.DictWriter(file, fieldnames=self.fieldnames)
+            writer.writeheader()
+            file.flush()
+
+    def log(self, row: Mapping[str, object]) -> None:
+        filtered_row = {name: row.get(name, "") for name in self.fieldnames}
+        with self.path.open("a", newline="", encoding="utf-8") as file:
+            writer = csv.DictWriter(file, fieldnames=self.fieldnames)
+            writer.writerow(filtered_row)
+            file.flush()
+
+    def log_step(self, **row: object) -> None:
+        self.log(row)
 
 
 class DataLogger:
@@ -34,19 +108,15 @@ class DataLogger:
         log_dir: Optional[Path | str] = None,
         filename: str = "experiment_results.csv",
     ) -> None:
-        project_root = Path(__file__).resolve().parents[2]
-        self.log_dir = Path(log_dir) if log_dir else project_root / "logs"
+        self.log_dir = Path(log_dir) if log_dir else PROJECT_ROOT / "logs"
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.log_path = self.log_dir / filename
-        self._file = self.log_path.open("w", newline="", encoding="utf-8")
-        self._writer = csv.DictWriter(self._file, fieldnames=self.required_columns)
-        self._writer.writeheader()
+        self._ensure_header()
         self.current_time = 0.0
 
     def close(self) -> None:
-        if not self._file.closed:
-            self._file.flush()
-            self._file.close()
+        # kept for context manager compatibility
+        return
 
     def log_step(
         self,
@@ -76,7 +146,10 @@ class DataLogger:
             "kcm_intervention": float(kcm_intervention),
             "reward_components": json.dumps(reward_components or {}),
         }
-        self._writer.writerow(row)
+        with self.log_path.open("a", newline="", encoding="utf-8") as file:
+            writer = csv.DictWriter(file, fieldnames=self.required_columns)
+            writer.writerow(row)
+            file.flush()
 
     @staticmethod
     def project_to_path(
@@ -107,5 +180,13 @@ class DataLogger:
     def __exit__(self, exc_type, exc, tb) -> None:
         self.close()
 
+    def _ensure_header(self) -> None:
+        if self.log_path.exists() and self.log_path.stat().st_size > 0:
+            return
+        with self.log_path.open("w", newline="", encoding="utf-8") as file:
+            writer = csv.DictWriter(file, fieldnames=self.required_columns)
+            writer.writeheader()
+            file.flush()
 
-__all__ = ["DataLogger"]
+
+__all__ = ["CSVLogger", "DataLogger", "ExperimentManager"]

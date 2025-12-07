@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Iterable, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
+import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -23,7 +24,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 class ExperimentManager:
     """Manage experiment directory structure and config snapshots."""
 
-    def __init__(self, category: str, config_path: Path | str, experiment_dir: Path | str | None = None) -> None:
+    def __init__(
+        self,
+        category: str,
+        config_path: Path | str,
+        experiment_dir: Path | str | None = None,
+        config_data: Optional[Mapping] = None,
+    ) -> None:
         if experiment_dir is not None:
             base_dir = Path(experiment_dir)
         else:
@@ -44,7 +51,10 @@ class ExperimentManager:
         self.models_dir.mkdir(parents=True, exist_ok=True)
 
         self.config_copy_path = self.experiment_dir / "config.yaml"
-        self._copy_config(config_path)
+        if config_data is not None:
+            self._write_config(config_data)
+        else:
+            self._copy_config(config_path)
 
     def _copy_config(self, config_path: Path | str) -> None:
         source = Path(config_path)
@@ -55,6 +65,11 @@ class ExperimentManager:
         if source.resolve() == self.config_copy_path.resolve():
             return
         shutil.copyfile(source, self.config_copy_path)
+
+    def _write_config(self, config_data: Mapping) -> None:
+        """Persist the effective configuration snapshot for reproducibility."""
+        with self.config_copy_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(config_data, f, allow_unicode=True)
 
     def create_logger(self, filename: str, fieldnames: Sequence[str]) -> "CSVLogger":
         return CSVLogger(self.logs_dir / filename, fieldnames)

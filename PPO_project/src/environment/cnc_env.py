@@ -16,6 +16,7 @@ def create_environment_from_config(config: Dict, path_points: Iterable, device=N
     env_cfg = config["environment"]
     kcm_cfg = config["kinematic_constraints"]
     Pm = [np.array(pt) for pt in path_points]
+    reward_weights = config.get("reward_weights", {})
 
     return Env(
         device=device or env_cfg.get("device"),
@@ -30,6 +31,7 @@ def create_environment_from_config(config: Dict, path_points: Iterable, device=N
         Pm=Pm,
         max_steps=env_cfg["max_steps"],
         lookahead_points=env_cfg.get("lookahead_points", 5),
+        reward_weights=reward_weights,
     )
 
 

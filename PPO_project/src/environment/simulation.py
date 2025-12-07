@@ -107,6 +107,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     base_cfg = _load_base_config()
     env_cfg = base_cfg.get("environment", {})
     kcm_cfg = base_cfg.get("kinematic_constraints", {})
+    reward_weights = base_cfg.get("reward_weights", {})
 
     dt = env_cfg.get("interpolation_period", 0.1)
     path_points = _build_path(config.path_name, base_cfg)
@@ -130,6 +131,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         Pm=path_points,
         max_steps=env_cfg.get("max_steps", 3000),
         lookahead_points=env_cfg.get("lookahead_points", 5),
+        reward_weights=reward_weights,
     )
 
     # 兼容可视化所需的 Pl/Pr

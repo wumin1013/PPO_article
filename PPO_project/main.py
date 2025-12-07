@@ -4,11 +4,11 @@
 
 from __future__ import annotations
 
+import argparse
 import os
 import time
-import argparse
 from pathlib import Path
-from typing import Tuple
+from typing import Mapping, Optional, Tuple
 
 import numpy as np
 import torch
@@ -27,6 +27,20 @@ from src.utils.path_generator import get_path_by_name
 from src.utils.plotter import configure_chinese_font, visualize_final_path
 
 
+def str2bool(value: Optional[str]) -> bool:
+    """Parse flexible boolean flags from CLI strings."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        raise argparse.ArgumentTypeError("布尔参数不能为空")
+    lowered = str(value).strip().lower()
+    if lowered in {"1", "true", "yes", "y", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"无法解析布尔值: {value}")
+
+
 def resolve_config_path(config_path: str) -> str:
     """将配置路径转为绝对路径，保证任何调用地点一致。"""
     if os.path.isabs(config_path):
@@ -43,22 +57,67 @@ def load_config(config_path: str) -> Tuple[dict, str]:
     return config, resolved_path
 
 
+def apply_cli_overrides(config: dict, overrides: Optional[argparse.Namespace]) -> None:
+    """将命令行选项写入配置字典（仅当提供时）。"""
+    if overrides is None:
+        return
+
+    experiment_cfg = config.setdefault("experiment", {})
+    reward_cfg = config.setdefault("reward_weights", {})
+
+    if getattr(overrides, "experiment_name", None):
+        experiment_cfg["name"] = overrides.experiment_name
+        experiment_cfg["category"] = overrides.experiment_name
+
+    if getattr(overrides, "use_kcm", None) is not None:
+        experiment_cfg["enable_kcm"] = bool(overrides.use_kcm)
+        if not overrides.use_kcm:
+            reward_cfg["w_kcm_penalty"] = 0.0
+
+    if getattr(overrides, "use_smoothness_reward", None) is not None:
+        experiment_cfg["use_smoothness_reward"] = bool(overrides.use_smoothness_reward)
+        if not overrides.use_smoothness_reward:
+            reward_cfg["w_action_smooth"] = 0.0
+
+
+def _resolve_experiment_category(experiment_config: Mapping, experiment_mode: str) -> str:
+    """选择实验目录名的优先级：显式name > category > mode。"""
+    return str(experiment_config.get("name") or experiment_config.get("category") or experiment_mode)
+
+
 def _init_experiment(
     config_path: str,
     path_config: dict,
     experiment_mode: str,
     experiment_config: dict,
     experiment_dir: Path | str | None = None,
+    config_data: Optional[Mapping] = None,
 ) -> tuple[ExperimentManager, str]:
     """创建实验管理器及日志标签。"""
-    experiment_category = experiment_config.get("category") or experiment_mode
-    manager = ExperimentManager(str(experiment_category), config_path, experiment_dir=experiment_dir)
+    experiment_category = _resolve_experiment_category(experiment_config, experiment_mode)
+    manager = ExperimentManager(
+        str(experiment_category),
+        config_path,
+        experiment_dir=experiment_dir,
+        config_data=config_data,
+    )
     path_label = path_config.get("type", "path")
     log_tag = f"{experiment_mode}_{path_label}"
     return manager, log_tag
 
 
-def _init_loggers(manager: ExperimentManager, log_tag: str) -> tuple[CSVLogger, CSVLogger, CSVLogger, CSVLogger]:
+class _FanoutLogger:
+    """Broadcast log rows到多个底层CSVLogger。"""
+
+    def __init__(self, loggers) -> None:
+        self.loggers = list(loggers)
+
+    def log_step(self, **row: object) -> None:
+        for logger in self.loggers:
+            logger.log_step(**row)
+
+
+def _init_loggers(manager: ExperimentManager, log_tag: str) -> tuple[CSVLogger, CSVLogger, CSVLogger, _FanoutLogger]:
     """构建所需的原子化CSV日志记录器。"""
     step_logger = manager.create_logger(
         f"step_metrics_{log_tag}.csv",
@@ -82,8 +141,12 @@ def _init_loggers(manager: ExperimentManager, log_tag: str) -> tuple[CSVLogger, 
             "progress",
         ],
     )
-    training_logger = manager.create_logger(
-        f"training_{log_tag}.csv", ["episode_idx", "reward", "actor_loss", "critic_loss", "wall_time"]
+    training_fields = ["episode_idx", "reward", "actor_loss", "critic_loss", "wall_time"]
+    training_logger = _FanoutLogger(
+        [
+            manager.create_logger("training_log.csv", training_fields),
+            manager.create_logger(f"training_{log_tag}.csv", training_fields),
+        ]
     )
     return step_logger, episode_logger, paper_logger, training_logger
 
@@ -121,11 +184,27 @@ def _find_model_checkpoint(category: str, mode_suffix: str) -> Path | None:
     return None
 
 
-def train(config_path: str = "configs/default.yaml", resume_path: str | None = None) -> None:
+def train(
+    config_path: str = "configs/default.yaml",
+    resume_path: str | None = None,
+    cli_overrides: Optional[argparse.Namespace] = None,
+    experiment_dir: str | None = None,
+    mode_override: Optional[str] = None,
+) -> None:
     """训练入口，支持断点续训。"""
     configure_chinese_font()
 
     config, resolved_config_path = load_config(config_path)
+    if mode_override:
+        config.setdefault("experiment", {})["mode"] = mode_override
+    apply_cli_overrides(config, cli_overrides)
+
+    experiment_config = config.setdefault("experiment", {"mode": "train", "enable_kcm": True})
+    experiment_mode = mode_override or experiment_config.get("mode", "train")
+    if experiment_config.get("enable_kcm") is False and experiment_mode == "train":
+        experiment_mode = "ablation_no_kcm"
+        experiment_config["mode"] = experiment_mode
+
     print(f"加载配置: {resolved_config_path}")
     print(yaml.dump(config, allow_unicode=True))
 
@@ -135,8 +214,7 @@ def train(config_path: str = "configs/default.yaml", resume_path: str | None = N
     env_config = config["environment"]
     kcm_config = config["kinematic_constraints"]
     path_config = config["path"]
-    experiment_config = config.get("experiment", {"mode": "train", "enable_kcm": True})
-    experiment_mode = experiment_config.get("mode", "train")
+    reward_weights = config.get("reward_weights", {})
 
     Pm = _build_path(path_config)
     env = Env(
@@ -152,6 +230,7 @@ def train(config_path: str = "configs/default.yaml", resume_path: str | None = N
         Pm=Pm,
         max_steps=env_config["max_steps"],
         lookahead_points=env_config.get("lookahead_points", 5),
+        reward_weights=reward_weights,
     )
 
     obs_space = getattr(env, "observation_space", None)
@@ -208,9 +287,9 @@ def train(config_path: str = "configs/default.yaml", resume_path: str | None = N
         )
 
         if experiment_mode == "ablation_no_reward":
-            config["reward_weights"]["w_j"] = 0.0
-            config["reward_weights"]["w_c"] = 0.0
-            print("消融实验模式: 禁用惩罚权重")
+            for key in ("w_action_smooth", "w_kcm_penalty"):
+                config["reward_weights"][key] = 0.0
+            print("消融实验模式: 禁用平滑与KCM惩罚")
         else:
             print(f"PPO智能体创建成功 模式: {experiment_mode}")
 
@@ -248,8 +327,16 @@ def train(config_path: str = "configs/default.yaml", resume_path: str | None = N
         else:
             print(f"警告: 未找到续训文件 {resume_file}，将从头开始。")
 
+    explicit_experiment_dir = getattr(cli_overrides, "experiment_dir", None) or experiment_dir
+    target_experiment_dir = resume_experiment_dir or explicit_experiment_dir
+
     manager, log_tag = _init_experiment(
-        resolved_config_path, path_config, experiment_mode, experiment_config, experiment_dir=resume_experiment_dir
+        resolved_config_path,
+        path_config,
+        experiment_mode,
+        experiment_config,
+        experiment_dir=target_experiment_dir,
+        config_data=config,
     )
     checkpoint_manager = CheckpointManager(manager.models_dir)
     step_logger, episode_logger, paper_logger, training_logger = _init_loggers(manager, log_tag)
@@ -441,15 +528,32 @@ def train(config_path: str = "configs/default.yaml", resume_path: str | None = N
         print(f"\n最终模型已保存: {final_model_path}")
 
     print(f"\n可视化最终轨迹(ε={env_config['epsilon']:.3f})")
-    visualize_final_path(env)
+    try:
+        visualize_final_path(env)
+    except Exception as exc:
+        print(f"可视化轨迹时出现警告: {exc}")
 
 
-def test(config_path: str = "configs/default.yaml", model_path: str | None = None) -> None:
+def test(
+    config_path: str = "configs/default.yaml",
+    model_path: str | None = None,
+    cli_overrides: Optional[argparse.Namespace] = None,
+    experiment_dir: str | None = None,
+    mode_override: Optional[str] = None,
+) -> None:
     """测试入口 - 加载已训练模型进行推理。"""
     configure_chinese_font()
 
     config, resolved_config_path = load_config(config_path)
+    if mode_override:
+        config.setdefault("experiment", {})["mode"] = mode_override
+    apply_cli_overrides(config, cli_overrides)
+
+    experiment_config = config.setdefault("experiment", {})
+    experiment_mode = mode_override or experiment_config.get("mode", "test")
+
     print(f"加载配置: {resolved_config_path}")
+    print(yaml.dump(config, allow_unicode=True))
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"使用设备: {device}")
@@ -457,10 +561,16 @@ def test(config_path: str = "configs/default.yaml", model_path: str | None = Non
     env_config = config["environment"]
     kcm_config = config["kinematic_constraints"]
     path_config = config["path"]
-    experiment_config = config.get("experiment", {})
-    experiment_mode = experiment_config.get("mode", "test")
+    reward_weights = config.get("reward_weights", {})
 
-    manager, log_tag = _init_experiment(resolved_config_path, path_config, experiment_mode, experiment_config)
+    manager, log_tag = _init_experiment(
+        resolved_config_path,
+        path_config,
+        experiment_mode,
+        experiment_config,
+        experiment_dir=experiment_dir or getattr(cli_overrides, "experiment_dir", None),
+        config_data=config,
+    )
 
     Pm = _build_path(path_config)
     env = Env(
@@ -476,6 +586,7 @@ def test(config_path: str = "configs/default.yaml", model_path: str | None = Non
         Pm=Pm,
         max_steps=env_config["max_steps"],
         lookahead_points=env_config.get("lookahead_points", 5),
+        reward_weights=reward_weights,
     )
 
     obs_space = getattr(env, "observation_space", None)
@@ -578,7 +689,10 @@ def test(config_path: str = "configs/default.yaml", model_path: str | None = Non
     print(f"  Total Reward:            {total_reward:.2f}")
     print("=" * 80 + "\n")
 
-    visualize_final_path(env)
+    try:
+        visualize_final_path(env)
+    except Exception as exc:
+        print(f"可视化轨迹时出现警告: {exc}")
 
 
 if __name__ == "__main__":
@@ -593,25 +707,37 @@ if __name__ == "__main__":
     )
     parser.add_argument("--model", type=str, default=None, help="测试模式下的模型路径")
     parser.add_argument("--resume", type=str, default=None, help="latest_checkpoint.pth 路径，用于断点续训")
+    parser.add_argument("--experiment_name", type=str, default=None, help="显式指定实验名称（保存目录名）")
+    parser.add_argument("--experiment_dir", type=str, default=None, help="显式指定实验目录（覆盖时间戳生成）")
+    parser.add_argument(
+        "--use_kcm",
+        type=str2bool,
+        default=None,
+        help="覆盖配置，控制是否启用KCM（False 则进入KCM消融）",
+    )
+    parser.add_argument(
+        "--use_smoothness_reward",
+        type=str2bool,
+        default=None,
+        help="覆盖配置，控制是否启用平滑奖励项",
+    )
 
     args = parser.parse_args()
 
-    if args.mode != "train":
-        config, _ = load_config(args.config)
-        config.setdefault("experiment", {})
-        config["experiment"]["mode"] = args.mode
-
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        temp_config_path = os.path.join(script_dir, "temp_config.yaml")
-        with open(temp_config_path, "w", encoding="utf-8") as f:
-            yaml.dump(config, f, allow_unicode=True)
-
-        if args.mode == "test":
-            test(temp_config_path, args.model)
-        else:
-            train(temp_config_path, args.resume)
-
-        if os.path.exists(temp_config_path):
-            os.remove(temp_config_path)
+    if args.mode == "test":
+        test(
+            args.config,
+            args.model,
+            cli_overrides=args,
+            experiment_dir=args.experiment_dir,
+            mode_override="test",
+        )
     else:
-        train(args.config, args.resume)
+        mode_override = None if args.mode == "train" else args.mode
+        train(
+            args.config,
+            args.resume,
+            cli_overrides=args,
+            experiment_dir=args.experiment_dir,
+            mode_override=mode_override,
+        )

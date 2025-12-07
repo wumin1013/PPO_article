@@ -51,13 +51,13 @@ ppo:
   hidden_dim: 128
   lmbda: 0.95
 reward_weights:
-  w_c: 0.5
-  w_constraint: 0.2
-  w_direction: 0.5
-  w_e: 1.0
-  w_j: 0.3
-  w_progress: 2.0
-  w_velocity: 0.2
+  w_velocity: 2.0
+  w_progress: 1.0
+  w_e: 1.2
+  w_action_smooth: 0.5
+  w_kcm_penalty: 0.8
+  w_violation: 12.0
+  w_survival: 0.05
 training:
   checkpoint_interval_steps: 10
   log_interval: 1

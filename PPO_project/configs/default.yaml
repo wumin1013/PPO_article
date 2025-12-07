@@ -22,13 +22,13 @@ kinematic_constraints:
 
 # 奖励函数权重
 reward_weights:
-  w_e: 1.0                  # 跟踪误差权重
-  w_c: 0.5                  # 舒适性(捷度)权重
-  w_j: 0.3                  # 平滑性权重
-  w_progress: 2.0           # 进度奖励权重
-  w_direction: 0.5          # 方向对齐权重
-  w_velocity: 0.2           # 速度合理性权重
-  w_constraint: 0.2         # 约束干预惩罚权重
+  w_velocity: 2.0           # 安全区速度驱动
+  w_progress: 1.0           # 前进奖励
+  w_e: 1.2                  # 走廊缓冲惩罚
+  w_action_smooth: 0.5      # 动作平滑惩罚
+  w_kcm_penalty: 0.8        # KCM干预惩罚
+  w_violation: 12.0         # 违规区强惩罚
+  w_survival: 0.05          # 存活小奖励
 
 # PPO算法参数
 ppo:

@@ -23,7 +23,18 @@ def configure_chinese_font() -> None:
 
 
 def _clean_path(path):
-    return np.array([p for p in path if p is not None and not np.isnan(p).any()])
+    if path is None:
+        return np.empty((0, 2))
+    cleaned = [p for p in path if p is not None and not np.isnan(p).any()]
+    return np.array(cleaned) if cleaned else np.empty((0, 2))
+
+
+def _get_boundary(env, key: str):
+    """Return Pl/Pr with fallbacks for legacy env cache."""
+    if hasattr(env, key):
+        return getattr(env, key)
+    cache = getattr(env, "cache", {})
+    return cache.get(key, [])
 
 
 def visualize_final_path(env) -> None:
@@ -31,13 +42,17 @@ def visualize_final_path(env) -> None:
     plt.figure(figsize=(10, 6), dpi=100)
 
     pm = _clean_path(env.Pm)
+    if pm.size == 0:
+        print("warning: empty reference path, skip visualization.")
+        return
     plt.plot(pm[:, 0], pm[:, 1], "k--", linewidth=2.5, label="Reference Path (Pm)")
     plt.scatter(pm[:, 0], pm[:, 1], c="black", marker="*", s=150, edgecolor="gold", zorder=3)
 
-    pl = _clean_path(env.Pl)
-    pr = _clean_path(env.Pr)
-    plt.plot(pl[:, 0], pl[:, 1], "g--", linewidth=1.8, label="Left Boundary (Pl)", alpha=0.7)
-    plt.plot(pr[:, 0], pr[:, 1], "b--", linewidth=1.8, label="Right Boundary (Pr)", alpha=0.7)
+    pl = _clean_path(_get_boundary(env, "Pl"))
+    pr = _clean_path(_get_boundary(env, "Pr"))
+    if pl.size > 0 and pr.size > 0:
+        plt.plot(pl[:, 0], pl[:, 1], "g--", linewidth=1.8, label="Left Boundary (Pl)", alpha=0.7)
+        plt.plot(pr[:, 0], pr[:, 1], "b--", linewidth=1.8, label="Right Boundary (Pr)", alpha=0.7)
 
     pt = np.array(env.trajectory)
     plt.plot(pt[:, 0], pt[:, 1], "r-", linewidth=1.5, label="Actual Trajectory (Pt)")

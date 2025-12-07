@@ -20,11 +20,12 @@ import torch.nn.functional as F
 from tqdm import tqdm
 import csv
 from math import degrees,acos,sqrt
-from typing import List, Tuple, Optional
+from typing import Dict, List, Tuple, Optional
 import time
 from rtree import index
 from src.utils import rl_utils
 from src.environment.kinematics import apply_kinematic_constraints
+from src.environment.reward import RewardCalculator
 from src.utils.metrics import PaperMetrics
 from src.utils.plotter import configure_chinese_font, visualize_final_path
 
@@ -44,6 +45,7 @@ class Env:
         MAX_ANG_JERK,
         Pm,
         max_steps,
+        reward_weights: Optional[Dict[str, float]] = None,
         lookahead_points: int = 5,
     ):
         self.lookahead_points = max(1, int(lookahead_points))
@@ -70,6 +72,7 @@ class Env:
         self.device = device
         self.max_steps = max_steps
         self.interpolation_period = interpolation_period
+        self.reward_weights = reward_weights or {}
         # 确保所有约束参数都是浮点数
         self.MAX_VEL = float(MAX_VEL)
         self.MAX_ACC = float(MAX_ACC)
@@ -84,6 +87,12 @@ class Env:
             low=np.array([-self.MAX_ANG_VEL, 0.0], dtype=np.float32),
             high=np.array([self.MAX_ANG_VEL, self.MAX_VEL], dtype=np.float32),
             dtype=np.float32,
+        )
+
+        self.reward_calculator = RewardCalculator(
+            weights=self.reward_weights,
+            max_vel=self.MAX_VEL,
+            half_epsilon=self.half_epsilon,
         )
         
         # 闭合路径追踪相关
@@ -139,8 +148,6 @@ class Env:
         self.curvature_rate_scale = max(max_curvature_rate, 1e-3)
         # 创建三角函数查找表
         self._create_trig_lookup_table()
-        
-        self.last_progress = 0.0
         
         # 添加新属性用于跟踪线段信
         self.current_segment_idx = 0
@@ -321,6 +328,7 @@ class Env:
         self.angular_acc = 0.0  # 当前角加速度
         self.angular_jerk = 0.0  # 当前角加加速度
         self.kcm_intervention = 0.0  # 运动学约束干预程        
+        self.reward_calculator.reset()
         lookahead_features = self._compute_lookahead_features()
         self.state = np.array(
             [
@@ -904,87 +912,25 @@ class Env:
         tau = current_direction - path_direction
         tau = (tau + np.pi) % (2 * np.pi) - np.pi
         return tau
-
+    
     def calculate_reward(self):
-        """Improved reward with normalization for value learning stability"""
-        
-        # 基础跟踪奖励 - 标准化到[-10, 10]范围
-        distance = self.get_contour_error(self.current_position)
-        # 修正：使half_epsilon 作为归一化基准，因为有效边界±epsilon/2
-        distance_ratio = np.clip(distance / self.half_epsilon, 0, 2)  # 限制最大比
-        
-        # 使用更平滑的奖励函数
-        tracking_reward = 10.0 * np.exp(-3 * distance_ratio) - 5.0  # 范围：[-5, 5]
-        
-        # 进度奖励 - 标准
-        progress = self.state[4]
-        progress_diff = max(0, progress - self.last_progress)  # 只奖励正向进
-        progress_reward = 20.0 * progress_diff  # 根据进度差给奖励
-        
-        # 方向对齐奖励 - 标准
-        tau = abs(self.state[2])
-        direction_reward = 5.0 * np.exp(-2 * tau) - 2.5  # 范围：[-2.5, 2.5]
-        
-        # 速度奖励 - 鼓励合理速度
-        velocity_ratio = self.velocity / self.MAX_VEL
-        velocity_reward = 2.0 * (1 - abs(velocity_ratio - 0.7))  # 鼓励70%最大速度
-        
-        # 平滑性奖- 惩罚过大的加速度变化
-        jerk_penalty = -2.0 * np.clip(abs(self.jerk) / self.MAX_JERK, 0, 1)
-        ang_jerk_penalty = -2.0 * np.clip(abs(self.angular_jerk) / self.MAX_ANG_JERK, 0, 1)
-        smoothness_reward = jerk_penalty + ang_jerk_penalty
-        
-        # 运动学约束干预惩- 惩罚约束对动作的过度修正
-        constraint_penalty = -2.0 * self.kcm_intervention
-        
-        # 终点到达奖励 - 大幅提升
-        completion_reward = 0
+        contour_error = self.get_contour_error(self.current_position)
+        progress = float(self.state[4])
         end_point = np.array(self.Pm[-1])
         end_distance = np.linalg.norm(self.current_position - end_point)
-        # 修正：使half_epsilon 作为基准
-        end_distance_ratio = end_distance / self.half_epsilon
-        if progress > 0.8:
-            # 高进度时的终点接近奖
-            proximity_bonus = 50.0 * (progress - 0.8) * np.exp(-5 * end_distance_ratio)
-            completion_reward += proximity_bonus
-            
-            # 非常接近终点时的巨大奖励
-            if end_distance < self.half_epsilon * 0.6:
-                completion_reward += 100.0 * np.exp(-10 * end_distance_ratio)
-                
-                # 完全到达终点的最高奖
-                if end_distance < self.half_epsilon * 0.2:
-                    completion_reward += 200.0
-        
-        # 闭合路径完成奖励
-        if self.closed and self.lap_completed:
-            completion_reward += 150.0
-        
-        # 存活奖励 - 防止早期终止
-        survival_reward = 0.1  # 每步小额奖励
-        
-        # 组合总奖励，确保合理的数值范
-        total_reward = (tracking_reward + progress_reward + direction_reward + 
-                       velocity_reward + smoothness_reward + constraint_penalty + 
-                       completion_reward + survival_reward)
-        
-        # 限制总奖励范围，防止梯度爆炸
-        total_reward = np.clip(total_reward, -20, 100)
-        
-        self.last_reward_components = {
-            'tracking': float(tracking_reward),
-            'progress': float(progress_reward),
-            'direction': float(direction_reward),
-            'velocity': float(velocity_reward),
-            'smoothness': float(smoothness_reward),
-            'constraint': float(constraint_penalty),
-            'completion': float(completion_reward),
-            'survival': float(survival_reward),
-            'total': float(total_reward),
-        }
 
-        self.last_progress = progress
-        return total_reward
+        reward, components = self.reward_calculator.calculate_reward(
+            contour_error=contour_error,
+            progress=progress,
+            velocity=self.velocity,
+            action=(self.angular_vel, self.velocity),
+            kcm_intervention=self.kcm_intervention,
+            end_distance=end_distance,
+            lap_completed=self.closed and self.lap_completed,
+        )
+
+        self.last_reward_components = components
+        return reward
 
     def _calculate_segment_adaptive_reward(self):
         """根据路径段类型计算自适应奖励，加强直线段跟踪精度"""

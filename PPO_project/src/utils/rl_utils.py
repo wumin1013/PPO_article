@@ -88,4 +88,58 @@ def compute_advantage(gamma, lmbda, td_delta):
     advantage_list.reverse()
     # 性能优化：先转换为 numpy 数组，再转换为 tensor
     return torch.tensor(np.array(advantage_list, dtype=np.float32), dtype=torch.float)
+
+
+class RunningMeanStd:
+    """在线维护均值和方差，基于 Welford 算法的无偏估计。"""
+
+    def __init__(self, shape, epsilon: float = 1e-4):
+        self.mean = np.zeros(shape, dtype=np.float64)
+        self.var = np.ones(shape, dtype=np.float64)
+        self.count = epsilon
+
+    def _update_from_moments(self, batch_mean: np.ndarray, batch_var: np.ndarray, batch_count: int) -> None:
+        """按批次统计量增量更新总体均值和方差。"""
+        delta = batch_mean - self.mean
+        total_count = self.count + batch_count
+
+        new_mean = self.mean + delta * batch_count / total_count
+
+        m_a = self.var * self.count
+        m_b = batch_var * batch_count
+        m2 = m_a + m_b + delta**2 * self.count * batch_count / total_count
+        new_var = m2 / max(total_count, 1e-6)
+
+        self.mean = new_mean
+        self.var = new_var
+        self.count = total_count
+
+    def update(self, x: np.ndarray) -> None:
+        """接收任意批次样本并更新统计量。"""
+        arr = np.asarray(x, dtype=np.float64)
+        if arr.ndim == 1:
+            batch_mean = arr
+            batch_var = np.zeros_like(arr)
+            batch_count = 1
+        else:
+            batch_mean = arr.mean(axis=0)
+            batch_var = arr.var(axis=0)
+            batch_count = arr.shape[0]
+        self._update_from_moments(batch_mean, batch_var, batch_count)
+
+
+class StateNormalizer:
+    """状态归一化器：在线更新均值方差并返回标准化结果。"""
+
+    def __init__(self, state_dim: int, eps: float = 1e-8):
+        self.rms = RunningMeanStd(shape=(state_dim,))
+        self.eps = eps
+
+    def __call__(self, state: np.ndarray, update: bool = True) -> np.ndarray:
+        arr = np.asarray(state, dtype=np.float64)
+        if update:
+            self.rms.update(arr)
+        std = np.sqrt(self.rms.var + self.eps)
+        normalized = (arr - self.rms.mean) / std
+        return normalized.astype(np.float32)
                 

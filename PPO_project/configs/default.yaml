@@ -32,14 +32,14 @@ reward_weights:
 
 # PPO算法参数
 ppo:
-  actor_lr: 0.0003          # Actor学习率
+  actor_lr: 0.0001          # Actor学习率
   critic_lr: 0.001          # Critic学习率
   hidden_dim: 128           # 隐藏层维度
   gamma: 0.99               # 折扣因子
   lmbda: 0.95               # GAE参数
   epochs: 10                # 每次更新的epoch数
   eps: 0.2                  # PPO clip参数
-  batch_size: 64            # 批次大小
+  batch_size: 256           # 批次大小
 
 # 训练配置
 training:

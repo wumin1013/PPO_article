@@ -26,6 +26,7 @@ from src.utils.logger import CSVLogger, DataLogger, ExperimentManager
 from src.utils.metrics import PaperMetrics
 from src.utils.path_generator import get_path_by_name
 from src.utils.plotter import configure_chinese_font, visualize_final_path
+from src.utils.rl_utils import StateNormalizer
 
 
 def str2bool(value: Optional[str]) -> bool:
@@ -287,6 +288,8 @@ def train(
     obs_space = getattr(env, "observation_space", None)
     act_space = getattr(env, "action_space", None)
     print(f"环境创建成功: 状态维度{env.observation_dim}, 动作维度={env.action_space_dim}")
+    state_dim = obs_space.shape[0] if obs_space is not None else env.observation_dim
+    normalizer = StateNormalizer(state_dim)
 
     resume_state = None
     resume_experiment_dir: Path | None = None
@@ -400,7 +403,9 @@ def train(
 
     with tqdm(total=num_episodes, initial=start_episode, desc="训练进度") as pbar:
         for episode in range(start_episode, num_episodes):
-            state = env.reset()
+            use_random_start = episode < num_episodes * 0.3
+            state = env.reset(random_start=use_random_start)
+            state = normalizer(state)
             paper_metrics = PaperMetrics()
             current_episode_trace: list[tuple[float, float]] = []
             start_pos = getattr(env, "current_position", None)
@@ -422,6 +427,7 @@ def train(
             while not done:
                 action = agent.take_action(state)
                 next_state, reward, done, info = env.step(action)
+                next_state = normalizer(next_state)
                 global_step += 1
 
                 pos_sample = getattr(env, "current_position", None)

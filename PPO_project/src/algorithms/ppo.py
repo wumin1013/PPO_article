@@ -91,12 +91,12 @@ class PolicyNetContinuous(nn.Module):
         
         # 角速度分支
         angle_feat = F.selu(self.angle_fc(x))
-        angle_mu = self.angle_mu(angle_feat)
+        angle_mu = torch.tanh(self.angle_mu(angle_feat))
         angle_std = F.softplus(self.angle_std(angle_feat)) + 1e-3
         
         # 线速度分支
         speed_feat = F.selu(self.speed_fc(x))
-        speed_mu = torch.sigmoid(self.speed_mu(speed_feat))
+        speed_mu = torch.tanh(self.speed_mu(speed_feat))
         speed_std = F.softplus(self.speed_std(speed_feat)) + 1e-3
         
         mu = torch.cat([angle_mu, speed_mu], dim=1)
@@ -194,11 +194,6 @@ class PPOContinuous:
                                   dtype=torch.float).to(self.device)
         dones = torch.tensor(transition_dict['dones'], 
                             dtype=torch.float).view(-1, 1).to(self.device)
-        
-        # 奖励标准化
-        if rewards.std() > 1e-6:
-            normalized_rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
-            rewards = torch.clamp(normalized_rewards, min=-5.0, max=5.0)
         
         # 计算TD目标和优势函数
         td_target = rewards + self.gamma * self.critic(next_states) * (1 - dones)

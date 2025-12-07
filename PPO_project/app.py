@@ -1,4 +1,5 @@
 import os
+import signal
 import sys
 import subprocess
 from datetime import datetime
@@ -31,6 +32,46 @@ CONFIG_OPTIONS: Dict[str, Path] = {
 }
 
 st.set_page_config(page_title="Trajectory Master Dashboard", layout="wide")
+
+
+def init_session_state() -> None:
+    """Initialize session state for multi-process tracking."""
+    st.session_state.setdefault("running_processes", [])
+    if "last_launch" in st.session_state:
+        st.session_state.pop("last_launch")
+
+
+def _trigger_rerun() -> None:
+    rerun = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
+    if rerun:
+        rerun()
+
+
+def _remove_process(pid: str) -> None:
+    st.session_state["running_processes"] = [p for p in st.session_state.get("running_processes", []) if p.get("pid") != pid]
+
+
+def kill_process(pid_value: str) -> None:
+    """Terminate a running process by PID and remove it from session state."""
+    if not pid_value:
+        return
+    init_session_state()
+    try:
+        pid = int(pid_value)
+    except ValueError:
+        st.error(f"无法解析 PID: {pid_value}")
+        return
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        st.warning(f"进程 {pid} 已不存在，已从列表中移除。")
+    except Exception as exc:  # pragma: no cover - defensive UI path
+        st.error(f"终止任务失败: {exc}")
+        return
+
+    _remove_process(str(pid))
+    _trigger_rerun()
 
 
 def generate_experiment_name(trajectory_label: str, disable_kcm: bool, disable_smooth: bool) -> str:
@@ -138,13 +179,15 @@ def launch_training_process(
         st.error(f"启动训练失败: {exc}")
         return None
 
+    init_session_state()
     launch_info = {
         "pid": str(process.pid),
         "cmd": format_command(cmd),
         "experiment_dir": str(experiment_dir),
         "experiment_name": experiment_name,
+        "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
     }
-    st.session_state["last_launch"] = launch_info
+    st.session_state["running_processes"].append(launch_info)
     st.session_state["experiment_name_user_edit"] = True
     st.success(f"已启动训练进程 (PID: {process.pid})")
     return launch_info
@@ -417,6 +460,23 @@ def _make_motion_fig(trace: Dict[str, List[float]], kcm_cfg: dict):
     return fig
 
 
+def render_sidebar_process_manager() -> None:
+    st.sidebar.subheader("进行中任务 · Running Tasks")
+    processes = st.session_state.get("running_processes", [])
+    if not processes:
+        st.sidebar.caption("暂无运行中的训练。")
+        return
+
+    for idx, proc in enumerate(list(processes)):
+        pid = proc.get("pid", "?")
+        exp_name = proc.get("experiment_name", "Unknown")
+        with st.sidebar.expander(f"{exp_name} · PID {pid}", expanded=False):
+            st.caption(f"启动时间: {proc.get('start_time', '未知')}")
+            st.caption(f"命令: {proc.get('cmd', '')}")
+            if st.button("终止任务 (Kill)", key=f"kill_{pid}_{idx}", type="secondary"):
+                kill_process(str(pid))
+
+
 def render_training_ops() -> None:
     st.header("模式 A · Training Ops")
     st.markdown("面向任务的实验向导 + 异步训练发射 + 被动监控。")
@@ -449,14 +509,15 @@ def render_training_ops() -> None:
                 force_gpu=force_gpu,
             )
 
-    if "last_launch" in st.session_state:
-        last = st.session_state["last_launch"]
+    running = st.session_state.get("running_processes", [])
+    if running:
+        latest = running[-1]
         st.info(
-            f"任务运行中 (PID: {last.get('pid')}) · 实验目录: {last.get('experiment_dir')}\n\n"
-            f"命令: `{last.get('cmd')}`"
+            f"最近启动: {latest.get('experiment_name')} (PID: {latest.get('pid')}) · "
+            f"实验目录: {latest.get('experiment_dir')}\n\n命令: `{latest.get('cmd')}`"
         )
-        default_exp = last.get("experiment_name")
-        default_run = Path(last["experiment_dir"]) if last.get("experiment_dir") else None
+        default_exp = latest.get("experiment_name")
+        default_run = Path(latest["experiment_dir"]) if latest.get("experiment_dir") else None
     else:
         default_exp, default_run = None, None
 
@@ -481,22 +542,26 @@ def render_paper_mode() -> None:
         if not target_model.exists():
             st.error(f"模型不存在: {target_model}")
             return
-        with st.spinner("评估中..."):
-            config, cfg_path = _load_effective_config(target_model)
-            env = _build_env(config, device)
-            agent = _build_agent(config, env, device)
-            _load_checkpoint(agent, target_model, device)
+        try:
+            with st.spinner("评估中..."):
+                config, cfg_path = _load_effective_config(target_model)
+                env = _build_env(config, device)
+                agent = _build_agent(config, env, device)
+                _load_checkpoint(agent, target_model, device)
 
-            metrics_list: List[dict] = []
-            sample_trace: Optional[Dict[str, List[float]]] = None
-            for _ in range(int(runs)):
-                metrics, trace = _rollout_episode(env, agent)
-                metrics_list.append(metrics)
-                if sample_trace is None:
-                    sample_trace = trace
+                metrics_list: List[dict] = []
+                sample_trace: Optional[Dict[str, List[float]]] = None
+                for _ in range(int(runs)):
+                    metrics, trace = _rollout_episode(env, agent)
+                    metrics_list.append(metrics)
+                    if sample_trace is None:
+                        sample_trace = trace
 
-            summary = _summarize_metrics(metrics_list)
-            latex_text = _latex_table(summary)
+                summary = _summarize_metrics(metrics_list)
+                latex_text = _latex_table(summary)
+        except Exception as exc:  # pragma: no cover - UI error path
+            st.error(f"模型文件损坏或不匹配: {exc}")
+            return
 
         st.subheader("统计汇总")
         st.write(pd.DataFrame(summary).T.rename(columns={"mean": "Mean", "std": "Std"}))
@@ -547,7 +612,9 @@ def render_paper_mode() -> None:
 
 
 def main() -> None:
+    init_session_state()
     mode = st.sidebar.radio("选择模式", ["Training Ops", "Paper Mode"], index=0)
+    render_sidebar_process_manager()
     if mode == "Training Ops":
         render_training_ops()
     else:

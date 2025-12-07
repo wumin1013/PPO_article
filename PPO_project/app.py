@@ -260,7 +260,90 @@ def render_training_monitor(default_exp: Optional[str] = None, default_run: Opti
     fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["critic_loss"], name="Critic Loss", line=dict(color="#d62728")), row=1, col=2)
     fig.update_layout(height=420, margin=dict(l=20, r=20, t=40, b=20), legend=dict(orientation="h"))
     st.plotly_chart(fig, use_container_width=True)
+    latest_episode_idx = int(df["episode_idx"].iloc[-1]) if "episode_idx" in df.columns else None
     st.dataframe(df.tail(15), use_container_width=True)
+    render_realtime_trajectory(run_dir, latest_episode_idx)
+
+
+def render_realtime_trajectory(run_dir: Path, latest_episode: Optional[int] = None) -> None:
+    traj_path = run_dir / "logs" / "latest_trajectory.csv"
+    config_path = run_dir / "config.yaml"
+
+    if not traj_path.exists():
+        st.info("等待数据同步：latest_trajectory.csv 尚未生成。")
+        return
+    if not config_path.exists():
+        st.info("未找到 config.yaml，无法绘制参考路径与允差带。")
+        return
+
+    st.divider()
+    st.subheader(f"最新回合轨迹 (Episode {latest_episode})" if latest_episode is not None else "最新回合轨迹")
+
+    try:
+        traj_df = pd.read_csv(traj_path)
+        if traj_df.empty or not {"x", "y"}.issubset(traj_df.columns):
+            st.info("轨迹文件为空或缺少 x,y 列，等待下一次更新。")
+            return
+
+        saved_config, _ = load_config(str(config_path))
+        dummy_env = _build_env(saved_config, torch.device("cpu"))
+        dummy_env.reset()  # 触发边界计算
+
+        pl = _clean_boundary(dummy_env.cache.get("Pl", [])) if hasattr(dummy_env, "cache") else []
+        pr = _clean_boundary(dummy_env.cache.get("Pr", [])) if hasattr(dummy_env, "cache") else []
+        ref_points = getattr(dummy_env, "Pm", [])
+
+        traj_fig = go.Figure()
+        if pl and pr:
+            band_x = [p[0] for p in pl] + [p[0] for p in pr][::-1]
+            band_y = [p[1] for p in pl] + [p[1] for p in pr][::-1]
+            traj_fig.add_trace(
+                go.Scatter(
+                    x=band_x,
+                    y=band_y,
+                    fill="toself",
+                    fillcolor="rgba(44,160,44,0.15)",
+                    line=dict(color="rgba(0,0,0,0)"),
+                    name="Tolerance Tube",
+                    hoverinfo="skip",
+                )
+            )
+
+        if ref_points is not None and len(ref_points):
+            ref_x = [p[0] for p in ref_points]
+            ref_y = [p[1] for p in ref_points]
+            traj_fig.add_trace(
+                go.Scatter(
+                    x=ref_x,
+                    y=ref_y,
+                    mode="lines",
+                    name="Reference",
+                    line=dict(dash="dash", color="blue", width=1),
+                )
+            )
+
+        traj_fig.add_trace(
+            go.Scatter(
+                x=traj_df["x"],
+                y=traj_df["y"],
+                mode="lines",
+                name="Actual",
+                line=dict(color="#e45756", width=2.5),
+            )
+        )
+
+        traj_fig.update_layout(
+            height=550,
+            title="Real-time Trajectory Visualization",
+            xaxis_title="X (m)",
+            yaxis_title="Y (m)",
+            yaxis=dict(scaleanchor="x", scaleratio=1),
+            legend=dict(orientation="h", y=1.1),
+            margin=dict(l=10, r=10, t=50, b=10),
+        )
+        st.plotly_chart(traj_fig, use_container_width=True)
+    except Exception as e:  # pragma: no cover - UI 防御
+        st.warning(f"可视化渲染挂起 (数据同步中...): {e}")
 
 
 def _load_effective_config(model_path: Path) -> Tuple[dict, Path]:

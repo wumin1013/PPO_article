@@ -31,7 +31,22 @@ CONFIG_OPTIONS: Dict[str, Path] = {
     "Butterfly Curve (蝴蝶曲线)": CONFIG_DIR / "butterfly.yaml",
 }
 
+KCM_FIELDS: List[Tuple[str, str, str]] = [
+    ("MAX_VEL", "max_vel", "Max Velocity (线速度)"),
+    ("MAX_ACC", "max_acc", "Max Acceleration (线加速度)"),
+    ("MAX_JERK", "max_jerk", "Max Jerk (线跃度)"),
+    ("MAX_ANG_VEL", "max_ang_vel", "Max Angular Velocity (角速度)"),
+    ("MAX_ANG_ACC", "max_ang_acc", "Max Angular Acceleration (角加速度)"),
+    ("MAX_ANG_JERK", "max_ang_jerk", "Max Angular Jerk (角跃度)"),
+]
+
 st.set_page_config(page_title="Trajectory Master Dashboard", layout="wide")
+
+
+@st.cache_data(show_spinner=False)
+def _load_kcm_defaults(config_path: str, mtime: float) -> Dict[str, float]:
+    config, _ = load_config(config_path)
+    return config.get("kinematic_constraints", {})
 
 
 def init_session_state() -> None:
@@ -74,7 +89,7 @@ def kill_process(pid_value: str) -> None:
     _trigger_rerun()
 
 
-def generate_experiment_name(trajectory_label: str, disable_kcm: bool, disable_smooth: bool) -> str:
+def generate_experiment_name(trajectory_label: str, disable_kcm: bool, disable_smooth: bool, customized: bool = False) -> str:
     safe_label = trajectory_label.split("(")[0].strip().replace(" ", "_").replace("-", "_")
     tags: List[str] = []
     if disable_kcm:
@@ -82,7 +97,8 @@ def generate_experiment_name(trajectory_label: str, disable_kcm: bool, disable_s
     if disable_smooth:
         tags.append("NoSmooth")
     tag = "_".join(tags) if tags else "Full"
-    return f"exp_{safe_label}_{tag}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    base = f"exp_{safe_label}_{tag}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    return f"{base}_Custom" if customized else base
 
 
 def ensure_experiment_name(auto_name: str) -> str:
@@ -140,6 +156,7 @@ def launch_training_process(
     disable_smooth: bool,
     resume_path: str,
     force_gpu: bool,
+    kcm_overrides: Optional[Dict[str, float]] = None,
 ) -> Optional[Dict[str, str]]:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_dir = SAVED_MODELS_DIR / experiment_name / timestamp
@@ -161,6 +178,10 @@ def launch_training_process(
         cmd.extend(["--use_smoothness_reward", "False"])
     if resume_path:
         cmd.extend(["--resume", resume_path])
+    if kcm_overrides:
+        for arg_name, value in kcm_overrides.items():
+            if value is not None:
+                cmd.extend([f"--{arg_name}", str(value)])
 
     env = os.environ.copy()
     if force_gpu:
@@ -406,6 +427,38 @@ def _latex_table(summary: Dict[str, Dict[str, float]]) -> str:
     return "\n".join(lines)
 
 
+def _render_kcm_tuner(config_path: Path) -> Tuple[Dict[str, float], bool]:
+    defaults: Dict[str, float] = {}
+    try:
+        mtime = config_path.stat().st_mtime
+        defaults = _load_kcm_defaults(str(config_path), mtime)
+    except FileNotFoundError:
+        st.warning(f"配置文件不存在: {config_path}")
+    except Exception as exc:  # pragma: no cover - UI防御
+        st.warning(f"读取配置失败: {exc}")
+
+    kcm_values: Dict[str, float] = {}
+    is_custom = False
+
+    with st.expander("Step 3 · 运动学参数微调", expanded=False):
+        st.caption("覆盖 YAML 中的运动学约束，发射时通过 CLI 透传到 main.py。")
+        for cfg_key, arg_name, label in KCM_FIELDS:
+            base_value = float(defaults.get(cfg_key, 0.0))
+            input_value = st.number_input(
+                label,
+                min_value=0.0,
+                value=base_value,
+                step=0.1,
+                format="%.4f",
+                key=f"kcm_{config_path.name}_{arg_name}",
+            )
+            kcm_values[arg_name] = float(input_value)
+            if not is_custom and abs(float(input_value) - base_value) > 1e-9:
+                is_custom = True
+
+    return kcm_values, is_custom
+
+
 def _clean_boundary(boundary: List) -> List[Tuple[float, float]]:
     cleaned: List[Tuple[float, float]] = []
     for item in boundary:
@@ -486,14 +539,16 @@ def render_training_ops() -> None:
     disable_kcm = col2.checkbox("Disable KCM (禁用运动学约束)", value=False)
     disable_smooth = col2.checkbox("Disable Smoothness Reward (禁用平滑奖励)", value=False)
 
-    auto_name = generate_experiment_name(trajectory_label, disable_kcm, disable_smooth)
+    config_path = CONFIG_OPTIONS[trajectory_label]
+    kcm_overrides, is_custom_kcm = _render_kcm_tuner(config_path)
+
+    auto_name = generate_experiment_name(trajectory_label, disable_kcm, disable_smooth, customized=is_custom_kcm)
     exp_name = ensure_experiment_name(auto_name)
 
     with st.expander("Step 4 · 高级选项"):
         resume_path = st.text_input("Resume Checkpoint (.pth)", value="")
         force_gpu = st.checkbox("Force GPU (CUDA_VISIBLE_DEVICES)", value=False)
 
-    config_path = CONFIG_OPTIONS[trajectory_label]
     st.caption(f"配置映射: {trajectory_label} -> {config_path}")
 
     if st.button("🚀 Launch Training", type="primary"):
@@ -507,6 +562,7 @@ def render_training_ops() -> None:
                 disable_smooth=disable_smooth,
                 resume_path=resume_path.strip(),
                 force_gpu=force_gpu,
+                kcm_overrides=kcm_overrides,
             )
 
     running = st.session_state.get("running_processes", [])

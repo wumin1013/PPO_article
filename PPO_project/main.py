@@ -64,6 +64,7 @@ def apply_cli_overrides(config: dict, overrides: Optional[argparse.Namespace]) -
 
     experiment_cfg = config.setdefault("experiment", {})
     reward_cfg = config.setdefault("reward_weights", {})
+    kcm_cfg = config.setdefault("kinematic_constraints", {})
 
     if getattr(overrides, "experiment_name", None):
         experiment_cfg["name"] = overrides.experiment_name
@@ -78,6 +79,21 @@ def apply_cli_overrides(config: dict, overrides: Optional[argparse.Namespace]) -
         experiment_cfg["use_smoothness_reward"] = bool(overrides.use_smoothness_reward)
         if not overrides.use_smoothness_reward:
             reward_cfg["w_action_smooth"] = 0.0
+
+    kcm_override_map = {
+        "max_vel": "MAX_VEL",
+        "max_acc": "MAX_ACC",
+        "max_jerk": "MAX_JERK",
+        "max_ang_vel": "MAX_ANG_VEL",
+        "max_ang_acc": "MAX_ANG_ACC",
+        "max_ang_jerk": "MAX_ANG_JERK",
+    }
+
+    for arg_name, cfg_key in kcm_override_map.items():
+        cli_value = getattr(overrides, arg_name, None)
+        if cli_value is not None:
+            kcm_cfg[cfg_key] = float(cli_value)
+            print(f"[CLI Override] {cfg_key} <- {cli_value}")
 
 
 def _resolve_experiment_category(experiment_config: Mapping, experiment_mode: str) -> str:
@@ -721,6 +737,12 @@ if __name__ == "__main__":
         default=None,
         help="覆盖配置，控制是否启用平滑奖励项",
     )
+    parser.add_argument("--max_vel", type=float, default=None, help="覆盖最大线速度 (MAX_VEL)")
+    parser.add_argument("--max_acc", type=float, default=None, help="覆盖最大线加速度 (MAX_ACC)")
+    parser.add_argument("--max_jerk", type=float, default=None, help="覆盖最大线跃度 (MAX_JERK)")
+    parser.add_argument("--max_ang_vel", type=float, default=None, help="覆盖最大角速度 (MAX_ANG_VEL)")
+    parser.add_argument("--max_ang_acc", type=float, default=None, help="覆盖最大角加速度 (MAX_ANG_ACC)")
+    parser.add_argument("--max_ang_jerk", type=float, default=None, help="覆盖最大角跃度 (MAX_ANG_JERK)")
 
     args = parser.parse_args()
 

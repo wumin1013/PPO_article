@@ -6,7 +6,7 @@ environment:
   epsilon: 1.5              # 总带宽(m) - 放宽走廊以允许内切
   interpolation_period: 0.1 # 插值周期(s)
   max_steps: 4000           # 最大步数，避免长路径未完成
-  lookahead_points: 20      # 观测空间中的前瞻路径点数量
+  lookahead_points: 8       # 观测空间中的前瞻路径点数量（减小维度，扩大采样间隔）
 
 # 运动学约束参数 (KCM模块)
 kinematic_constraints:
@@ -24,6 +24,7 @@ kinematic_constraints:
 reward_weights:
   w_velocity: 1.0           # 安全区速度驱动
   w_progress: 2.0           # 前进奖励
+  w_heading_align: 1.5      # 航向对齐奖励
   w_e: 0.5                  # 走廊缓冲惩罚
   w_action_smooth: 0.5      # 动作平滑惩罚
   w_kcm_penalty: 1.5        # KCM干预惩罚

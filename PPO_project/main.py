@@ -203,6 +203,31 @@ def _write_latest_trajectory(logs_dir: Path, trajectory_points: Sequence[Sequenc
             pass
 
 
+def _write_trajectory_to_file(file_path: Path, trajectory_points: Sequence[Sequence[float]]) -> None:
+    """保存轨迹快照到指定文件（用于持久化存储）。"""
+    rows = []
+    for point in trajectory_points:
+        if not point or len(point) < 2:
+            continue
+        try:
+            x, y = point
+            rows.append((float(x), float(y)))
+        except Exception:
+            continue
+
+    if not rows:
+        return
+
+    file_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with file_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["x", "y"])
+            writer.writerows(rows)
+    except Exception as exc:
+        print(f"写入轨迹快照 {file_path.name} 失败: {exc}")
+
+
 def _build_path(path_config: dict) -> list[np.ndarray]:
     """根据配置生成参考路径。"""
     if path_config["type"] == "waypoints":
@@ -515,9 +540,8 @@ def train(
                 wall_time=time.perf_counter() - wall_time_start,
             )
 
-            should_dump_trace = (episode + 1) % log_interval == 0 or (episode + 1) == num_episodes
-            if should_dump_trace:
-                _write_latest_trajectory(manager.logs_dir, current_episode_trace)
+            # 每回合都更新latest_trajectory.csv以实现实时显示（覆盖写入，不占额外空间）
+            _write_latest_trajectory(manager.logs_dir, current_episode_trace)
 
             eval_reward = smoothed_rewards[-1] if smoothed_rewards else episode_reward
             if hasattr(agent, "actor") and eval_reward > best_eval_reward:
@@ -529,6 +553,9 @@ def train(
                     global_step=global_step,
                     config=config,
                 )
+                # 保存最佳模型对应的轨迹快照
+                best_traj_path = manager.logs_dir / f"best_trajectory_ep{episode+1}.csv"
+                _write_trajectory_to_file(best_traj_path, current_episode_trace)
                 print(f"发现更优模型: eval_reward={eval_reward:.2f}, 保存到 {best_path}")
 
             if (episode + 1) % log_interval == 0:

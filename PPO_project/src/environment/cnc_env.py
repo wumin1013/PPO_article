@@ -73,8 +73,8 @@ class Env:
         self.trajectory = []
         self.trajectory_states = []
         self.action_space = gym.spaces.Box(
-            low=np.array([-self.MAX_ANG_VEL, 0.0], dtype=np.float32),
-            high=np.array([self.MAX_ANG_VEL, self.MAX_VEL], dtype=np.float32),
+            low=np.array([-1.0, 0.0], dtype=np.float32),
+            high=np.array([1.0, 1.0], dtype=np.float32),
             dtype=np.float32,
         )
 
@@ -362,18 +362,22 @@ class Env:
         # 角运动约束处
         prev_ang_vel = self.angular_vel
         prev_ang_acc = self.angular_acc
-        #解包动作
-        theta_prime, length_prime = action
-        
-        # === 保存网络输出的原始意图（raw intent===
-        raw_angular_vel_intent = theta_prime  # 网络输出的原始角速度意图
-        raw_linear_vel_intent = length_prime  # 网络输出的原始线速度意图
-        
-        # 使用Numba优化的约束计
+
+        norm_action = np.array(action, dtype=float).flatten()
+        norm_theta = float(norm_action[0]) if norm_action.size > 0 else 0.0
+        norm_length = float(norm_action[1]) if norm_action.size > 1 else 0.0
+
+        # 归一化动作映射回物理量级
+        norm_theta = np.clip(norm_theta, -1.0, 1.0)
+        norm_length = np.clip(norm_length, 0.0, 1.0)
+        raw_angular_vel_intent = norm_theta * self.MAX_ANG_VEL
+        raw_linear_vel_intent = norm_length * self.MAX_VEL
+
+        # 使用Numba优化的约束计算
         (self.velocity, self.acceleration, self.jerk,
          self.angular_vel, self.angular_acc, self.angular_jerk) = apply_kinematic_constraints(
             prev_vel, prev_acc, prev_ang_vel, prev_ang_acc,
-            length_prime, theta_prime, self.interpolation_period,
+            raw_linear_vel_intent, raw_angular_vel_intent, self.interpolation_period,
             self.MAX_VEL, self.MAX_ACC, self.MAX_JERK,
             self.MAX_ANG_VEL, self.MAX_ANG_ACC, self.MAX_ANG_JERK
         )
@@ -387,6 +391,7 @@ class Env:
         # 构建最终安全动
         safe_action = (self.angular_vel, self.velocity)  # final_vel是线速度
         next_state = self.apply_action(safe_action)
+        self.state = next_state
         self.trajectory_states.append(next_state)
         
         # 更新误差历史
@@ -404,12 +409,11 @@ class Env:
             "step": self.current_step,
             "contour_error": self.get_contour_error(self.current_position),
             "segment_idx": self.current_segment_idx,
-            "progress": next_state[4],  # 添加进度信息
+            "progress": self.state[4],  # 添加进度信息
             "jerk": self.jerk,  # 添加当前捷度指标
             "kcm_intervention": self.kcm_intervention,  # 添加运动学约束干预程度
         }
-        normalized_state = self.normalize_state(next_state)
-        self.state = next_state
+        normalized_state = self.normalize_state(self.state)
         return normalized_state, reward, done, info
     
     def normalize_state(self, state):
@@ -779,37 +783,25 @@ class Env:
     
     def calculate_reward(self):
         contour_error = self.get_contour_error(self.current_position)
+        progress = float(self.state[4]) if len(self.state) > 4 else 0.0
+        heading_error = abs(self.state[2]) if len(self.state) > 2 else abs(self.calculate_direction_deviation(self.current_position))
+        end_point = np.array(self.Pm[-1])
+        end_distance = float(np.linalg.norm(self.current_position - end_point))
+        lap_done = self.lap_completed or getattr(self, "reached_target", False)
 
-        # 致死惩罚：越界立即重罚，迫使智能体在容差带内切弯
-        if contour_error > self.half_epsilon:
-            self.last_reward_components = {
-                "lethal_penalty": -100.0,
-                "contour_error": contour_error,
-            }
-            return -100.0
-
-        # 核心奖励：分段自适应逻辑（入弯控速、出弯弹射、直线贴边）
-        segment_reward = self._calculate_segment_adaptive_reward()
-
-        # 基础进度奖励：鼓励持续向前推进
-        progress = (
-            self._calculate_closed_path_progress(self.current_position)
-            if self.closed
-            else self._calculate_path_progress(self.current_position)
+        reward, components = self.reward_calculator.calculate_reward(
+            contour_error=contour_error,
+            progress=progress,
+            velocity=self.velocity,
+            action=(self.angular_vel, self.velocity),
+            heading_error=heading_error,
+            kcm_intervention=self.kcm_intervention,
+            end_distance=end_distance,
+            lap_completed=lap_done,
         )
-        progress_reward = 5.0 * progress
 
-        # KCM 干预惩罚：约束越多，奖励越低
-        kcm_penalty = -2.0 * self.kcm_intervention
-
-        total_reward = segment_reward + progress_reward + kcm_penalty
-        self.last_reward_components = {
-            "segment_adaptive": segment_reward,
-            "progress": progress_reward,
-            "kcm_penalty": kcm_penalty,
-            "contour_error": contour_error,
-        }
-        return total_reward
+        self.last_reward_components = components
+        return reward
 
     def _calculate_segment_adaptive_reward(self):
         """根据路径段类型计算自适应奖励，加强直线段跟踪精度"""

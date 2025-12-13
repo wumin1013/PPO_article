@@ -119,6 +119,7 @@ class PPOContinuous:
                  eps: float,
                  gamma: float,
                  device: torch.device,
+                 ent_coef: float = 0.0,
                  observation_space=None,
                  action_space=None):
         """
@@ -134,6 +135,7 @@ class PPOContinuous:
             epochs: 每次更新的epoch数
             eps: PPO clip参数
             gamma: 折扣因子
+            ent_coef: 熵权重系数
             device: 计算设备
             observation_space: 可选的观测空间，用于自动推断输入维度
             action_space: 可选的动作空间，用于自动推断输出维度
@@ -163,6 +165,7 @@ class PPOContinuous:
         self.eps = eps
         self.device = device
         self.max_grad_norm = 0.5
+        self.ent_coef = ent_coef
         
         # 学习率调度器
         self.actor_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -219,10 +222,8 @@ class PPOContinuous:
             action_dists = torch.distributions.Normal(mu, std)
             log_probs = action_dists.log_prob(actions)
             
-            # 熵正则化
-            angle_entropy = action_dists.entropy()[:, 0].mean() * 0.01
-            speed_entropy = action_dists.entropy()[:, 1].mean() * 0.01
-            total_entropy = angle_entropy + speed_entropy
+            # 熵正则化（系数由配置控制，默认压制探索）
+            entropy_bonus = action_dists.entropy().sum(dim=1).mean() * self.ent_coef
             
             # 计算概率比
             log_ratio = log_probs.sum(dim=1, keepdim=True) - old_log_probs.sum(dim=1, keepdim=True)
@@ -235,7 +236,7 @@ class PPOContinuous:
             
             # Actor损失
             policy_loss = -torch.min(surr1, surr2).mean()
-            actor_loss = policy_loss - total_entropy
+            actor_loss = policy_loss - entropy_bonus
             actor_loss = torch.clamp(actor_loss, min=-10.0, max=10.0)
             
             # Critic损失

@@ -4,21 +4,21 @@
 # 环境配置
 environment:
   epsilon: 1.5              # 总带宽(m) - 放宽走廊以允许内切
-  interpolation_period: 0.1 # 插值周期(s)
+  interpolation_period: 0.01 # 插值周期(s)，与单文件脚本对齐
   max_steps: 4000           # 最大步数，避免长路径未完成
   lookahead_points: 8       # 观测空间中的前瞻路径点数量（减小维度，扩大采样间隔）
 
 # 运动学约束参数 (KCM模块)
 kinematic_constraints:
   # 线性运动约束
-  MAX_VEL: 0.5              # 最大线速度 (m/s)
-  MAX_ACC: 5.0              # 最大线加速度 (m/s²)
-  MAX_JERK: 100.0           # 最大线捷度 (m/s³)
+  MAX_VEL: 1000.0           # 最大线速度 (m/s)
+  MAX_ACC: 5000.0           # 最大线加速度 (m/s²)
+  MAX_JERK: 50000.0         # 最大线捷度 (m/s³)
   
   # 角运动约束
-  MAX_ANG_VEL: 1.5          # 最大角速度 (rad/s)
-  MAX_ANG_ACC: 3.0          # 最大角加速度 (rad/s²)
-  MAX_ANG_JERK: 5.0         # 最大角捷度 (rad/s³)
+  MAX_ANG_VEL: 6.283185307179586          # 最大角速度 (rad/s) = 2π
+  MAX_ANG_ACC: 31.41592653589793          # 最大角加速度 (rad/s²) = 10π
+  MAX_ANG_JERK: 314.1592653589793         # 最大角捷度 (rad/s³) = 100π
 
 # 奖励函数权重
 reward_weights:
@@ -33,14 +33,15 @@ reward_weights:
 
 # PPO算法参数
 ppo:
-  actor_lr: 0.0001          # Actor学习率
-  critic_lr: 0.001          # Critic学习率
-  hidden_dim: 128           # 隐藏层维度
+  actor_lr: 0.00001         # Actor学习率（与单文件脚本一致）
+  critic_lr: 0.00005        # Critic学习率（与单文件脚本一致）
+  hidden_dim: 512           # 隐藏层维度（与单文件脚本一致）
   gamma: 0.99               # 折扣因子
   lmbda: 0.95               # GAE参数
   epochs: 10                # 每次更新的epoch数
-  eps: 0.2                  # PPO clip参数
-  batch_size: 256           # 批次大小
+  eps: 0.1                  # PPO clip参数（与单文件脚本一致）
+  batch_size: null          # 单文件脚本未使用分批采样，沿用全轨迹更新
+  ent_coef: 0.0             # 熵权重，压制随机探索以减少轨迹扭曲
 
 # 训练配置
 training:

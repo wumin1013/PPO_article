@@ -1,6 +1,8 @@
-"""
-绘图与字体配置工具。
-"""
+"""绘图与字体配置及实时可视化工具。"""
+from __future__ import annotations
+
+from typing import Iterable, Optional, Sequence
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
@@ -35,6 +37,70 @@ def _get_boundary(env, key: str):
         return getattr(env, key)
     cache = getattr(env, "cache", {})
     return cache.get(key, [])
+
+
+class TrajectoryPlotter:
+    """交互式轨迹绘图器，用于训练时的实时刷新。"""
+
+    def __init__(self, title: str = "Trajectory Tracking", pause: float = 0.01) -> None:
+        configure_chinese_font()
+        plt.ion()
+        self.pause = pause
+        self.fig, self.ax = plt.subplots(figsize=(8, 6), dpi=100)
+        self.ref_line, = self.ax.plot([], [], "k--", linewidth=1.5, label="Reference Path")
+        self.traj_line, = self.ax.plot([], [], "r-", linewidth=1.5, label="Actual Trajectory")
+        self.left_line, = self.ax.plot([], [], "g--", linewidth=1.2, alpha=0.6, label="Left Boundary")
+        self.right_line, = self.ax.plot([], [], "b--", linewidth=1.2, alpha=0.6, label="Right Boundary")
+        self.sample_scatter = self.ax.scatter([], [], c="purple", s=25, alpha=0.6, edgecolor="white", label="Samples")
+        self.ax.set_xlabel("X Coordinate")
+        self.ax.set_ylabel("Y Coordinate")
+        self.ax.set_title(title)
+        self.ax.grid(True, linestyle=":", alpha=0.4)
+        self.ax.legend(loc="upper left", framealpha=0.9)
+
+    def _set_line(self, line, data: np.ndarray) -> None:
+        if data.size == 0:
+            line.set_data([], [])
+        else:
+            line.set_data(data[:, 0], data[:, 1])
+
+    def _set_samples(self, trajectory: np.ndarray) -> None:
+        if trajectory.size == 0:
+            self.sample_scatter.set_offsets(np.empty((0, 2)))
+            return
+        step = max(1, len(trajectory) // 200)
+        sampled = trajectory[::step]
+        self.sample_scatter.set_offsets(sampled[:, :2])
+
+    def update(
+        self,
+        reference_path: Optional[Iterable[Sequence[float]]] = None,
+        trajectory: Optional[Iterable[Sequence[float]]] = None,
+        left_boundary: Optional[Iterable[Sequence[float]]] = None,
+        right_boundary: Optional[Iterable[Sequence[float]]] = None,
+    ) -> None:
+        """非阻塞刷新绘图，避免卡死。"""
+        ref = _clean_path(reference_path)
+        traj = _clean_path(trajectory)
+        left = _clean_path(left_boundary)
+        right = _clean_path(right_boundary)
+
+        self._set_line(self.ref_line, ref)
+        self._set_line(self.traj_line, traj)
+        self._set_line(self.left_line, left)
+        self._set_line(self.right_line, right)
+        self._set_samples(traj)
+
+        if traj.size > 0 or ref.size > 0:
+            self.ax.relim()
+            self.ax.autoscale_view()
+
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
+        plt.pause(self.pause)
+
+    def close(self) -> None:
+        plt.close(self.fig)
 
 
 def visualize_final_path(env) -> None:
@@ -108,4 +174,4 @@ def visualize_final_path(env) -> None:
     plt.show()
 
 
-__all__ = ["configure_chinese_font", "visualize_final_path"]
+__all__ = ["configure_chinese_font", "visualize_final_path", "TrajectoryPlotter"]

@@ -19,12 +19,14 @@ import sys
 
 import matplotlib.pyplot as plt
 import matplotlib as mpl
+import matplotlib.font_manager as font_manager
 import numpy as np
 import pandas as pd
 import seaborn as sns
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+SAVED_MODELS_DIR = PROJECT_ROOT / "saved_models"
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.append(str(PROJECT_ROOT))
 
@@ -36,19 +38,75 @@ STYLE_MAP = {
 
 
 def set_academic_style(font: str = "Times New Roman") -> None:
-    mpl.rcParams.update({
-        "font.family": font,
-        "axes.labelsize": 12,
-        "axes.titlesize": 13,
-        "legend.fontsize": 10,
-        "xtick.labelsize": 10,
-        "ytick.labelsize": 10,
-    })
+    available_fonts = {f.name for f in font_manager.fontManager.ttflist}
+    chosen_font = font if font in available_fonts else "DejaVu Sans"
+    if chosen_font != font:
+        print(f"[paper_plotter] Font '{font}' not found, fallback to '{chosen_font}'.")
+
+    mpl.rcParams.update(
+        {
+            "font.family": chosen_font,
+            "axes.labelsize": 12,
+            "axes.titlesize": 13,
+            "legend.fontsize": 10,
+            "xtick.labelsize": 10,
+            "ytick.labelsize": 10,
+        }
+    )
     sns.set_style("whitegrid")
 
 
+def resolve_csv_path(path_str: str) -> Path:
+    path = Path(path_str)
+    if path.is_absolute():
+        return path
+    candidates = [
+        (PROJECT_ROOT / path).resolve(),
+        (SAVED_MODELS_DIR / path).resolve(),
+        (Path(__file__).resolve().parent / path).resolve(),
+    ]
+    for cand in candidates:
+        if cand.exists():
+            return cand
+    return candidates[0]
+
+
+def _ensure_columns(df: pd.DataFrame, label: str) -> pd.DataFrame:
+    fallbacks: Dict[str, List[str]] = {
+        "timestamp": ["step", "env_step", "episode_idx", "wall_time"],
+        "pos_x": ["x", "ref_x"],
+        "pos_y": ["y", "ref_y"],
+        "velocity": ["speed", "mean_velocity"],
+        "acceleration": ["acc", "mean_acceleration"],
+        "jerk": ["mean_jerk"],
+        "contour_error": ["error", "rmse_error"],
+        "kcm_intervention": ["kcm", "mean_kcm_intervention"],
+        "reward": ["total_reward", "episode_reward"],
+    }
+    for target, candidates in fallbacks.items():
+        if target in df.columns:
+            continue
+        for cand in candidates:
+            if cand in df.columns:
+                df[target] = df[cand]
+                print(f"[paper_plotter] '{target}' 缺失，使用备选列 '{cand}' (label={label}).")
+                break
+        else:
+            print(f"[paper_plotter] 警告: 数据缺少列 '{target}' (label={label}).")
+    return df
+
+
 def load_run(csv_path: Path, label: str) -> pd.DataFrame:
-    df = pd.read_csv(csv_path)
+    if not csv_path.exists():
+        print(f"[paper_plotter] CSV not found: {csv_path}")
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(csv_path)
+    except Exception as exc:
+        print(f"[paper_plotter] 读取失败 {csv_path}: {exc}")
+        return pd.DataFrame()
+    print(f"[paper_plotter] Loaded {csv_path}, columns={list(df.columns)}")
+    df = _ensure_columns(df, label)
     df["method"] = label
     try:
         df["reward_components"] = df["reward_components"].apply(json.loads)
@@ -60,6 +118,10 @@ def load_run(csv_path: Path, label: str) -> pd.DataFrame:
 def plot_s_shape_comparison(runs: Dict[str, pd.DataFrame], output_dir: Path) -> None:
     if len(runs) != 3:
         print("Fig8 skipped: need three runs for J-NNC, NNC, Traditional")
+        return
+    required_cols = {"timestamp", "velocity", "acceleration", "jerk"}
+    if not all(required_cols.issubset(df.columns) for df in runs.values()):
+        print("Fig8 skipped: 数据缺少必要列 timestamp/velocity/acceleration/jerk")
         return
     fig, axes = plt.subplots(3, 1, figsize=(8, 9), sharex=True)
     metrics = ["velocity", "acceleration", "jerk"]
@@ -82,8 +144,12 @@ def plot_s_shape_comparison(runs: Dict[str, pd.DataFrame], output_dir: Path) -> 
 
 
 def plot_velocity_heatmap(df: pd.DataFrame, output_dir: Path) -> None:
+    required_cols = {"pos_x", "pos_y", "velocity"}
     if df.empty:
         print("Fig9 skipped: empty dataframe")
+        return
+    if not required_cols.issubset(df.columns):
+        print(f"Fig9 skipped: 缺少列 {required_cols - set(df.columns)}")
         return
     fig, ax = plt.subplots(figsize=(7, 6))
     sc = ax.scatter(
@@ -108,8 +174,12 @@ def plot_velocity_heatmap(df: pd.DataFrame, output_dir: Path) -> None:
 
 
 def plot_kcm_dual_axis(df: pd.DataFrame, output_dir: Path) -> None:
+    required_cols = {"timestamp", "contour_error", "kcm_intervention"}
     if df.empty:
         print("Fig11 skipped: empty dataframe")
+        return
+    if not required_cols.issubset(df.columns):
+        print(f"Fig11 skipped: 缺少列 {required_cols - set(df.columns)}")
         return
     fig, ax1 = plt.subplots(figsize=(7, 4))
     ax2 = ax1.twinx()
@@ -140,10 +210,10 @@ def plot_kcm_dual_axis(df: pd.DataFrame, output_dir: Path) -> None:
 
 def calc_stats(df: pd.DataFrame) -> Dict[str, float]:
     return {
-        "Time": float(df["timestamp"].max() if not df.empty else 0.0),
-        "Max Error": float(df["contour_error"].abs().max() if not df.empty else 0.0),
-        "Mean Error": float(df["contour_error"].abs().mean() if not df.empty else 0.0),
-        "Max Jerk": float(df["jerk"].abs().max() if not df.empty else 0.0),
+        "Time": float(df["timestamp"].max() if "timestamp" in df else 0.0),
+        "Max Error": float(df["contour_error"].abs().max() if "contour_error" in df else 0.0),
+        "Mean Error": float(df["contour_error"].abs().mean() if "contour_error" in df else 0.0),
+        "Max Jerk": float(df["jerk"].abs().max() if "jerk" in df else 0.0),
     }
 
 
@@ -166,7 +236,7 @@ def print_table(config: Dict[str, Dict[str, Path]]) -> None:
 def parse_table_config(config_path: Optional[str]) -> Dict[str, Dict[str, Path]]:
     if not config_path:
         return {}
-    cfg_path = Path(config_path)
+    cfg_path = resolve_csv_path(config_path)
     if not cfg_path.exists():
         print(f"Config not found: {cfg_path}")
         return {}
@@ -204,32 +274,32 @@ def main() -> None:
     runs: Dict[str, pd.DataFrame] = {}
     if args.jncc_csv and args.nnc_csv and args.traditional_csv:
         runs = {
-            "J-NNC": load_run(Path(args.jncc_csv), "J-NNC"),
-            "NNC": load_run(Path(args.nnc_csv), "NNC"),
-            "Traditional": load_run(Path(args.traditional_csv), "Traditional"),
+            "J-NNC": load_run(resolve_csv_path(args.jncc_csv), "J-NNC"),
+            "NNC": load_run(resolve_csv_path(args.nnc_csv), "NNC"),
+            "Traditional": load_run(resolve_csv_path(args.traditional_csv), "Traditional"),
         }
         plot_s_shape_comparison(runs, output_dir)
 
     heatmap_csv = args.heatmap_csv or args.jncc_csv
     if heatmap_csv:
-        plot_velocity_heatmap(load_run(Path(heatmap_csv), "Heatmap"), output_dir)
+        plot_velocity_heatmap(load_run(resolve_csv_path(heatmap_csv), "Heatmap"), output_dir)
 
     fig11_csv = args.fig11_csv or args.jncc_csv
     if fig11_csv:
-        plot_kcm_dual_axis(load_run(Path(fig11_csv), "J-NNC"), output_dir)
+        plot_kcm_dual_axis(load_run(resolve_csv_path(fig11_csv), "J-NNC"), output_dir)
 
     table_cfg = parse_table_config(args.table_config)
     if not table_cfg and args.jncc_csv and args.nnc_csv and args.traditional_csv:
         table_cfg = {
             "s_shape": {
-                "J-NNC": Path(args.jncc_csv),
-                "NNC": Path(args.nnc_csv),
-                "Traditional": Path(args.traditional_csv),
+                "J-NNC": resolve_csv_path(args.jncc_csv),
+                "NNC": resolve_csv_path(args.nnc_csv),
+                "Traditional": resolve_csv_path(args.traditional_csv),
             }
         }
         if args.heatmap_csv and args.heatmap_csv != args.jncc_csv:
             table_cfg["butterfly"] = {
-                "J-NNC": Path(args.heatmap_csv),
+                "J-NNC": resolve_csv_path(args.heatmap_csv),
             }
     print_table(table_cfg)
 

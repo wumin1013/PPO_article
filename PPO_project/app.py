@@ -441,9 +441,9 @@ def render_training_sidebar() -> Dict[str, object]:
     path_override = _render_path_override_form(config, selected_path_type)
 
     col_start, col_stop = st.sidebar.columns(2)
-    if col_start.button("🚀 启动训练 (Start)", use_container_width=True):
+    if col_start.button("🚀 启动训练 (Start)", width='stretch'):
         start_training(config_path, experiment_name, disable_kcm, disable_smooth, kcm_overrides, path_override)
-    if col_stop.button("🛑 停止训练 (Stop)", use_container_width=True):
+    if col_stop.button("🛑 停止训练 (Stop)", width='stretch'):
         stop_training()
 
     active_log_dir = _safe_log_dir(st.session_state.get("log_dir")) or _find_latest_log_dir()
@@ -493,11 +493,11 @@ def render_training_view() -> None:
     with col_left:
         st.markdown("#### Reward & Loss")
         reward_fig = _build_reward_loss_fig(training_df)
-        st.plotly_chart(reward_fig, use_container_width=True)
+        st.plotly_chart(reward_fig, width='stretch')
     with col_right:
         st.markdown("#### Real-time Trajectory")
         traj_fig = _build_trajectory_fig(traj_df, geom)
-        st.plotly_chart(traj_fig, use_container_width=True)
+        st.plotly_chart(traj_fig, width='stretch')
 
     if st.session_state.get("is_training"):
         time.sleep(1)
@@ -743,7 +743,7 @@ def render_paper_view() -> None:
     runs: int = sidebar_state["runs"]
     device_choice: str = sidebar_state["device_choice"]
 
-    if st.sidebar.button("开始批量评估 (Start Evaluation)", use_container_width=True) and model_path:
+    if st.sidebar.button("开始批量评估 (Start Evaluation)", width='stretch') and model_path:
         st.session_state["paper_results"] = None
         with st.spinner("评估中..."):
             try:
@@ -797,7 +797,7 @@ def render_paper_view() -> None:
         return
 
     summary_df = pd.DataFrame(results["summary"]).T.rename(columns={"mean": "Mean", "std": "Std"})
-    st.dataframe(summary_df, use_container_width=True)
+    st.dataframe(summary_df, width='stretch')
     st.text_area("LaTeX 表格", results["latex"], height=140)
     st.caption(f"模型: {results['model_path']} | 配置: {results['config_path']}")
 

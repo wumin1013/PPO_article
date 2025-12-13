@@ -79,14 +79,10 @@ class NNCAgent(PPOContinuous):
         action_dist = torch.distributions.Normal(mu, sigma)
         action = action_dist.sample()
         
-        # 仅进行基础裁剪（不使用KCM的捷度约束）
-        ang_vel = float(action[0, 0].cpu().numpy())
-        lin_vel = float(action[0, 1].cpu().numpy())
-        
-        # 简单裁剪到允许范围
-        ang_vel = np.clip(ang_vel, -self.max_ang_vel, self.max_ang_vel)
-        lin_vel = np.clip(lin_vel, 0.0, self.max_vel)
-        
+        # 仅进行基础裁剪（不使用KCM的捷度约束），输出保持归一化量纲
+        ang_vel = np.clip(float(action[0, 0].cpu().numpy()), -1.0, 1.0)
+        lin_vel = np.clip(float(action[0, 1].cpu().numpy()), 0.0, 1.0)
+
         return [ang_vel, lin_vel]
 
 

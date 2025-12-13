@@ -4,7 +4,6 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
 import copy
 import numpy as np
-import gymnasium as gym
 from torch import nn
 import torch
 import math

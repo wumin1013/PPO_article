@@ -96,7 +96,7 @@ class PolicyNetContinuous(nn.Module):
         
         # 线速度分支
         speed_feat = F.selu(self.speed_fc(x))
-        speed_mu = torch.tanh(self.speed_mu(speed_feat))
+        speed_mu = torch.sigmoid(self.speed_mu(speed_feat))
         speed_std = F.softplus(self.speed_std(speed_feat)) + 1e-3
         
         mu = torch.cat([angle_mu, speed_mu], dim=1)

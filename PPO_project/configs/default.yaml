@@ -3,17 +3,17 @@
 
 # 环境配置
 environment:
-  epsilon: 0.5              # 总带宽(m) - Pl到Pr的距离
+  epsilon: 1.5              # 总带宽(m) - 放宽走廊以允许内切
   interpolation_period: 0.1 # 插值周期(s)
-  max_steps: 3000           # 最大步数
-  lookahead_points: 5       # 观测空间中的前瞻路径点数量
+  max_steps: 4000           # 最大步数，避免长路径未完成
+  lookahead_points: 20      # 观测空间中的前瞻路径点数量
 
 # 运动学约束参数 (KCM模块)
 kinematic_constraints:
   # 线性运动约束
-  MAX_VEL: 1.0              # 最大线速度 (m/s)
-  MAX_ACC: 2.0              # 最大线加速度 (m/s²)
-  MAX_JERK: 3.0             # 最大线捷度 (m/s³)
+  MAX_VEL: 0.5              # 最大线速度 (m/s)
+  MAX_ACC: 5.0              # 最大线加速度 (m/s²)
+  MAX_JERK: 100.0           # 最大线捷度 (m/s³)
   
   # 角运动约束
   MAX_ANG_VEL: 1.5          # 最大角速度 (rad/s)
@@ -22,12 +22,12 @@ kinematic_constraints:
 
 # 奖励函数权重
 reward_weights:
-  w_velocity: 2.0           # 安全区速度驱动
-  w_progress: 1.0           # 前进奖励
-  w_e: 1.2                  # 走廊缓冲惩罚
+  w_velocity: 1.0           # 安全区速度驱动
+  w_progress: 2.0           # 前进奖励
+  w_e: 0.5                  # 走廊缓冲惩罚
   w_action_smooth: 0.5      # 动作平滑惩罚
-  w_kcm_penalty: 0.8        # KCM干预惩罚
-  w_violation: 12.0         # 违规区强惩罚
+  w_kcm_penalty: 1.5        # KCM干预惩罚
+  w_violation: 5.0          # 违规区强惩罚
   w_survival: 0.05          # 存活小奖励
 
 # PPO算法参数
@@ -51,36 +51,31 @@ training:
 
 # 路径定义 (参考路径Pm)
 path:
-  # 路径类型: 'waypoints', 's_shape', 'butterfly', 'lemniscate', 'u_shape', 'star'
-  type: 'waypoints'
+  # 路径类型: 'waypoints', 'line', 'square', 's_shape', 's_shape_bspline'
+  type: 'line'
   
-  # 使用原始U型路径
+  # 自定义路径点（当 type 为 'waypoints' 时使用）
   waypoints:
     - [0.0, 0.0]
     - [10.0, 0.0]
     - [10.0, 10.0]
     - [0.0, 10.0]
     - [0.0, 0.0]
-  closed: true              # 是否为闭合路径
+  closed: false             # 是否为闭合路径
   
   # 参数化路径配置（当type不是'waypoints'时使用）
-  scale: 10.0               # 路径缩放比例
+  scale: 10.0               # 路径缩放比例：line→length，square→side_length
   num_points: 200           # 采样点数量
   
   # S形路径参数
   s_shape:
     amplitude: 5.0          # 振幅
     periods: 2.0            # 周期数
-  
-  # 蝶形路径参数
-  butterfly:
-    sharpness: 1.0          # 尖锐度
-    center: [0.0, 0.0]      # 中心点
-  
-  # 星形路径参数
-  star:
-    inner_radius: 4.0       # 内圆半径
-    star_points: 5          # 星形顶点数
+
+  # B样条S形路径参数
+  s_shape_bspline:
+    control_points: null    # 可选自定义控制点列表
+    smoothing: 0.0          # B样条平滑因子
 
 # 实验模式配置
 experiment:

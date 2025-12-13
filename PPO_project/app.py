@@ -1,11 +1,14 @@
+import base64
+import copy
+import io
 import os
 import signal
-import sys
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -14,6 +17,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 import torch
+import yaml
 
 from main import _build_path, load_config
 from src.algorithms.baselines import NNCAgent
@@ -22,417 +26,70 @@ from src.environment import Env
 from src.utils.logger import DataLogger
 from src.utils.metrics import PaperMetrics
 
+# --------------------------------------------------------------------------------------
+# Constants
+# --------------------------------------------------------------------------------------
 BASE_DIR = Path(__file__).resolve().parent
+ROOT_DIR = BASE_DIR.parent
 CONFIG_DIR = BASE_DIR / "configs"
 SAVED_MODELS_DIR = BASE_DIR / "saved_models"
 MAIN_SCRIPT = BASE_DIR / "main.py"
-AUTO_REFRESH_KEY = "auto_refresh_enabled"
+PYTHON_CMD = ROOT_DIR / "python.cmd"
 
-CONFIG_OPTIONS: Dict[str, Path] = {
-    "S-Shape Curve (S形曲线)": CONFIG_DIR / "s_shape.yaml",
-    "Butterfly Curve (蝴蝶曲线)": CONFIG_DIR / "butterfly.yaml",
+SCENARIOS: Dict[str, Path] = {
+    "Line (直线)": CONFIG_DIR / "default.yaml",
+    "Square (正方形)": CONFIG_DIR / "default.yaml",
+    "S-shape (S形)": CONFIG_DIR / "default.yaml",
 }
 
-KCM_FIELDS: List[Tuple[str, str, str]] = [
-    ("MAX_VEL", "max_vel", "Max Velocity (线速度)"),
-    ("MAX_ACC", "max_acc", "Max Acceleration (线加速度)"),
-    ("MAX_JERK", "max_jerk", "Max Jerk (线跃度)"),
-    ("MAX_ANG_VEL", "max_ang_vel", "Max Angular Velocity (角速度)"),
-    ("MAX_ANG_ACC", "max_ang_acc", "Max Angular Acceleration (角加速度)"),
-    ("MAX_ANG_JERK", "max_ang_jerk", "Max Angular Jerk (角跃度)"),
+PATH_TYPES: List[str] = ["line", "square", "s_shape"]
+
+KCM_FIELDS: List[Tuple[str, str]] = [
+    ("MAX_VEL", "最大线速度 MAX_VEL"),
+    ("MAX_ACC", "最大线加速度 MAX_ACC"),
+    ("MAX_JERK", "最大线跃度 MAX_JERK"),
+    ("MAX_ANG_VEL", "最大角速度 MAX_ANG_VEL"),
+    ("MAX_ANG_ACC", "最大角加速度 MAX_ANG_ACC"),
+    ("MAX_ANG_JERK", "最大角跃度 MAX_ANG_JERK"),
 ]
 
-st.set_page_config(page_title="Trajectory Master Dashboard", layout="wide")
+st.set_page_config(page_title="Trajectory Industrial Dashboard", layout="wide")
 
 
-@st.cache_data(show_spinner=False)
-def _load_kcm_defaults(config_path: str, mtime: float) -> Dict[str, float]:
-    config, _ = load_config(config_path)
-    return config.get("kinematic_constraints", {})
+# --------------------------------------------------------------------------------------
+# Sidebar Utilities
+# --------------------------------------------------------------------------------------
+def ensure_state_defaults() -> None:
+    st.session_state.setdefault("is_training", False)
+    st.session_state.setdefault("train_pid", None)
+    st.session_state.setdefault("log_dir", None)
+    st.session_state.setdefault("config_path", None)
+    st.session_state.setdefault("experiment_name", None)
+    st.session_state.setdefault("paper_results", None)
 
 
-@st.cache_data(ttl=2, show_spinner=False)
-def load_data_safe(path: str, retries: int = 5, delay: float = 0.1, **kwargs) -> pd.DataFrame:
-    """无锁CSV读取：容错+短缓存，避免训练写入时卡死。"""
-    kwargs.setdefault("engine", "python")
-    kwargs.setdefault("on_bad_lines", "skip")
-    last_error: Optional[Exception] = None
-    for _ in range(retries):
-        try:
-            return pd.read_csv(path, **kwargs)
-        except (PermissionError, OSError, pd.errors.EmptyDataError, pd.errors.ParserError) as exc:
-            last_error = exc
-            time.sleep(delay)
-    return pd.DataFrame()
+def resolve_python() -> str:
+    if PYTHON_CMD.exists():
+        return str(PYTHON_CMD)
+    return sys.executable or "python"
 
 
-def init_session_state() -> None:
-    """Initialize session state for multi-process tracking."""
+def read_live_csv(path: Path) -> pd.DataFrame:
+    """无缓存读取CSV，锁定或空文件时返回空表。"""
+    if not path or not path.exists():
+        return pd.DataFrame()
     try:
-        st.session_state.setdefault("running_processes", [])
-        if "last_launch" in st.session_state:
-            st.session_state.pop("last_launch")
-    except Exception:
-        # 非 Streamlit 运行时（如直接 python 执行）不使用 session_state
-        return
+        return pd.read_csv(path, engine="python", on_bad_lines="skip")
+    except (pd.errors.EmptyDataError, pd.errors.ParserError, PermissionError, OSError):
+        return pd.DataFrame()
 
 
-def _trigger_rerun() -> None:
-    rerun = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
-    if rerun:
-        rerun()
-
-
-def render_auto_refresh_toggle() -> bool:
-    """全局自动刷新开关，默认开启。"""
-    try:
-        default = st.session_state.get(AUTO_REFRESH_KEY, True)
-        enabled = st.toggle("开启实时监控 (Auto-Refresh)", value=default, key=AUTO_REFRESH_KEY)
-        st.session_state[AUTO_REFRESH_KEY] = enabled
-        return enabled
-    except Exception:
-        # 在非 Streamlit 运行环境时安全返回
-        return False
-
-
-def _remove_process(pid: str) -> None:
-    try:
-        st.session_state["running_processes"] = [p for p in st.session_state.get("running_processes", []) if p.get("pid") != pid]
-    except Exception:
-        return
-
-
-def get_running_processes() -> List[Dict[str, str]]:
-    """Return tracked running processes from session state."""
-    init_session_state()
-    try:
-        return list(st.session_state.get("running_processes", []))
-    except Exception:
-        return []
-
-
-def _safe_read_csv(path: Path, retries: int = 5, delay: float = 0.1, **kwargs) -> pd.DataFrame:
-    """Backward-compatible wrapper -> load_data_safe with caching and parser fallback."""
-    return load_data_safe(str(path), retries=retries, delay=delay, **kwargs)
-
-
-def kill_process(pid_value: str) -> None:
-    """Terminate a running process by PID and remove it from session state."""
-    if not pid_value:
-        return
-    init_session_state()
-    try:
-        pid = int(pid_value)
-    except ValueError:
-        st.error(f"无法解析 PID: {pid_value}")
-        return
-
-    try:
-        os.kill(pid, signal.SIGTERM)
-    except ProcessLookupError:
-        st.warning(f"进程 {pid} 已不存在，已从列表中移除。")
-    except Exception as exc:  # pragma: no cover - defensive UI path
-        st.error(f"终止任务失败: {exc}")
-        return
-
-    _remove_process(str(pid))
-    _trigger_rerun()
-
-
-def generate_experiment_name(trajectory_label: str, disable_kcm: bool, disable_smooth: bool, customized: bool = False) -> str:
-    safe_label = trajectory_label.split("(")[0].strip().replace(" ", "_").replace("-", "_")
-    tags: List[str] = []
-    if disable_kcm:
-        tags.append("NoKCM")
-    if disable_smooth:
-        tags.append("NoSmooth")
-    tag = "_".join(tags) if tags else "Full"
-    base = f"exp_{safe_label}_{tag}_{datetime.now().strftime('%Y%m%d%H%M%S')}"
-    return f"{base}_Custom" if customized else base
-
-
-def ensure_experiment_name(auto_name: str) -> str:
-    try:
-        if "experiment_name_user_edit" not in st.session_state:
-            st.session_state["experiment_name_user_edit"] = False
-        if not st.session_state["experiment_name_user_edit"]:
-            st.session_state["experiment_name"] = auto_name
-    except Exception:
-        # 非 Streamlit 环境下简单返回自动名
-        return auto_name
-
-    def _mark_user_edit() -> None:
-        try:
-            st.session_state["experiment_name_user_edit"] = True
-        except Exception:
-            return
-
-    exp_name = st.text_input(
-        "Experiment Name",
-        value=st.session_state.get("experiment_name", auto_name) if hasattr(st, "session_state") else auto_name,
-        on_change=_mark_user_edit,
-        key="experiment_name_input",
-    )
-    if st.button("重置自动命名", type="secondary"):
-        try:
-            st.session_state["experiment_name_user_edit"] = False
-            st.session_state["experiment_name"] = auto_name
-        except Exception:
-            pass
-        exp_name = auto_name
-    return exp_name or auto_name
-
-
-def list_experiment_runs() -> Dict[str, List[Path]]:
-    experiments: Dict[str, List[Path]] = {}
-    if not SAVED_MODELS_DIR.exists():
-        return experiments
-    for exp_dir in SAVED_MODELS_DIR.iterdir():
-        if not exp_dir.is_dir():
-            continue
-        runs = sorted([p for p in exp_dir.iterdir() if p.is_dir()], reverse=True)
-        if runs:
-            experiments[exp_dir.name] = runs
-    return experiments
-
-
-def pick_log_file(run_dir: Path) -> Optional[Path]:
-    logs_dir = run_dir / "logs"
-    primary = logs_dir / "training_log.csv"
-    if primary.exists():
-        return primary
-    candidates = sorted(logs_dir.glob("training_*.csv"), reverse=True)
-    return candidates[0] if candidates else None
-
-
-def format_command(cmd: List[str]) -> str:
-    return " ".join(map(str, cmd))
-
-
-def launch_training_process(
-    config_path: Path,
-    experiment_name: str,
-    disable_kcm: bool,
-    disable_smooth: bool,
-    resume_path: str,
-    force_gpu: bool,
-    kcm_overrides: Optional[Dict[str, float]] = None,
-) -> Optional[Dict[str, str]]:
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    experiment_dir = SAVED_MODELS_DIR / experiment_name / timestamp
-    cmd = [
-        sys.executable,
-        str(MAIN_SCRIPT),
-        "--mode",
-        "train",
-        "--config",
-        str(config_path),
-        "--experiment_name",
-        experiment_name,
-        "--experiment_dir",
-        str(experiment_dir),
-    ]
-    if disable_kcm:
-        cmd.extend(["--use_kcm", "False"])
-    if disable_smooth:
-        cmd.extend(["--use_smoothness_reward", "False"])
-    if resume_path:
-        cmd.extend(["--resume", resume_path])
-    if kcm_overrides:
-        for arg_name, value in kcm_overrides.items():
-            if value is not None:
-                cmd.extend([f"--{arg_name}", str(value)])
-
-    env = os.environ.copy()
-    if force_gpu:
-        env.setdefault("CUDA_VISIBLE_DEVICES", env.get("CUDA_VISIBLE_DEVICES", "0"))
-
-    try:
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.STDOUT,
-            cwd=str(BASE_DIR),
-            env=env,
-            start_new_session=True,
-        )
-    except Exception as exc:  # pragma: no cover - user runtime protection
-        st.error(f"启动训练失败: {exc}")
-        return None
-
-    init_session_state()
-    launch_info = {
-        "pid": str(process.pid),
-        "cmd": format_command(cmd),
-        "experiment_dir": str(experiment_dir),
-        "experiment_name": experiment_name,
-        "start_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-    }
-    st.session_state["running_processes"].append(launch_info)
-    st.session_state["experiment_name_user_edit"] = True
-    st.success(f"已启动训练进程 (PID: {process.pid})")
-    return launch_info
-
-
-def render_training_monitor(default_exp: Optional[str] = None, default_run: Optional[Path] = None, auto_refresh_enabled: bool = False) -> None:
-    st.divider()
-    st.subheader("📊 训练监控 · Real-time Monitoring")
-    
-    if auto_refresh_enabled:
-        st.success("✅ 实时监控已启用 - 页面每2秒自动刷新")
-    else:
-        st.info("💡 提示：开启顶部的「实时监控」开关，页面将自动刷新")
-    
-    experiments = list_experiment_runs()
-    if not experiments:
-        st.info("尚未发现 saved_models 下的训练记录。")
-        return
-
-    exp_names = sorted(experiments.keys(), reverse=True)
-    default_exp_idx = exp_names.index(default_exp) if default_exp in exp_names else 0
-    exp_choice = st.selectbox("选择实验", exp_names, index=default_exp_idx, key="monitor_exp_choice")
-
-    runs = experiments.get(exp_choice, [])
-    if not runs:
-        st.warning("该实验下暂无时间戳目录。")
-        return
-
-    run_labels = [p.name for p in runs]
-    default_run_idx = 0
-    if default_run:
-        try:
-            default_run_idx = run_labels.index(default_run.name)
-        except ValueError:
-            default_run_idx = 0
-    run_choice = st.selectbox("选择时间戳", run_labels, index=default_run_idx, key="monitor_run_choice")
-    run_dir = runs[run_labels.index(run_choice)]
-    log_path = pick_log_file(run_dir)
-    st.caption(f"📁 日志文件: {log_path or '未找到 training_log.csv'}")
-
-    if log_path is None or not log_path.exists():
-        st.info("等待日志产生中...")
-        return
-
-    try:
-        df = _safe_read_csv(log_path)
-        if df.empty:
-            st.info("日志文件为空，可能训练尚未写入。")
-            return
-
-        df["reward_smooth"] = df["reward"].ewm(alpha=0.1).mean()
-        fig = make_subplots(rows=1, cols=2, subplot_titles=["Reward", "Actor/Critic Loss"])
-        fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["reward"], name="Reward", line=dict(color="#1f77b4")), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["reward_smooth"], name="Reward (EMA)", line=dict(color="#ff7f0e", dash="dash")), row=1, col=1)
-        fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["actor_loss"], name="Actor Loss", line=dict(color="#2ca02c")), row=1, col=2)
-        fig.add_trace(go.Scatter(x=df["episode_idx"], y=df["critic_loss"], name="Critic Loss", line=dict(color="#d62728")), row=1, col=2)
-        fig.update_layout(height=420, margin=dict(l=20, r=20, t=40, b=20), legend=dict(orientation="h"))
-        st.plotly_chart(fig, use_container_width=True)
-        latest_episode_idx = int(df["episode_idx"].iloc[-1]) if "episode_idx" in df.columns else None
-        st.dataframe(df.tail(15), use_container_width=True)
-        render_realtime_trajectory(run_dir, latest_episode_idx)
-    except Exception as e:
-        st.warning("📊 数据同步中，下一帧即将显示...")
-        st.caption(f"详情: {e}")
-        return
-
-
-def render_realtime_trajectory(run_dir: Path, latest_episode: Optional[int] = None) -> None:
-    traj_path = run_dir / "logs" / "latest_trajectory.csv"
-    config_path = run_dir / "config.yaml"
-
-    if not traj_path.exists():
-        st.info("等待数据同步：latest_trajectory.csv 尚未生成。")
-        return
-    if not config_path.exists():
-        st.info("未找到 config.yaml，无法绘制参考路径与允差带。")
-        return
-
-    st.divider()
-    st.subheader(f"最新回合轨迹 (Episode {latest_episode})" if latest_episode is not None else "最新回合轨迹")
-
-    try:
-        traj_df = _safe_read_csv(traj_path)
-        if traj_df.empty or not {"x", "y"}.issubset(traj_df.columns):
-            st.info("轨迹文件为空或缺少 x,y 列，等待下一次更新。")
-            return
-
-        saved_config, _ = load_config(str(config_path))
-        dummy_env = _build_env(saved_config, torch.device("cpu"))
-        dummy_env.reset()  # 触发边界计算
-
-        pl = _clean_boundary(dummy_env.cache.get("Pl", [])) if hasattr(dummy_env, "cache") else []
-        pr = _clean_boundary(dummy_env.cache.get("Pr", [])) if hasattr(dummy_env, "cache") else []
-        ref_points = getattr(dummy_env, "Pm", [])
-
-        traj_fig = go.Figure()
-        if pl and pr:
-            band_x = [p[0] for p in pl] + [p[0] for p in pr][::-1]
-            band_y = [p[1] for p in pl] + [p[1] for p in pr][::-1]
-            traj_fig.add_trace(
-                go.Scatter(
-                    x=band_x,
-                    y=band_y,
-                    fill="toself",
-                    fillcolor="rgba(44,160,44,0.15)",
-                    line=dict(color="rgba(0,0,0,0)"),
-                    name="Tolerance Tube",
-                    hoverinfo="skip",
-                )
-            )
-
-        if ref_points is not None and len(ref_points):
-            ref_x = [p[0] for p in ref_points]
-            ref_y = [p[1] for p in ref_points]
-            traj_fig.add_trace(
-                go.Scatter(
-                    x=ref_x,
-                    y=ref_y,
-                    mode="lines",
-                    name="Reference",
-                    line=dict(dash="dash", color="blue", width=1),
-                )
-            )
-
-        traj_fig.add_trace(
-            go.Scatter(
-                x=traj_df["x"],
-                y=traj_df["y"],
-                mode="lines",
-                name="Actual",
-                line=dict(color="#e45756", width=2.5),
-            )
-        )
-
-        traj_fig.update_layout(
-            height=550,
-            title="Real-time Trajectory Visualization",
-            xaxis_title="X (m)",
-            yaxis_title="Y (m)",
-            yaxis=dict(scaleanchor="x", scaleratio=1),
-            legend=dict(orientation="h", y=1.1),
-            margin=dict(l=10, r=10, t=50, b=10),
-        )
-        st.plotly_chart(traj_fig, use_container_width=True)
-    except Exception as e:  # pragma: no cover - UI 防御
-        st.warning("数据同步中，下一帧即将显示...")
-        st.caption(f"详情: {e}")
-
-
-def _load_effective_config(model_path: Path) -> Tuple[dict, Path]:
-    candidate = model_path.parent.parent / "config.yaml"
-    if candidate.exists():
-        return load_config(str(candidate))[0], candidate
-    fallback = CONFIG_DIR / "default.yaml"
-    st.warning("未找到模型同目录下的 config.yaml，已回退到默认配置。")
-    return load_config(str(fallback))[0], fallback
-
-
-def _build_env(config: dict, device: torch.device) -> Env:
+def _build_env_from_config(config: dict, device: torch.device = torch.device("cpu")) -> Env:
     env_cfg = config["environment"]
     kcm_cfg = config["kinematic_constraints"]
     path_cfg = config["path"]
     reward_weights = config.get("reward_weights", {})
-    Pm = _build_path(path_cfg)
+    pm_points = _build_path(path_cfg)
     return Env(
         device=device,
         epsilon=env_cfg["epsilon"],
@@ -443,11 +100,433 @@ def _build_env(config: dict, device: torch.device) -> Env:
         MAX_ANG_VEL=kcm_cfg["MAX_ANG_VEL"],
         MAX_ANG_ACC=kcm_cfg["MAX_ANG_ACC"],
         MAX_ANG_JERK=kcm_cfg["MAX_ANG_JERK"],
-        Pm=Pm,
+        Pm=pm_points,
         max_steps=env_cfg["max_steps"],
         lookahead_points=env_cfg.get("lookahead_points", 5),
         reward_weights=reward_weights,
     )
+
+
+def _apply_path_override(config: dict, path_override: Optional[dict]) -> dict:
+    """复制配置并应用路径覆盖项（仅用于前端/启动前的动态调整）。"""
+    if not path_override:
+        return config
+    cfg = copy.deepcopy(config)
+    override_path = path_override.get("path") if isinstance(path_override, dict) else None
+    if override_path:
+        merged_path = copy.deepcopy(cfg.get("path", {}))
+        merged_path.update(override_path)
+        cfg["path"] = merged_path
+    return cfg
+
+
+def _build_geometry_from_config(config: dict) -> Dict[str, object]:
+    env = _build_env_from_config(config)
+    ref_points = [(float(p[0]), float(p[1])) for p in env.Pm]
+    pl = [(float(p[0]), float(p[1])) for p in env.cache.get("Pl", [])]
+    pr = [(float(p[0]), float(p[1])) for p in env.cache.get("Pr", [])]
+
+    xs = [p[0] for p in ref_points]
+    ys = [p[1] for p in ref_points]
+    x_range = [min(xs) - 0.5, max(xs) + 0.5] if xs else None
+    y_range = [min(ys) - 0.5, max(ys) + 0.5] if ys else None
+
+    return {"ref_points": ref_points, "pl": pl, "pr": pr, "ranges": {"x": x_range, "y": y_range}}
+
+
+def load_reference_geometry(config_path: Path, path_override: Optional[dict] = None) -> Dict[str, object]:
+    use_cache = path_override is None
+    cache_key = f"ref_geom::{config_path}"
+    cached = st.session_state.get(cache_key) if use_cache else None
+    if cached:
+        return cached
+
+    config, _ = load_config(str(config_path))
+    config = _apply_path_override(config, path_override)
+    result = _build_geometry_from_config(config)
+    if use_cache:
+        st.session_state[cache_key] = result
+    return result
+
+
+def _safe_log_dir(path: Optional[str]) -> Optional[Path]:
+    if not path:
+        return None
+    log_dir = Path(path)
+    return log_dir if log_dir.exists() else None
+
+
+def _find_latest_log_dir() -> Optional[Path]:
+    if not SAVED_MODELS_DIR.exists():
+        return None
+    candidates: List[Tuple[float, Path]] = []
+    for exp_dir in SAVED_MODELS_DIR.iterdir():
+        if not exp_dir.is_dir():
+            continue
+        for run_dir in exp_dir.iterdir():
+            log_dir = run_dir / "logs"
+            if log_dir.exists():
+                candidates.append((log_dir.stat().st_mtime, log_dir))
+    if not candidates:
+        return None
+    return sorted(candidates, key=lambda x: x[0], reverse=True)[0][1]
+
+
+def _latest_experiment_name(config_path: Path) -> str:
+    label = config_path.stem.replace(" ", "_")
+    return f"exp_{label}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+
+def _render_path_override_form(config: dict, path_type: str) -> dict:
+    """渲染路径参数表单，返回覆盖后的 path 片段。"""
+    path_cfg = config.get("path", {})
+
+    st.sidebar.markdown("##### 轨迹配置")
+    scale = st.sidebar.number_input("路径尺度 (scale/length/side)", value=float(path_cfg.get("scale", 10.0)), step=0.5)
+    num_points = int(
+        st.sidebar.number_input("采样点数", min_value=10, max_value=20000, value=int(path_cfg.get("num_points", 200)), step=10)
+    )
+
+    override = {"path": {"type": path_type, "scale": float(scale), "num_points": num_points}}
+
+    if path_type == "line":
+        base_angle = float(path_cfg.get("line", {}).get("angle", 0.0))
+        angle = st.sidebar.number_input("线段角度 (rad)", value=base_angle, step=0.1, format="%.4f")
+        override["path"]["line"] = {"angle": angle}
+    elif path_type == "s_shape":
+        s_cfg = path_cfg.get("s_shape", {})
+        amp = st.sidebar.number_input("S形振幅", value=float(s_cfg.get("amplitude", scale / 2)), step=0.5)
+        periods = st.sidebar.number_input("周期数", value=float(s_cfg.get("periods", 2.0)), step=0.5)
+        override["path"]["s_shape"] = {"amplitude": amp, "periods": periods}
+    elif path_type == "square":
+        # 正方形无需额外参数；侧边输入用 scale 表示边长
+        override["path"]["square"] = {}
+
+    return override
+
+
+# --------------------------------------------------------------------------------------
+# Training Logic
+# --------------------------------------------------------------------------------------
+def start_training(
+    config_path: Path,
+    experiment_name: str,
+    disable_kcm: bool,
+    disable_smooth: bool,
+    kcm_overrides: Dict[str, float],
+    path_override: Optional[dict] = None,
+) -> None:
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    experiment_dir = SAVED_MODELS_DIR / experiment_name / timestamp
+    experiment_dir.mkdir(parents=True, exist_ok=True)
+
+    runtime_config_path = config_path
+    if path_override:
+        try:
+            base_config, _ = load_config(str(config_path))
+            merged_config = _apply_path_override(base_config, path_override)
+            runtime_config_path = experiment_dir / "config.runtime.yaml"
+            with runtime_config_path.open("w", encoding="utf-8") as f:
+                yaml.safe_dump(merged_config, f, allow_unicode=True, sort_keys=False)
+        except Exception as exc:
+            st.warning(f"写入覆盖后的配置失败，将使用原始配置：{exc}")
+            runtime_config_path = config_path
+
+    cmd: List[str] = [
+        resolve_python(),
+        str(MAIN_SCRIPT),
+        "--mode",
+        "train",
+        "--config",
+        str(runtime_config_path),
+        "--experiment_name",
+        experiment_name,
+        "--experiment_dir",
+        str(experiment_dir),
+    ]
+    if disable_kcm:
+        cmd.extend(["--use_kcm", "False"])
+    if disable_smooth:
+        cmd.extend(["--use_smoothness_reward", "False"])
+
+    flag_map = {
+        "MAX_VEL": "max_vel",
+        "MAX_ACC": "max_acc",
+        "MAX_JERK": "max_jerk",
+        "MAX_ANG_VEL": "max_ang_vel",
+        "MAX_ANG_ACC": "max_ang_acc",
+        "MAX_ANG_JERK": "max_ang_jerk",
+    }
+    for cfg_key, value in kcm_overrides.items():
+        flag = flag_map.get(cfg_key)
+        if flag is not None:
+            cmd.extend([f"--{flag}", str(value)])
+
+    try:
+        process = subprocess.Popen(
+            cmd,
+            cwd=str(BASE_DIR),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+    except Exception as exc:
+        st.error(f"启动训练失败: {exc}")
+        return
+
+    st.session_state["is_training"] = True
+    st.session_state["train_pid"] = process.pid
+    st.session_state["log_dir"] = str(experiment_dir / "logs")
+    st.session_state["config_path"] = str(runtime_config_path)
+    st.session_state["active_path_override"] = path_override or None
+    st.session_state["experiment_name"] = experiment_name
+    st.session_state["command_line"] = " ".join(cmd)
+    st.success(f"训练已启动 (PID: {process.pid})")
+
+
+def stop_training() -> None:
+    pid = st.session_state.get("train_pid")
+    if pid:
+        try:
+            os.kill(int(pid), signal.SIGTERM)
+        except Exception as exc:
+            st.warning(f"终止进程时出现问题: {exc}")
+    st.session_state["is_training"] = False
+    st.session_state["train_pid"] = None
+    st.session_state["log_dir"] = None
+    st.session_state["command_line"] = None
+    st.session_state["active_path_override"] = None
+
+
+def _build_reward_loss_fig(df: pd.DataFrame) -> go.Figure:
+    fig = make_subplots(specs=[[{"secondary_y": True}]])
+    if not df.empty and {"episode_idx", "reward"}.issubset(df.columns):
+        fig.add_trace(
+            go.Scatter(x=df["episode_idx"], y=df["reward"], name="Reward", mode="lines+markers", line=dict(color="#0b7285")),
+            secondary_y=False,
+        )
+    if not df.empty and {"episode_idx", "actor_loss"}.issubset(df.columns):
+        fig.add_trace(
+            go.Scatter(x=df["episode_idx"], y=df["actor_loss"], name="Actor Loss", mode="lines", line=dict(color="#f59f00")),
+            secondary_y=True,
+        )
+    if not df.empty and {"episode_idx", "critic_loss"}.issubset(df.columns):
+        fig.add_trace(
+            go.Scatter(x=df["episode_idx"], y=df["critic_loss"], name="Critic Loss", mode="lines", line=dict(color="#c92a2a")),
+            secondary_y=True,
+        )
+    fig.update_layout(
+        height=420,
+        margin=dict(l=10, r=10, t=30, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    fig.update_yaxes(title_text="Reward", secondary_y=False)
+    fig.update_yaxes(title_text="Loss", secondary_y=True)
+    return fig
+
+
+def _build_trajectory_fig(traj_df: pd.DataFrame, geom: Dict[str, object]) -> go.Figure:
+    ref_points: List[Tuple[float, float]] = geom.get("ref_points", []) if geom else []
+    pl: List[Tuple[float, float]] = geom.get("pl", []) if geom else []
+    pr: List[Tuple[float, float]] = geom.get("pr", []) if geom else []
+    ranges = geom.get("ranges", {}) if geom else {}
+
+    fig = go.Figure()
+
+    if pl and pr:
+        band_x = [p[0] for p in pl] + [p[0] for p in pr][::-1]
+        band_y = [p[1] for p in pl] + [p[1] for p in pr][::-1]
+        fig.add_trace(
+            go.Scatter(
+                x=band_x,
+                y=band_y,
+                fill="toself",
+                fillcolor="rgba(33, 150, 243, 0.12)",
+                line=dict(color="rgba(0,0,0,0)"),
+                name="Tolerance Band",
+                hoverinfo="skip",
+            )
+        )
+
+    if ref_points:
+        fig.add_trace(
+            go.Scatter(
+                x=[p[0] for p in ref_points],
+                y=[p[1] for p in ref_points],
+                mode="lines",
+                line=dict(color="#1f77b4", dash="dash"),
+                name="Reference Path",
+            )
+        )
+
+    if not traj_df.empty and {"x", "y"}.issubset(traj_df.columns):
+        fig.add_trace(
+            go.Scatter(
+                x=traj_df["x"],
+                y=traj_df["y"],
+                mode="lines+markers",
+                marker=dict(size=4, color="#e03131"),
+                line=dict(color="#e03131", width=2),
+                name="Agent Trajectory",
+            )
+        )
+
+    x_range = ranges.get("x")
+    y_range = ranges.get("y")
+    fig.update_layout(
+        height=560,
+        margin=dict(l=10, r=10, t=30, b=10),
+        xaxis_title="X",
+        yaxis_title="Y",
+        xaxis_range=x_range,
+        yaxis_range=y_range,
+        yaxis=dict(scaleanchor="x", scaleratio=1),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    return fig
+
+
+def load_live_data(log_dir: Optional[Path], config_path: Path, path_override: Optional[dict] = None) -> Dict[str, object]:
+    if log_dir is None:
+        return {
+            "training": pd.DataFrame(),
+            "paper": pd.DataFrame(),
+            "trajectory": pd.DataFrame(),
+            "geom": load_reference_geometry(config_path, path_override),
+        }
+
+    training_df = read_live_csv(log_dir / "training_log.csv")
+
+    paper_path = next(log_dir.glob("paper_metrics*.csv"), None) if log_dir.exists() else None
+    paper_df = read_live_csv(paper_path) if paper_path else pd.DataFrame()
+
+    traj_df = read_live_csv(log_dir / "latest_trajectory.csv")
+
+    config_copy = log_dir.parent / "config.yaml"
+    geom_path = config_copy if config_copy.exists() else config_path
+    geom = load_reference_geometry(geom_path, None if config_copy.exists() else path_override)
+
+    return {"training": training_df, "paper": paper_df, "trajectory": traj_df, "geom": geom}
+
+
+def render_training_sidebar() -> Dict[str, object]:
+    st.sidebar.markdown("### 训练监控 · Training Ops")
+    scenario = st.sidebar.selectbox("场景选择", list(SCENARIOS.keys()))
+    config_path = SCENARIOS[scenario]
+    path_type_map = {
+        "Line (直线)": "line",
+        "Square (正方形)": "square",
+        "S-shape (S形)": "s_shape",
+    }
+    selected_path_type = path_type_map.get(scenario, "line")
+
+    config, _ = load_config(str(config_path))
+    default_name = st.session_state.get("experiment_name") or _latest_experiment_name(config_path)
+    experiment_name = st.sidebar.text_input("实验名称", value=default_name)
+    if not experiment_name.strip():
+        experiment_name = _latest_experiment_name(config_path)
+    st.session_state["experiment_name"] = experiment_name
+
+    disable_kcm = st.sidebar.checkbox("Disable KCM", value=False)
+    disable_smooth = st.sidebar.checkbox("Disable Smoothness", value=False)
+
+    kcm_overrides: Dict[str, float] = {}
+    with st.sidebar.expander("KCM 参数微调", expanded=False):
+        kcm_cfg = config.get("kinematic_constraints", {})
+        for cfg_key, label in KCM_FIELDS:
+            base_value = float(kcm_cfg.get(cfg_key, 0.0))
+            val = st.number_input(label, value=base_value, step=0.1, format="%.4f", key=f"kcm_{cfg_key}")
+            kcm_overrides[cfg_key] = float(val)
+
+    path_override = _render_path_override_form(config, selected_path_type)
+
+    col_start, col_stop = st.sidebar.columns(2)
+    if col_start.button("🚀 启动训练 (Start)", use_container_width=True):
+        start_training(config_path, experiment_name, disable_kcm, disable_smooth, kcm_overrides, path_override)
+    if col_stop.button("🛑 停止训练 (Stop)", use_container_width=True):
+        stop_training()
+
+    active_log_dir = _safe_log_dir(st.session_state.get("log_dir")) or _find_latest_log_dir()
+    st.sidebar.caption(f"日志目录: {active_log_dir}" if active_log_dir else "日志目录: 未找到")
+    if st.session_state.get("train_pid"):
+        st.sidebar.success(f"运行中 PID: {st.session_state['train_pid']}")
+
+    return {"config_path": config_path, "log_dir": active_log_dir, "path_override": path_override}
+
+
+def render_training_view() -> None:
+    sidebar_state = render_training_sidebar()
+    config_path: Path = sidebar_state["config_path"]
+    log_dir: Optional[Path] = sidebar_state["log_dir"]
+    path_override = sidebar_state.get("path_override")
+
+    # 训练中使用运行时配置，预览时使用当前选择+覆盖
+    effective_config_path = Path(st.session_state.get("config_path") or config_path)
+    if not st.session_state.get("is_training"):
+        effective_config_path = config_path
+    active_override = st.session_state.get("active_path_override") if st.session_state.get("is_training") else path_override
+
+    data = load_live_data(log_dir, effective_config_path, active_override)
+    training_df: pd.DataFrame = data["training"]
+    paper_df: pd.DataFrame = data["paper"]
+    traj_df: pd.DataFrame = data["trajectory"]
+    geom = data["geom"]
+
+    current_episode = "-"
+    if not training_df.empty and "episode_idx" in training_df.columns:
+        current_episode = int(training_df["episode_idx"].max())
+
+    last_reward = "-"
+    if not training_df.empty and "reward" in training_df.columns:
+        last_reward = float(training_df["reward"].iloc[-1])
+
+    mean_error = "-"
+    if not paper_df.empty and "rmse_error" in paper_df.columns:
+        mean_error = float(paper_df["rmse_error"].iloc[-1])
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Current Episode", current_episode)
+    m2.metric("Last Reward", last_reward)
+    m3.metric("Mean Error (RMSE)", mean_error)
+
+    col_left, col_right = st.columns([1, 2])
+    with col_left:
+        st.markdown("#### Reward & Loss")
+        reward_fig = _build_reward_loss_fig(training_df)
+        st.plotly_chart(reward_fig, use_container_width=True)
+    with col_right:
+        st.markdown("#### Real-time Trajectory")
+        traj_fig = _build_trajectory_fig(traj_df, geom)
+        st.plotly_chart(traj_fig, use_container_width=True)
+
+    if st.session_state.get("is_training"):
+        time.sleep(1)
+        rerun = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
+        if rerun:
+            rerun()
+
+
+# --------------------------------------------------------------------------------------
+# Paper Logic
+# --------------------------------------------------------------------------------------
+def list_best_models() -> List[Path]:
+    models: List[Tuple[float, Path]] = []
+    for best_path in SAVED_MODELS_DIR.glob("**/checkpoints/best_model.pth"):
+        try:
+            mtime = best_path.stat().st_mtime
+            models.append((mtime, best_path))
+        except OSError:
+            continue
+    return [p for _, p in sorted(models, key=lambda x: x[0], reverse=True)]
+
+
+def _load_effective_config(model_path: Path) -> Tuple[dict, Path]:
+    candidate = model_path.parent.parent / "config.yaml"
+    if candidate.exists():
+        return load_config(str(candidate))[0], candidate
+    fallback = CONFIG_DIR / "s_shape.yaml"
+    st.warning("未找到模型同目录下的 config.yaml，已回退到 s_shape.yaml。")
+    return load_config(str(fallback))[0], fallback
 
 
 def _build_agent(config: dict, env: Env, device: torch.device):
@@ -459,7 +538,7 @@ def _build_agent(config: dict, env: Env, device: torch.device):
     disable_kcm = exp_cfg.get("enable_kcm") is False or exp_cfg.get("mode") == "ablation_no_kcm"
 
     if disable_kcm:
-        agent = NNCAgent(
+        return NNCAgent(
             state_dim=None,
             hidden_dim=ppo_cfg["hidden_dim"],
             action_dim=None,
@@ -475,33 +554,29 @@ def _build_agent(config: dict, env: Env, device: torch.device):
             observation_space=obs_space,
             action_space=act_space,
         )
-    else:
-        agent = PPOContinuous(
-            state_dim=None,
-            hidden_dim=ppo_cfg["hidden_dim"],
-            action_dim=None,
-            actor_lr=ppo_cfg["actor_lr"],
-            critic_lr=ppo_cfg["critic_lr"],
-            lmbda=ppo_cfg["lmbda"],
-            epochs=ppo_cfg["epochs"],
-            eps=ppo_cfg["eps"],
-            gamma=ppo_cfg["gamma"],
-            device=device,
-            observation_space=obs_space,
-            action_space=act_space,
-        )
-    return agent
+    return PPOContinuous(
+        state_dim=None,
+        hidden_dim=ppo_cfg["hidden_dim"],
+        action_dim=None,
+        actor_lr=ppo_cfg["actor_lr"],
+        critic_lr=ppo_cfg["critic_lr"],
+        lmbda=ppo_cfg["lmbda"],
+        epochs=ppo_cfg["epochs"],
+        eps=ppo_cfg["eps"],
+        gamma=ppo_cfg["gamma"],
+        device=device,
+        observation_space=obs_space,
+        action_space=act_space,
+    )
 
 
 def _load_checkpoint(agent, model_path: Path, device: torch.device) -> None:
     checkpoint = torch.load(model_path, map_location=device, weights_only=False)
-    if "actor" in checkpoint:
+    if "actor" in checkpoint and hasattr(agent, "actor"):
         agent.actor.load_state_dict(checkpoint["actor"])
-    if "critic" in checkpoint:
-        agent.critic.load_state_dict(checkpoint["critic"])
-    if hasattr(agent, "actor"):
         agent.actor.eval()
-    if hasattr(agent, "critic"):
+    if "critic" in checkpoint and hasattr(agent, "critic"):
+        agent.critic.load_state_dict(checkpoint["critic"])
         agent.critic.eval()
 
 
@@ -582,226 +657,106 @@ def _latex_table(summary: Dict[str, Dict[str, float]]) -> str:
     return "\n".join(lines)
 
 
-def _render_kcm_tuner(config_path: Path) -> Tuple[Dict[str, float], bool]:
-    defaults: Dict[str, float] = {}
-    try:
-        mtime = config_path.stat().st_mtime
-        defaults = _load_kcm_defaults(str(config_path), mtime)
-    except FileNotFoundError:
-        st.warning(f"配置文件不存在: {config_path}")
-    except Exception as exc:  # pragma: no cover - UI防御
-        st.warning(f"读取配置失败: {exc}")
+def _make_fig1_matplotlib(trace: Dict[str, List[float]], geom: Dict[str, object]):
+    ref_points: List[Tuple[float, float]] = geom.get("ref_points", [])
+    pl: List[Tuple[float, float]] = geom.get("pl", [])
+    pr: List[Tuple[float, float]] = geom.get("pr", [])
 
-    kcm_values: Dict[str, float] = {}
-    is_custom = False
+    fig, ax = plt.subplots(figsize=(6, 6))
 
-    with st.expander("Step 3 · 运动学参数微调", expanded=False):
-        st.caption("覆盖 YAML 中的运动学约束，发射时通过 CLI 透传到 main.py。")
-        for cfg_key, arg_name, label in KCM_FIELDS:
-            base_value = float(defaults.get(cfg_key, 0.0))
-            input_value = st.number_input(
-                label,
-                min_value=0.0,
-                value=base_value,
-                step=0.1,
-                format="%.4f",
-                key=f"kcm_{config_path.name}_{arg_name}",
-            )
-            kcm_values[arg_name] = float(input_value)
-            if not is_custom and abs(float(input_value) - base_value) > 1e-9:
-                is_custom = True
-
-    return kcm_values, is_custom
-
-
-def _clean_boundary(boundary: List) -> List[Tuple[float, float]]:
-    cleaned: List[Tuple[float, float]] = []
-    for item in boundary:
-        if not item or len(item) < 2:
-            continue
-        x, y = item
-        if x is None or y is None:
-            continue
-        cleaned.append((float(x), float(y)))
-    return cleaned
-
-
-def _make_path_fig(trace: Dict[str, List[float]], env: Env):
-    pos = np.column_stack([trace["position_x"], trace["position_y"]])
-    ref = np.column_stack([trace["reference_x"], trace["reference_y"]])
-    pl = _clean_boundary(env.cache.get("Pl", [])) if hasattr(env, "cache") else []
-    pr = _clean_boundary(env.cache.get("Pr", [])) if hasattr(env, "cache") else []
-
-    fig = go.Figure()
-    fig.add_trace(go.Scatter(x=ref[:, 0], y=ref[:, 1], name="Reference", mode="lines", line=dict(color="#4c78a8", dash="dash")))
-    if pl and pr and len(pl) == len(pr):
+    if pl and pr:
         band_x = [p[0] for p in pl] + [p[0] for p in pr][::-1]
         band_y = [p[1] for p in pl] + [p[1] for p in pr][::-1]
-        fig.add_trace(
-            go.Scatter(
-                x=band_x,
-                y=band_y,
-                fill="toself",
-                fillcolor="rgba(44,160,44,0.12)",
-                line=dict(color="rgba(0,0,0,0)"),
-                name="Tolerance Tube",
-                showlegend=True,
-            )
-        )
-    fig.add_trace(go.Scatter(x=pos[:, 0], y=pos[:, 1], name="Actual", mode="lines", line=dict(color="#e45756", width=3)))
-    fig.update_yaxes(scaleanchor="x", scaleratio=1)
-    fig.update_layout(height=420, margin=dict(l=10, r=10, t=30, b=10), legend=dict(orientation="h"))
+        ax.fill(band_x, band_y, color="#2196f3", alpha=0.15, label="Tolerance Band")
+
+    if ref_points:
+        ax.plot([p[0] for p in ref_points], [p[1] for p in ref_points], "--", color="#1f77b4", linewidth=1.5, label="Reference Path")
+
+    if trace.get("position_x") and trace.get("position_y"):
+        ax.plot(trace["position_x"], trace["position_y"], color="#e03131", linewidth=2.2, label="Agent Trajectory")
+
+    xs = [p[0] for p in ref_points] or trace.get("position_x", [])
+    ys = [p[1] for p in ref_points] or trace.get("position_y", [])
+    if xs and ys:
+        ax.set_xlim([min(xs) - 1, max(xs) + 1])
+        ax.set_ylim([min(ys) - 1, max(ys) + 1])
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_title("Fig1 · Trajectory vs Reference")
+    ax.legend(loc="upper right")
+    ax.grid(True, linestyle=":", alpha=0.5)
+    fig.tight_layout()
     return fig
 
 
-def _make_motion_fig(trace: Dict[str, List[float]], kcm_cfg: dict):
-    t = trace["timestamp"]
-    fig = make_subplots(rows=3, cols=1, shared_xaxes=True, subplot_titles=["Velocity", "Acceleration", "Jerk"])
-    fig.add_trace(go.Scatter(x=t, y=trace["velocity"], name="Velocity", line=dict(color="#1f77b4")), row=1, col=1)
-    fig.add_trace(go.Scatter(x=t, y=[kcm_cfg["MAX_VEL"]] * len(t), name="Velocity Limit", line=dict(color="red", dash="dash")), row=1, col=1)
-    fig.add_trace(go.Scatter(x=t, y=trace["acceleration"], name="Acceleration", line=dict(color="#2ca02c")), row=2, col=1)
-    fig.add_trace(go.Scatter(x=t, y=[kcm_cfg["MAX_ACC"]] * len(t), name="Acc Limit", line=dict(color="red", dash="dash")), row=2, col=1)
-    fig.add_trace(go.Scatter(x=t, y=trace["jerk"], name="Jerk", line=dict(color="#d62728")), row=3, col=1)
-    fig.add_trace(go.Scatter(x=t, y=[kcm_cfg["MAX_JERK"]] * len(t), name="Jerk Limit", line=dict(color="red", dash="dash")), row=3, col=1)
-    fig.add_trace(go.Scatter(x=t, y=[-kcm_cfg["MAX_JERK"]] * len(t), name="Jerk Limit -", line=dict(color="red", dash="dot")), row=3, col=1)
-    fig.update_layout(height=520, margin=dict(l=10, r=10, t=40, b=20), legend=dict(orientation="h"))
+def _make_fig2_matplotlib(trace: Dict[str, List[float]], kcm_cfg: dict):
+    t = trace.get("timestamp", [])
+    fig, axes = plt.subplots(3, 1, figsize=(6.5, 7.5), sharex=True)
+    axes[0].plot(t, trace.get("velocity", []), color="#1f77b4")
+    axes[0].axhline(kcm_cfg["MAX_VEL"], color="red", linestyle="--", label="Vel Limit")
+    axes[0].set_ylabel("Velocity")
+
+    axes[1].plot(t, trace.get("acceleration", []), color="#2ca02c")
+    axes[1].axhline(kcm_cfg["MAX_ACC"], color="red", linestyle="--", label="Acc Limit")
+    axes[1].set_ylabel("Acceleration")
+
+    axes[2].plot(t, trace.get("jerk", []), color="#d62728")
+    axes[2].axhline(kcm_cfg["MAX_JERK"], color="red", linestyle="--", label="Jerk Limit")
+    axes[2].axhline(-kcm_cfg["MAX_JERK"], color="red", linestyle=":")
+    axes[2].set_ylabel("Jerk")
+    axes[2].set_xlabel("Time (s)")
+
+    for ax in axes:
+        ax.grid(True, linestyle=":", alpha=0.5)
+    axes[0].legend(loc="upper right")
+    fig.tight_layout()
     return fig
 
 
-def render_running_tasks_panel() -> Dict[str, Dict[str, str]]:
-    """在主区域展示运行中的训练并可一键终止。"""
-    processes = get_running_processes()
-    active: Dict[str, Dict[str, str]] = {}
-    if not processes:
-        return active
-
-    st.info("🟢 当前有运行中的训练任务")
-    with st.expander("📋 查看所有进行中任务 (Running Tasks)", expanded=False):
-        for idx, proc in enumerate(processes):
-            pid = proc.get("pid", "?")
-            exp_name = proc.get("experiment_name", "Unknown")
-            active[exp_name] = proc
-            st.markdown(f"**{exp_name}** (PID: {pid})")
-            cmd = proc.get('cmd', '')
-            display_cmd = cmd[:80] + "..." if len(cmd) > 80 else cmd
-            st.caption(f"启动: {proc.get('start_time', '未知')} | 命令: `{display_cmd}`")
-            if st.button("⛔ 终止此任务", key=f"kill_{pid}_{idx}", type="secondary"):
-                kill_process(str(pid))
-                st.success(f"已终止 PID {pid}")
-                return active
-            st.divider()
-    return active
+def _fig_to_pdf_bytes(fig) -> bytes:
+    buf = io.BytesIO()
+    fig.savefig(buf, format="pdf", dpi=300, bbox_inches="tight")
+    buf.seek(0)
+    return buf.getvalue()
 
 
-def render_training_ops(auto_refresh_enabled: bool, active_processes: Optional[Dict[str, Dict[str, str]]] = None) -> None:
-    active_processes = active_processes or {}
-    st.header("模式 A · Training Ops")
-    st.markdown("面向任务的实验向导 + 异步训练发射 + 实时监控。")
-    st.caption("提示：开启实时监控后,检测到训练进程会每2秒自动刷新。")
-
-    # Step 1: 场景选择 + 状态指示器
-    st.subheader("Step 1 · 选择训练场景")
-    col1, col2 = st.columns([3, 1])
-    trajectory_label = col1.selectbox("Trajectory Selection", list(CONFIG_OPTIONS.keys()), label_visibility="collapsed")
-    
-    # 检查该场景是否有运行中的训练（通过配置路径匹配）
-    config_path = CONFIG_OPTIONS[trajectory_label]
-    config_name = config_path.stem
-    running_for_scene = None
-    for exp_name, proc in active_processes.items():
-        if config_name.lower() in exp_name.lower():
-            running_for_scene = proc
-            break
-    
-    if running_for_scene:
-        pid = running_for_scene.get("pid", "?")
-        col2.success(f"🟢 训练中 (PID: {pid})")
-    else:
-        col2.info("⚪ 未运行")
-    
-    # Step 2: 消融设置
-    st.subheader("Step 2 · 消融设置")
-    col_a, col_b = st.columns(2)
-    disable_kcm = col_a.checkbox("Disable KCM (禁用运动学约束)", value=False)
-    disable_smooth = col_b.checkbox("Disable Smoothness Reward (禁用平滑奖励)", value=False)
-
-    kcm_overrides, is_custom_kcm = _render_kcm_tuner(config_path)
-
-    auto_name = generate_experiment_name(trajectory_label, disable_kcm, disable_smooth, customized=is_custom_kcm)
-    exp_name = ensure_experiment_name(auto_name)
-    
-    # Red Zone: 如果当前实验正在运行，显示红色警告区
-    running_for_exp = active_processes.get(exp_name)
-    if running_for_exp:
-        pid = running_for_exp.get("pid", "?")
-        st.error(f"⚠️ 当前实验 `{exp_name}` 正在训练中 (PID: {pid})")
-        st.caption(f"启动时间: {running_for_exp.get('start_time', '未知')} | 实验目录: {running_for_exp.get('experiment_dir', 'N/A')}")
-        if st.button("⛔ 立即结束训练 (Stop Training)", key=f"stop_active_{pid}", type="primary", use_container_width=True):
-            kill_process(str(pid))
-            st.success("任务已终止！页面即将刷新...")
-            return
-
-    with st.expander("Step 4 · 高级选项"):
-        resume_path = st.text_input("Resume Checkpoint (.pth)", value="")
-        force_gpu = st.checkbox("Force GPU (CUDA_VISIBLE_DEVICES)", value=False)
-
-    st.caption(f"配置映射: {trajectory_label} -> {config_path}")
-
-    if st.button("🚀 Launch Training", type="primary"):
-        if not config_path.exists():
-            st.error(f"配置文件不存在: {config_path}")
-        else:
-            launch_training_process(
-                config_path=config_path,
-                experiment_name=exp_name,
-                disable_kcm=disable_kcm,
-                disable_smooth=disable_smooth,
-                resume_path=resume_path.strip(),
-                force_gpu=force_gpu,
-                kcm_overrides=kcm_overrides,
-            )
-
-    running = get_running_processes()
-    if running:
-        latest = running[-1]
-        st.info(
-            f"最近启动: {latest.get('experiment_name')} (PID: {latest.get('pid')}) · "
-            f"实验目录: {latest.get('experiment_dir')}\n\n命令: `{latest.get('cmd')}`"
-        )
-        if auto_refresh_enabled:
-            st.caption("实时监控已开启：训练进行时页面将自动每2秒刷新一次。")
-        default_exp = latest.get("experiment_name")
-        default_run = Path(latest["experiment_dir"]) if latest.get("experiment_dir") else None
-    else:
-        default_exp, default_run = None, None
-
-    render_training_monitor(default_exp, default_run, auto_refresh_enabled=auto_refresh_enabled)
+def _pdf_iframe(pdf_bytes: bytes, height: int = 480) -> str:
+    b64 = base64.b64encode(pdf_bytes).decode("utf-8")
+    return f'<iframe src="data:application/pdf;base64,{b64}" width="100%" height="{height}" type="application/pdf"></iframe>'
 
 
-def render_paper_mode() -> None:
-    st.header("模式 B · Paper Mode")
-    st.markdown("加载 best_model.pth，批量评估并生成论文级图表与 LaTeX。")
+def render_paper_sidebar(models: List[Path]) -> Dict[str, object]:
+    st.sidebar.markdown("### 论文评估 · Paper Mode")
+    model_labels = [str(p.relative_to(SAVED_MODELS_DIR)) for p in models] if models else ["未找到 best_model.pth"]
+    model_choice = st.sidebar.selectbox("选择 best_model.pth", model_labels, index=0)
+    model_path = models[model_labels.index(model_choice)] if models else None
 
-    available_models = sorted(SAVED_MODELS_DIR.rglob("best_model.pth"), reverse=True)
-    model_options = [str(p.relative_to(BASE_DIR)) for p in available_models]
-    model_choice = st.selectbox("选择 best_model.pth", model_options)
-    manual_model = st.text_input("或手动填写模型路径", value="")
-    target_model = Path(manual_model) if manual_model.strip() else (BASE_DIR / model_choice if model_choice else None)
+    runs = int(st.sidebar.number_input("评估次数 (Batch Size)", min_value=1, max_value=50, value=20, step=1))
+    device_choice = st.sidebar.selectbox("计算设备", ["auto", "cpu", "cuda"], index=0)
 
-    runs = st.number_input("Batch Evaluation 次数", min_value=1, max_value=50, value=20, step=1)
-    device_choice = st.selectbox("设备", ["auto", "cpu", "cuda"])
-    device = torch.device("cuda" if (device_choice == "cuda" or (device_choice == "auto" and torch.cuda.is_available())) else "cpu")
+    return {"model_path": model_path, "runs": runs, "device_choice": device_choice}
 
-    if st.button("开始批量评估", type="primary") and target_model:
-        if not target_model.exists():
-            st.error(f"模型不存在: {target_model}")
-            return
-        try:
-            with st.spinner("评估中..."):
-                config, cfg_path = _load_effective_config(target_model)
-                env = _build_env(config, device)
+
+def render_paper_view() -> None:
+    models = list_best_models()
+    sidebar_state = render_paper_sidebar(models)
+    model_path: Optional[Path] = sidebar_state["model_path"]
+    runs: int = sidebar_state["runs"]
+    device_choice: str = sidebar_state["device_choice"]
+
+    if st.sidebar.button("开始批量评估 (Start Evaluation)", use_container_width=True) and model_path:
+        st.session_state["paper_results"] = None
+        with st.spinner("评估中..."):
+            try:
+                config, cfg_path = _load_effective_config(model_path)
+                device = torch.device(
+                    "cuda" if (device_choice == "cuda" or (device_choice == "auto" and torch.cuda.is_available())) else "cpu"
+                )
+                if device_choice == "cuda" and not torch.cuda.is_available():
+                    st.warning("CUDA 不可用，已自动切换到 CPU。")
+
+                env = _build_env_from_config(config, device)
                 agent = _build_agent(config, env, device)
-                _load_checkpoint(agent, target_model, device)
+                _load_checkpoint(agent, model_path, device)
 
                 metrics_list: List[dict] = []
                 sample_trace: Optional[Dict[str, List[float]]] = None
@@ -813,85 +768,60 @@ def render_paper_mode() -> None:
 
                 summary = _summarize_metrics(metrics_list)
                 latex_text = _latex_table(summary)
-        except Exception as exc:  # pragma: no cover - UI error path
-            st.error(f"模型文件损坏或不匹配: {exc}")
-            return
 
-        st.subheader("统计汇总")
-        st.write(pd.DataFrame(summary).T.rename(columns={"mean": "Mean", "std": "Std"}))
-        st.text_area("LaTeX 表格", latex_text, height=140)
-        st.caption(f"配置来源: {cfg_path}")
+                geom = load_reference_geometry(cfg_path)
+                fig1 = _make_fig1_matplotlib(sample_trace or {}, geom)
+                fig2 = _make_fig2_matplotlib(sample_trace or {}, config["kinematic_constraints"])
+                fig1_pdf = _fig_to_pdf_bytes(fig1)
+                fig2_pdf = _fig_to_pdf_bytes(fig2)
+                plt.close(fig1)
+                plt.close(fig2)
 
-        if sample_trace:
-            st.subheader("论文级图表预览")
-            try:
-                path_fig = _make_path_fig(sample_trace, env)
-                motion_fig = _make_motion_fig(sample_trace, config["kinematic_constraints"])
-                st.plotly_chart(path_fig, use_container_width=True)
-                st.plotly_chart(motion_fig, use_container_width=True)
-            except Exception as viz_err:
-                st.warning(f"图表生成失败: {viz_err}")
-                st.caption("可能原因：数据格式异常或环境边界未正确初始化")
+                st.session_state["paper_results"] = {
+                    "summary": summary,
+                    "latex": latex_text,
+                    "fig1_pdf": fig1_pdf,
+                    "fig2_pdf": fig2_pdf,
+                    "fig1_iframe": _pdf_iframe(fig1_pdf, height=520),
+                    "fig2_iframe": _pdf_iframe(fig2_pdf, height=520),
+                    "model_path": str(model_path),
+                    "config_path": str(cfg_path),
+                }
+            except Exception as exc:
+                st.error(f"评估失败: {exc}")
 
-            def _buffer_pdf(fig_obj) -> bytes:
-                buf = io.BytesIO()
-                fig_obj.savefig(buf, format="pdf", dpi=300, bbox_inches="tight")
-                buf.seek(0)
-                return buf.getvalue()
+    results = st.session_state.get("paper_results")
+    st.subheader("论文评估结果")
+    if not results:
+        st.info("点击左侧“开始批量评估”生成结果。")
+        return
 
-            import io  # local import to keep top-level tidy
+    summary_df = pd.DataFrame(results["summary"]).T.rename(columns={"mean": "Mean", "std": "Std"})
+    st.dataframe(summary_df, use_container_width=True)
+    st.text_area("LaTeX 表格", results["latex"], height=140)
+    st.caption(f"模型: {results['model_path']} | 配置: {results['config_path']}")
 
-            # Matplotlib版本用于PDF下载
-            mpl_fig1, ax1 = plt.subplots(figsize=(6, 6))
-            ax1.plot(sample_trace["reference_x"], sample_trace["reference_y"], "--", label="Reference", color="#4c78a8")
-            ax1.plot(sample_trace["position_x"], sample_trace["position_y"], label="Actual", color="#e45756")
-            ax1.set_aspect("equal", "box")
-            ax1.set_title("Fig 1 · Reference vs Actual")
-            ax1.legend()
-
-            mpl_fig2, axes = plt.subplots(3, 1, figsize=(6.5, 7.5), sharex=True)
-            t = sample_trace["timestamp"]
-            kcm_cfg = config["kinematic_constraints"]
-            axes[0].plot(t, sample_trace["velocity"], color="#1f77b4"); axes[0].axhline(kcm_cfg["MAX_VEL"], color="red", linestyle="--")
-            axes[1].plot(t, sample_trace["acceleration"], color="#2ca02c"); axes[1].axhline(kcm_cfg["MAX_ACC"], color="red", linestyle="--")
-            axes[2].plot(t, sample_trace["jerk"], color="#d62728"); axes[2].axhline(kcm_cfg["MAX_JERK"], color="red", linestyle="--"); axes[2].axhline(-kcm_cfg["MAX_JERK"], color="red", linestyle="--")
-            axes[2].set_xlabel("Time (s)")
-            axes[0].set_ylabel("Vel"); axes[1].set_ylabel("Acc"); axes[2].set_ylabel("Jerk")
-            axes[0].set_title("Fig 2 · Dynamics")
-            mpl_fig1.tight_layout(); mpl_fig2.tight_layout()
-
-            col_dl1, col_dl2 = st.columns(2)
-            with col_dl1:
-                st.caption("Plotly 已预览；此处提供 PDF 下载")
-                st.download_button("Download Fig1 (PDF)", _buffer_pdf(mpl_fig1), file_name="fig1_path.pdf")
-                plt.close(mpl_fig1)
-            with col_dl2:
-                st.download_button("Download Fig2 (PDF)", _buffer_pdf(mpl_fig2), file_name="fig2_dynamics.pdf")
-                plt.close(mpl_fig2)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("##### Fig1 轨迹对比 (PDF 预览)")
+        st.markdown(results["fig1_iframe"], unsafe_allow_html=True)
+        st.download_button("下载 Fig1 (PDF)", data=results["fig1_pdf"], file_name="fig1_trajectory.pdf")
+    with col2:
+        st.markdown("##### Fig2 运动学曲线 (PDF 预览)")
+        st.markdown(results["fig2_iframe"], unsafe_allow_html=True)
+        st.download_button("下载 Fig2 (PDF)", data=results["fig2_pdf"], file_name="fig2_dynamics.pdf")
 
 
+# --------------------------------------------------------------------------------------
+# Main
+# --------------------------------------------------------------------------------------
 def main() -> None:
-    init_session_state()
-    
-    # 全局实时监控开关
-    auto_refresh = render_auto_refresh_toggle()
-    
-    # 模式选择
-    mode = st.sidebar.radio("选择模式", ["Training Ops", "Paper Mode"], index=0)
-    
-    # 运行中任务面板（仅 Training Ops 模式显示）
-    active_processes = render_running_tasks_panel() if mode == "Training Ops" else {}
-    
-    # 渲染主界面
-    if mode == "Training Ops":
-        render_training_ops(auto_refresh_enabled=auto_refresh, active_processes=active_processes)
+    ensure_state_defaults()
+    mode = st.sidebar.radio("系统模式", ["训练监控 (Training Ops)", "论文评估 (Paper Mode)"], index=0)
+    if mode == "训练监控 (Training Ops)":
+        render_training_view()
     else:
-        render_paper_mode()
-
-    # 自动刷新循环：仅在启用监控、Training Ops模式、且有进程运行时触发
-    if auto_refresh and mode == "Training Ops" and get_running_processes():
-        time.sleep(2)  # 2秒刷新间隔
-        _trigger_rerun()
+        render_paper_view()
 
 
 if __name__ == "__main__":

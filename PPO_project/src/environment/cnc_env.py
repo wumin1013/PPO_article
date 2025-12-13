@@ -281,20 +281,12 @@ class Env:
     def reset(self, random_start: bool = False):
         self.current_step = 0
         self.trajectory_states = []
-        use_random_start = random_start and len(self.Pm) > 100
+        # 强制从路径起点开始，忽略外部的 random_start 请求
 
-        if use_random_start:
-            start_idx = np.random.randint(0, int(len(self.Pm) * 0.9))
-            self.current_segment_idx = start_idx
-            self.current_position = np.array(self.Pm[start_idx])
-            self._current_direction_angle = self._get_path_direction(self.current_position)
-            self._current_step_length = self.MAX_VEL
-            self.trajectory = [self.current_position.copy()]
-        else:
-            self.current_segment_idx = 0
-            self.current_position = np.array(self.Pm[0])
-            self._current_direction_angle, self._current_step_length = self.initialize_starting_conditions()
-            self.trajectory = [self.current_position.copy()]
+        self.current_segment_idx = 0
+        self.current_position = np.array(self.Pm[0])
+        self._current_direction_angle, self._current_step_length = self.initialize_starting_conditions()
+        self.trajectory = [self.current_position.copy()]
 
         # 重置闭合路径追踪状态
         self.accumulated_distance = 0.0
@@ -449,15 +441,13 @@ class Env:
     
     def apply_action(self, action):
         theta_prime, length_prime = action
-        path_angle = self._get_path_direction(self.current_position)
-        effective_angle = path_angle + theta_prime * self.interpolation_period
-        self._current_direction_angle = effective_angle
+        # 自身航向积分更新，解除对路径切向的绑定
+        self._current_direction_angle += theta_prime * self.interpolation_period
+        self._current_direction_angle = (self._current_direction_angle + np.pi) % (2 * np.pi) - np.pi
 
         displacement = length_prime * self.interpolation_period
-        cos_angle = self.fast_cos(effective_angle)
-        sin_angle = self.fast_sin(effective_angle)
-        x_next = self.current_position[0] + displacement * cos_angle
-        y_next = self.current_position[1] + displacement * sin_angle
+        x_next = self.current_position[0] + displacement * self.fast_cos(self._current_direction_angle)
+        y_next = self.current_position[1] + displacement * self.fast_sin(self._current_direction_angle)
 
         self.current_position = np.array([x_next, y_next])
         self.trajectory.append(self.current_position.copy())
@@ -789,22 +779,37 @@ class Env:
     
     def calculate_reward(self):
         contour_error = self.get_contour_error(self.current_position)
-        progress = float(self.state[4])
-        end_point = np.array(self.Pm[-1])
-        end_distance = np.linalg.norm(self.current_position - end_point)
 
-        reward, components = self.reward_calculator.calculate_reward(
-            contour_error=contour_error,
-            progress=progress,
-            velocity=self.velocity,
-            action=(self.angular_vel, self.velocity),
-            kcm_intervention=self.kcm_intervention,
-            end_distance=end_distance,
-            lap_completed=self.closed and self.lap_completed,
+        # 致死惩罚：越界立即重罚，迫使智能体在容差带内切弯
+        if contour_error > self.half_epsilon:
+            self.last_reward_components = {
+                "lethal_penalty": -100.0,
+                "contour_error": contour_error,
+            }
+            return -100.0
+
+        # 核心奖励：分段自适应逻辑（入弯控速、出弯弹射、直线贴边）
+        segment_reward = self._calculate_segment_adaptive_reward()
+
+        # 基础进度奖励：鼓励持续向前推进
+        progress = (
+            self._calculate_closed_path_progress(self.current_position)
+            if self.closed
+            else self._calculate_path_progress(self.current_position)
         )
+        progress_reward = 5.0 * progress
 
-        self.last_reward_components = components
-        return reward
+        # KCM 干预惩罚：约束越多，奖励越低
+        kcm_penalty = -2.0 * self.kcm_intervention
+
+        total_reward = segment_reward + progress_reward + kcm_penalty
+        self.last_reward_components = {
+            "segment_adaptive": segment_reward,
+            "progress": progress_reward,
+            "kcm_penalty": kcm_penalty,
+            "contour_error": contour_error,
+        }
+        return total_reward
 
     def _calculate_segment_adaptive_reward(self):
         """根据路径段类型计算自适应奖励，加强直线段跟踪精度"""
@@ -844,10 +849,16 @@ class Env:
             return speed_penalty + precision_bonus
             
         elif just_passed_turn:
-            # 刚过转弯：加强误差修正奖
+            # 刚过转弯：加强误差修正奖励，并鼓励出弯弹射
             error_correction = -30.0 * (error_ratio) ** 2
             direction_bonus = 20.0 * np.exp(-12 * abs(self.state[2]))  # 方向对齐奖励
-            return error_correction + direction_bonus
+
+            # 出弯弹射奖励：正向加速度且尚未恢复到巡航速度时奖励越大
+            exit_burst_bonus = 0.0
+            if self.acceleration > 0 and self.velocity < self.MAX_VEL * 0.95:
+                exit_burst_bonus = 10.0 * (self.acceleration / self.MAX_ACC)
+
+            return error_correction + direction_bonus + exit_burst_bonus
             
         elif is_straight:
             # 直线段：极度重视跟踪精度，要求紧贴PM

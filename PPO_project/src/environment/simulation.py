@@ -67,9 +67,24 @@ def _build_path(path_name: str, base_cfg: Dict) -> List[np.ndarray]:
     scale = path_cfg.get("scale", 10.0)
     num_points = path_cfg.get("num_points", 200)
     lower = path_name.lower()
+    if lower.startswith("line"):
+        return get_path_by_name("line", scale=scale, num_points=num_points, angle=path_cfg.get("line", {}).get("angle", 0.0))
+    if lower.startswith("square"):
+        return get_path_by_name("square", scale=scale, num_points=num_points)
+    if "bspline" in lower:
+        return get_path_by_name("s_shape_bspline", scale=scale, num_points=num_points, **path_cfg.get("s_shape_bspline", {}))
     if lower.startswith("s"):
         return get_path_by_name("s_shape", scale=scale, num_points=num_points, **path_cfg.get("s_shape", {}))
-    return get_path_by_name("butterfly", scale=scale, num_points=num_points, **path_cfg.get("butterfly", {}))
+
+    if path_cfg.get("type") == "waypoints":
+        return [np.array(wp) for wp in path_cfg.get("waypoints", [])]
+
+    supported = {"line", "square", "s_shape", "s_shape_bspline"}
+    fallback_type = path_cfg.get("type", "line")
+    if fallback_type not in supported:
+        fallback_type = "line"
+    kwargs = path_cfg.get(fallback_type, {})
+    return get_path_by_name(fallback_type, scale=scale, num_points=num_points, **kwargs)
 
 
 def _inflate_constraints(base: Dict, factor: float = 50.0) -> Dict:
@@ -246,4 +261,3 @@ def build_default_config() -> SimulationConfig:
         max_jerk=float(kcm_cfg.get("MAX_JERK", 3.0)),
         epsilon=float(env_cfg.get("epsilon", 0.5)),
     )
-

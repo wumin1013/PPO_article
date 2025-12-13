@@ -19,6 +19,17 @@ from src.utils.geometry import (
     project_point_to_segment,
 )
 
+# 固定沿用单文件版本的动力学参数，避免配置漂移导致的震荡
+LEGACY_INTERPOLATION_PERIOD = 0.01
+LEGACY_KINEMATICS = {
+    "MAX_VEL": 1000.0,
+    "MAX_ACC": 5000.0,
+    "MAX_JERK": 50000.0,
+    "MAX_ANG_VEL": math.pi * 2,
+    "MAX_ANG_ACC": math.pi * 10,
+    "MAX_ANG_JERK": math.pi * 100,
+}
+
 
 class Env:
     def __init__(
@@ -60,15 +71,15 @@ class Env:
         self.rmax = 3 * epsilon
         self.device = device
         self.max_steps = max_steps
-        self.interpolation_period = interpolation_period
+        self.interpolation_period = float(LEGACY_INTERPOLATION_PERIOD)
         self.reward_weights = reward_weights or {}
         # 确保所有约束参数都是浮点数
-        self.MAX_VEL = float(MAX_VEL)
-        self.MAX_ACC = float(MAX_ACC)
-        self.MAX_JERK = float(MAX_JERK)
-        self.MAX_ANG_VEL = float(MAX_ANG_VEL)
-        self.MAX_ANG_ACC = float(MAX_ANG_ACC)
-        self.MAX_ANG_JERK = float(MAX_ANG_JERK)
+        self.MAX_VEL = float(LEGACY_KINEMATICS["MAX_VEL"])
+        self.MAX_ACC = float(LEGACY_KINEMATICS["MAX_ACC"])
+        self.MAX_JERK = float(LEGACY_KINEMATICS["MAX_JERK"])
+        self.MAX_ANG_VEL = float(LEGACY_KINEMATICS["MAX_ANG_VEL"])
+        self.MAX_ANG_ACC = float(LEGACY_KINEMATICS["MAX_ANG_ACC"])
+        self.MAX_ANG_JERK = float(LEGACY_KINEMATICS["MAX_ANG_JERK"])
         self.current_step = 0
         self.trajectory = []
         self.trajectory_states = []
@@ -82,6 +93,8 @@ class Env:
             weights=self.reward_weights,
             max_vel=self.MAX_VEL,
             half_epsilon=self.half_epsilon,
+            max_jerk=self.MAX_JERK,
+            max_ang_jerk=self.MAX_ANG_JERK,
         )
         
         # 闭合路径追踪相关
@@ -309,20 +322,10 @@ class Env:
         self.kcm_intervention = 0.0
         self.reward_calculator.reset()
 
-        # 基于当前位置刷新线段信息与观测
-        segment_idx, distance_to_next_turn = self._update_segment_info()
-        self.current_segment_idx = segment_idx
-        if not np.isfinite(distance_to_next_turn):
-            if self.cache['segment_lengths'] and 0 <= self.current_segment_idx < len(self.cache['segment_lengths']):
-                distance_to_next_turn = self.cache['segment_lengths'][self.current_segment_idx]
-            else:
-                distance_to_next_turn = 0.0
-        overall_progress = (
-            self._calculate_closed_path_progress(self.current_position)
-            if self.closed
-            else self._calculate_path_progress(self.current_position)
-        )
-        tau_initial = self.calculate_direction_deviation(self.current_position)
+        # 初始观测对齐单文件脚本：固定起点、零进度、使用首段长度
+        distance_to_next_turn = self.cache['segment_lengths'][0] if self.cache['segment_lengths'] else 0.0
+        overall_progress = 0.0
+        tau_initial = 0.0
         next_angle = self._get_next_angle(self.current_segment_idx)
         lookahead_features = self._compute_lookahead_features()
 
@@ -370,8 +373,9 @@ class Env:
         # 归一化动作映射回物理量级
         norm_theta = np.clip(norm_theta, -1.0, 1.0)
         norm_length = np.clip(norm_length, 0.0, 1.0)
-        raw_angular_vel_intent = norm_theta * self.MAX_ANG_VEL
-        raw_linear_vel_intent = norm_length * self.MAX_VEL
+        # 沿用旧版：动作即物理量（未按MAX_*放大），由约束函数裁剪
+        raw_angular_vel_intent = norm_theta
+        raw_linear_vel_intent = norm_length
 
         # 使用Numba优化的约束计算
         (self.velocity, self.acceleration, self.jerk,
@@ -793,11 +797,13 @@ class Env:
             contour_error=contour_error,
             progress=progress,
             velocity=self.velocity,
-            action=(self.angular_vel, self.velocity),
             heading_error=heading_error,
             kcm_intervention=self.kcm_intervention,
             end_distance=end_distance,
+            jerk=self.jerk,
+            angular_jerk=self.angular_jerk,
             lap_completed=lap_done,
+            is_closed=self.closed,
         )
 
         self.last_reward_components = components

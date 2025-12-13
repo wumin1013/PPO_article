@@ -1,125 +1,103 @@
 from __future__ import annotations
 
-from typing import Dict, Optional, Sequence, Tuple
+from typing import Dict, Tuple
 
 import numpy as np
 
 
 class RewardCalculator:
-    """Corridor-based reward calculator focused on speed, smoothness, and KCM cooperation."""
-
-    SAFE_RATIO = 0.8
-    BUFFER_RATIO = 1.0
+    """奖励计算：与单文件版本 `PPO最终版_改进.py` 对齐，不再使用额外权重项。"""
 
     def __init__(
         self,
         weights: Dict[str, float],
         max_vel: float,
         half_epsilon: float,
-        safe_ratio: float | None = None,
+        max_jerk: float,
+        max_ang_jerk: float,
+        safe_ratio: float | None = None,  # 兼容旧参数，逻辑中不再使用
     ):
         self.weights = weights or {}
         self.max_vel = max_vel
+        self.max_jerk = max_jerk
+        self.max_ang_jerk = max_ang_jerk
         self.half_epsilon = max(half_epsilon, 1e-6)
-        self.safe_ratio = safe_ratio if safe_ratio is not None else self.SAFE_RATIO
-        self.buffer_ratio = self.BUFFER_RATIO
-
         self.last_progress = 0.0
-        self.prev_action: Optional[np.ndarray] = None
 
     def reset(self) -> None:
         self.last_progress = 0.0
-        self.prev_action = None
 
     def calculate_reward(
         self,
         contour_error: float,
         progress: float,
         velocity: float,
-        action: Sequence[float],
         heading_error: float,
         kcm_intervention: float,
         end_distance: float,
+        jerk: float,
+        angular_jerk: float,
         lap_completed: bool = False,
+        is_closed: bool = False,
+        **_: object,
     ) -> Tuple[float, Dict[str, float]]:
-        error_ratio = float(np.clip(contour_error / self.half_epsilon, 0.0, np.inf))
-        speed_reward = self.weights.get("w_velocity", 1.0) * self._normalized_velocity(velocity)
-        corridor_reward, zone, buffer_penalty, centering_factor = self._corridor_term(error_ratio, speed_reward)
-        heading_reward = self._heading_alignment_reward(heading_error)
+        """精确复现单文件脚本中的奖励逻辑。"""
+        distance_ratio = float(np.clip(contour_error / self.half_epsilon, 0.0, 2.0))
+        tracking_reward = 10.0 * np.exp(-3.0 * distance_ratio) - 5.0
 
-        progress_reward = self.weights.get("w_progress", 1.0) * max(0.0, progress - self.last_progress)
-        smooth_penalty = self._action_smooth_penalty(action)
-        kcm_penalty = -self.weights.get("w_kcm_penalty", 0.0) * float(kcm_intervention)
-        completion_bonus = self._completion_bonus(end_distance, progress, lap_completed)
-        survival_reward = self.weights.get("w_survival", 0.05)
+        progress_diff = max(0.0, progress - self.last_progress)
+        progress_reward = 20.0 * progress_diff
+
+        tau = abs(heading_error)
+        direction_reward = 5.0 * np.exp(-2.0 * tau) - 2.5
+
+        velocity_ratio = velocity / max(self.max_vel, 1e-6)
+        velocity_reward = 2.0 * (1.0 - abs(velocity_ratio - 0.7))
+
+        jerk_penalty = -4.0 * np.clip(abs(jerk) / max(self.max_jerk, 1e-6), 0.0, 1.0)
+        ang_jerk_penalty = -4.0 * np.clip(abs(angular_jerk) / max(self.max_ang_jerk, 1e-6), 0.0, 1.0)
+        smoothness_reward = jerk_penalty + ang_jerk_penalty
+
+        constraint_penalty = -2.0 * kcm_intervention
+
+        completion_reward = 0.0
+        end_distance_ratio = end_distance / self.half_epsilon
+        if progress > 0.8:
+            proximity_bonus = 50.0 * (progress - 0.8) * np.exp(-5.0 * end_distance_ratio)
+            completion_reward += proximity_bonus
+            if end_distance < self.half_epsilon * 0.6:
+                completion_reward += 100.0 * np.exp(-10.0 * end_distance_ratio)
+                if end_distance < self.half_epsilon * 0.2:
+                    completion_reward += 200.0
+
+        if is_closed and lap_completed:
+            completion_reward += 150.0
+
+        survival_reward = 0.1
 
         total = (
-            corridor_reward
-            + heading_reward
+            tracking_reward
             + progress_reward
-            + smooth_penalty
-            + kcm_penalty
-            + completion_bonus
+            + direction_reward
+            + velocity_reward
+            + smoothness_reward
+            + constraint_penalty
+            + completion_reward
             + survival_reward
         )
-        total = float(np.clip(total, -50.0, 120.0))
+        total = float(np.clip(total, -20.0, 100.0))
 
-        self.prev_action = np.array(action, dtype=float)
         self.last_progress = progress
 
         components = {
-            "zone": zone,
-            "speed": float(speed_reward),
-            "corridor": float(corridor_reward),
-            "centering": float(centering_factor),
-            "heading_alignment": float(heading_reward),
-            "buffer_penalty": float(buffer_penalty),
-            "progress": float(progress_reward),
-            "action_smooth": float(smooth_penalty),
-            "kcm_penalty": float(kcm_penalty),
-            "completion": float(completion_bonus),
-            "survival": float(survival_reward),
+            "tracking_reward": float(tracking_reward),
+            "progress_reward": float(progress_reward),
+            "direction_reward": float(direction_reward),
+            "velocity_reward": float(velocity_reward),
+            "smoothness_reward": float(smoothness_reward),
+            "constraint_penalty": float(constraint_penalty),
+            "completion_reward": float(completion_reward),
+            "survival_reward": float(survival_reward),
             "total": float(total),
         }
         return total, components
-
-    def _normalized_velocity(self, velocity: float) -> float:
-        return float(np.clip(velocity / max(self.max_vel, 1e-6), 0.0, 1.2))
-
-    def _corridor_term(self, error_ratio: float, speed_reward: float) -> Tuple[float, str, float, float]:
-        centering_factor = max(0.0, 1.0 - (error_ratio / max(self.buffer_ratio, 1e-6)) ** 2)
-        centered_speed = speed_reward * centering_factor
-
-        if error_ratio < self.safe_ratio:
-            return centered_speed, "safe", 0.0, centering_factor
-
-        if error_ratio <= self.buffer_ratio:
-            penalty_strength = (error_ratio - self.safe_ratio) / max(self.buffer_ratio - self.safe_ratio, 1e-6)
-            buffer_penalty = self.weights.get("w_e", 1.0) * (penalty_strength**2)
-            scaled_speed = centered_speed * (1.0 - 0.5 * penalty_strength)
-            return scaled_speed - buffer_penalty, "buffer", buffer_penalty, centering_factor
-
-        violation_penalty = self.weights.get("w_violation", 8.0) * (1.0 + (error_ratio - self.buffer_ratio) * 2.0)
-        return -violation_penalty, "violation", violation_penalty, centering_factor
-
-    def _heading_alignment_reward(self, heading_error: float) -> float:
-        weight = self.weights.get("w_heading_align", 1.0)
-        if weight <= 0.0:
-            return 0.0
-        decay = self.weights.get("heading_align_decay", 4.0)
-        return weight * float(np.exp(-decay * abs(heading_error)))
-
-    def _action_smooth_penalty(self, action: Sequence[float]) -> float:
-        if self.prev_action is None:
-            return 0.0
-        delta = np.abs(np.array(action, dtype=float) - self.prev_action)
-        return -self.weights.get("w_action_smooth", 0.0) * float(delta.sum())
-
-    def _completion_bonus(self, end_distance: float, progress: float, lap_completed: bool) -> float:
-        bonus = 0.0
-        if lap_completed:
-            bonus += 30.0
-        if progress > 0.8:
-            proximity = 1.0 - np.clip(end_distance / (self.half_epsilon + 1e-6), 0.0, 1.0)
-            bonus += 20.0 * proximity
-        return bonus

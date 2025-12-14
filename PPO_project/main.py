@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import csv
 import os
+import random
 import time
 from pathlib import Path
 from typing import Mapping, Optional, Sequence, Tuple
@@ -96,6 +97,51 @@ def apply_cli_overrides(config: dict, overrides: Optional[argparse.Namespace]) -
         if cli_value is not None:
             kcm_cfg[cfg_key] = float(cli_value)
             print(f"[CLI Override] {cfg_key} <- {cli_value}")
+
+
+def _set_global_seed(seed: int) -> None:
+    """设置并打印全局随机种子，保证可重复性。"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    print(f"[SEED] global seed set to {seed} (random/numpy/torch)")
+
+
+def _extract_baseline_type(experiment_mode: str) -> str:
+    """解析baseline类型，支持baseline_s_curve等复合名称。"""
+    prefix = "baseline_"
+    if not experiment_mode.startswith(prefix):
+        raise ValueError(f"experiment_mode {experiment_mode} is not a baseline mode")
+    return experiment_mode.split("_", maxsplit=1)[1]
+
+
+def _log_run_hyperparams(seed: int, env: Env, gamma: float | None, experiment_mode: str) -> None:
+    """输出本次运行的关键超参（dt/gamma/有效视界与约束上限）。"""
+    gamma_repr = f"{gamma:.6f}" if gamma is not None else "N/A"
+    horizon_steps: float | None = None
+    horizon_time: float | None = None
+    if gamma is not None and gamma < 1:
+        denominator = max(1e-9, 1.0 - gamma)
+        horizon_steps = 1.0 / denominator
+        horizon_time = env.interpolation_period * horizon_steps
+
+    if horizon_steps is not None and horizon_time is not None:
+        print(
+            f"[RUN] seed={seed} mode={experiment_mode} dt={env.interpolation_period} "
+            f"gamma={gamma_repr} H_steps≈{horizon_steps:.1f} H_time≈{horizon_time:.4f}"
+        )
+    else:
+        print(
+            f"[RUN] seed={seed} mode={experiment_mode} dt={env.interpolation_period} "
+            f"gamma={gamma_repr} (no finite horizon)"
+        )
+    print(
+        "[RUN] kinematic_constraints: "
+        f"MAX_VEL={env.MAX_VEL}, MAX_ACC={env.MAX_ACC}, MAX_JERK={env.MAX_JERK}, "
+        f"MAX_ANG_VEL={env.MAX_ANG_VEL}, MAX_ANG_ACC={env.MAX_ANG_ACC}, MAX_ANG_JERK={env.MAX_ANG_JERK}"
+    )
 
 
 def _resolve_experiment_category(experiment_config: Mapping, experiment_mode: str) -> str:
@@ -282,6 +328,11 @@ def train(
         experiment_mode = "ablation_no_kcm"
         experiment_config["mode"] = experiment_mode
 
+    seed = int(config.get("seed", experiment_config.get("seed", 42)))
+    config["seed"] = seed
+    experiment_config["seed"] = seed
+    _set_global_seed(seed)
+
     print(f"加载配置: {resolved_config_path}")
     print(yaml.dump(config, allow_unicode=True))
 
@@ -292,6 +343,7 @@ def train(
     kcm_config = config["kinematic_constraints"]
     path_config = config["path"]
     reward_weights = config.get("reward_weights", {})
+    ppo_config = config.get("ppo", {})
 
     Pm = _build_path(path_config)
     env = Env(
@@ -312,6 +364,8 @@ def train(
 
     obs_space = getattr(env, "observation_space", None)
     act_space = getattr(env, "action_space", None)
+    gamma_for_log = ppo_config.get("gamma")
+    _log_run_hyperparams(seed, env, gamma_for_log, experiment_mode)
     print(f"环境创建成功: 状态维度{env.observation_dim}, 动作维度={env.action_space_dim}")
     state_dim = obs_space.shape[0] if obs_space is not None else env.observation_dim
     normalizer = StateNormalizer(state_dim)
@@ -320,7 +374,8 @@ def train(
     resume_experiment_dir: Path | None = None
 
     if experiment_mode in ["baseline_nnc", "baseline_s_curve"]:
-        baseline_type = experiment_mode.split("_")[1]
+        baseline_type = _extract_baseline_type(experiment_mode)
+        experiment_config["baseline_type"] = baseline_type
         config["state_dim"] = obs_space.shape[0] if obs_space is not None else env.observation_dim
         config["action_dim"] = act_space.shape[0] if act_space is not None else env.action_space_dim
         config["observation_space"] = obs_space
@@ -329,7 +384,6 @@ def train(
         print(f"创建基线算法智能体 {baseline_type.upper()}")
 
     elif experiment_mode == "ablation_no_kcm":
-        ppo_config = config["ppo"]
         agent = NNCAgent(
             state_dim=None,
             hidden_dim=ppo_config["hidden_dim"],
@@ -350,7 +404,6 @@ def train(
         print("消融实验模式: 禁用KCM模块")
 
     else:
-        ppo_config = config["ppo"]
         agent = PPOContinuous(
             state_dim=None,
             hidden_dim=ppo_config["hidden_dim"],
@@ -650,6 +703,11 @@ def test(
     experiment_config = config.setdefault("experiment", {})
     experiment_mode = mode_override or experiment_config.get("mode", "test")
 
+    seed = int(config.get("seed", experiment_config.get("seed", 42)))
+    config["seed"] = seed
+    experiment_config["seed"] = seed
+    _set_global_seed(seed)
+
     print(f"加载配置: {resolved_config_path}")
     print(yaml.dump(config, allow_unicode=True))
 
@@ -660,6 +718,7 @@ def test(
     kcm_config = config["kinematic_constraints"]
     path_config = config["path"]
     reward_weights = config.get("reward_weights", {})
+    ppo_config = config.get("ppo", {})
 
     manager, log_tag = _init_experiment(
         resolved_config_path,
@@ -689,7 +748,8 @@ def test(
 
     obs_space = getattr(env, "observation_space", None)
     act_space = getattr(env, "action_space", None)
-    ppo_config = config["ppo"]
+    gamma_for_log = ppo_config.get("gamma")
+    _log_run_hyperparams(seed, env, gamma_for_log, experiment_mode)
     agent = PPOContinuous(
         state_dim=None,
         hidden_dim=ppo_config["hidden_dim"],

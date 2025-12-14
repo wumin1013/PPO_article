@@ -37,9 +37,14 @@ MAIN_SCRIPT = BASE_DIR / "main.py"
 PYTHON_CMD = ROOT_DIR / "python.cmd"
 
 SCENARIOS: Dict[str, Path] = {
-    "Line (直线)": CONFIG_DIR / "default.yaml",
-    "Square (正方形)": CONFIG_DIR / "default.yaml",
-    "S-shape (S形)": CONFIG_DIR / "default.yaml",
+    "Line (直线)": CONFIG_DIR / "train_line.yaml",
+    "Square (正方形)": CONFIG_DIR / "train_square.yaml",
+    "S-shape (S形)": CONFIG_DIR / "train_s_shape.yaml",
+}
+SCENARIO_SUFFIX: Dict[str, str] = {
+    "Line (直线)": "line",
+    "Square (正方形)": "square",
+    "S-shape (S形)": "s_shape",
 }
 
 PATH_TYPES: List[str] = ["line", "square", "s_shape"]
@@ -121,6 +126,8 @@ def _apply_path_override(config: dict, path_override: Optional[dict]) -> dict:
 
 
 def _build_geometry_from_config(config: dict) -> Dict[str, object]:
+    if not isinstance(config, dict) or "environment" not in config or "kinematic_constraints" not in config:
+        return {"ref_points": [], "pl": [], "pr": [], "ranges": {}}
     env = _build_env_from_config(config)
     ref_points = [(float(p[0]), float(p[1])) for p in env.Pm]
     pl = [(float(p[0]), float(p[1])) for p in env.cache.get("Pl", [])]
@@ -141,9 +148,14 @@ def load_reference_geometry(config_path: Path, path_override: Optional[dict] = N
     if cached:
         return cached
 
-    config, _ = load_config(str(config_path))
-    config = _apply_path_override(config, path_override)
-    result = _build_geometry_from_config(config)
+    try:
+        config, _ = load_config(str(config_path))
+        config = _apply_path_override(config, path_override)
+        result = _build_geometry_from_config(config)
+    except Exception as exc:
+        st.warning(f"加载配置失败，使用空几何占位: {exc}")
+        result = {"ref_points": [], "pl": [], "pr": [], "ranges": {}}
+
     if use_cache:
         st.session_state[cache_key] = result
     return result
@@ -154,6 +166,31 @@ def _safe_log_dir(path: Optional[str]) -> Optional[Path]:
         return None
     log_dir = Path(path)
     return log_dir if log_dir.exists() else None
+
+
+def _terminate_process(pid: int) -> None:
+    """跨平台终止子进程，Windows 上使用 taskkill 避免 WinError 87。"""
+    if pid is None:
+        return
+    try:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        else:
+            os.kill(int(pid), signal.SIGTERM)
+    except Exception:
+        # 静默失败避免前端崩溃
+        pass
+
+
+def _resolve_config_for_mode(scenario_key: str, mode: str) -> Path:
+    """根据场景和模式选取合适的配置文件；若未找到则回落到训练配置。"""
+    suffix = SCENARIO_SUFFIX.get(scenario_key, "line")
+    if mode in {"baseline_nnc", "baseline_s_curve", "ablation_no_kcm", "ablation_no_reward", "train"}:
+        candidate = CONFIG_DIR / f"{mode}_{suffix}.yaml"
+        if candidate.exists():
+            return candidate
+    # 测试或未知模式回退到默认训练配置
+    return SCENARIOS.get(scenario_key, CONFIG_DIR / f"train_{suffix}.yaml")
 
 
 def _find_latest_log_dir() -> Optional[Path]:
@@ -215,6 +252,7 @@ def start_training(
     disable_smooth: bool,
     kcm_overrides: Dict[str, float],
     path_override: Optional[dict] = None,
+    mode: str = "train",
 ) -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_dir = SAVED_MODELS_DIR / experiment_name / timestamp
@@ -236,7 +274,7 @@ def start_training(
         resolve_python(),
         str(MAIN_SCRIPT),
         "--mode",
-        "train",
+        mode,
         "--config",
         str(runtime_config_path),
         "--experiment_name",
@@ -244,10 +282,11 @@ def start_training(
         "--experiment_dir",
         str(experiment_dir),
     ]
-    if disable_kcm:
-        cmd.extend(["--use_kcm", "False"])
-    if disable_smooth:
-        cmd.extend(["--use_smoothness_reward", "False"])
+    if mode == "train":
+        if disable_kcm:
+            cmd.extend(["--use_kcm", "False"])
+        if disable_smooth:
+            cmd.extend(["--use_smoothness_reward", "False"])
 
     flag_map = {
         "MAX_VEL": "max_vel",
@@ -287,10 +326,7 @@ def start_training(
 def stop_training() -> None:
     pid = st.session_state.get("train_pid")
     if pid:
-        try:
-            os.kill(int(pid), signal.SIGTERM)
-        except Exception as exc:
-            st.warning(f"终止进程时出现问题: {exc}")
+        _terminate_process(int(pid))
     st.session_state["is_training"] = False
     st.session_state["train_pid"] = None
     st.session_state["log_dir"] = None
@@ -412,7 +448,12 @@ def load_live_data(log_dir: Optional[Path], config_path: Path, path_override: Op
 def render_training_sidebar() -> Dict[str, object]:
     st.sidebar.markdown("### 训练监控 · Training Ops")
     scenario = st.sidebar.selectbox("场景选择", list(SCENARIOS.keys()))
-    config_path = SCENARIOS[scenario]
+    mode_choice = st.sidebar.selectbox(
+        "运行模式",
+        ["train", "ablation_no_kcm", "ablation_no_reward", "baseline_nnc", "baseline_s_curve", "test"],
+        index=0,
+    )
+    config_path = _resolve_config_for_mode(scenario, mode_choice)
     path_type_map = {
         "Line (直线)": "line",
         "Square (正方形)": "square",
@@ -442,7 +483,15 @@ def render_training_sidebar() -> Dict[str, object]:
 
     col_start, col_stop = st.sidebar.columns(2)
     if col_start.button("🚀 启动训练 (Start)", width='stretch'):
-        start_training(config_path, experiment_name, disable_kcm, disable_smooth, kcm_overrides, path_override)
+        start_training(
+            config_path,
+            experiment_name,
+            disable_kcm,
+            disable_smooth,
+            kcm_overrides,
+            path_override,
+            mode_choice,
+        )
     if col_stop.button("🛑 停止训练 (Stop)", width='stretch'):
         stop_training()
 

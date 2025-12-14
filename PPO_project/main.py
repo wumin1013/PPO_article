@@ -506,7 +506,14 @@ def train(
 
             while not done:
                 action = agent.take_action(state)
-                next_state, reward, done, info = env.step(action)
+                action_arr = np.array(action, dtype=float).flatten()
+                if getattr(env, "action_space", None) is not None:
+                    low, high = env.action_space.low, env.action_space.high
+                    clipped_action = np.clip(action_arr, low, high)
+                else:
+                    clipped_action = np.array([np.clip(action_arr[0], -1.0, 1.0), np.clip(action_arr[1], 0.0, 1.0)])
+
+                next_state, reward, done, info = env.step(clipped_action)
                 next_state = normalizer(next_state)
                 global_step += 1
 
@@ -515,7 +522,7 @@ def train(
                     current_episode_trace.append((float(pos_sample[0]), float(pos_sample[1])))
 
                 transition_dict["states"].append(state)
-                transition_dict["actions"].append(action)
+                transition_dict["actions"].append(clipped_action.tolist())
                 transition_dict["next_states"].append(next_state)
                 transition_dict["rewards"].append(reward)
                 transition_dict["dones"].append(done)
@@ -803,7 +810,14 @@ def test(
     with DataLogger(log_dir=manager.logs_dir, filename=log_filename) as data_logger, torch.no_grad():
         while not done:
             action = agent.take_action(state)
-            next_state, reward, done, info = env.step(action)
+            action_arr = np.array(action, dtype=float).flatten()
+            if getattr(env, "action_space", None) is not None:
+                low, high = env.action_space.low, env.action_space.high
+                clipped_action = np.clip(action_arr, low, high)
+            else:
+                clipped_action = np.array([np.clip(action_arr[0], -1.0, 1.0), np.clip(action_arr[1], 0.0, 1.0)])
+
+            next_state, reward, done, info = env.step(clipped_action)
 
             ref_point = DataLogger.project_to_path(
                 position=env.current_position,

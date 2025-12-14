@@ -384,16 +384,18 @@ class Env:
         prev_ang_vel = self.angular_vel
         prev_ang_acc = self.angular_acc
 
-        norm_action = np.array(action, dtype=float).flatten()
-        norm_theta = float(norm_action[0]) if norm_action.size > 0 else 0.0
-        norm_length = float(norm_action[1]) if norm_action.size > 1 else 0.0
+        policy_action = np.array(action, dtype=float).flatten()
+        policy_theta = float(policy_action[0]) if policy_action.size > 0 else 0.0
+        policy_length = float(policy_action[1]) if policy_action.size > 1 else 0.0
 
-        # 归一化动作映射回物理量级
-        norm_theta = np.clip(norm_theta, -1.0, 1.0)
-        norm_length = np.clip(norm_length, 0.0, 1.0)
-        # 沿用旧版：动作即物理量（未按MAX_*放大），由约束函数裁剪
-        raw_angular_vel_intent = norm_theta
-        raw_linear_vel_intent = norm_length
+        # 先按动作空间边界裁剪，保持 PPO 使用的 log_prob 与送入环境的一致
+        policy_theta = np.clip(policy_theta, -1.0, 1.0)
+        policy_length = np.clip(policy_length, 0.0, 1.0)
+        action_policy = np.array([policy_theta, policy_length], dtype=float)
+
+        # policy 意图作为物理量输入约束
+        raw_angular_vel_intent = policy_theta
+        raw_linear_vel_intent = policy_length
 
         # 使用Numba优化的约束计算
         (self.velocity, self.acceleration, self.jerk,
@@ -415,7 +417,7 @@ class Env:
         next_state = self.apply_action(safe_action)
         self.state = next_state
         self.trajectory_states.append(next_state)
-        
+
         # 更新误差历史
         current_error = self.get_contour_error(self.current_position)
         self.error_history.append(current_error)
@@ -434,6 +436,9 @@ class Env:
             "progress": self.state[4],  # 添加进度信息
             "jerk": self.jerk,  # 添加当前捷度指标
             "kcm_intervention": self.kcm_intervention,  # 添加运动学约束干预程度
+            "action_policy": action_policy.copy(),
+            "action_exec": np.array(safe_action, dtype=float),
+            "action_gap_abs": np.abs(np.array(safe_action, dtype=float) - action_policy),
         }
         normalized_state = self.normalize_state(self.state)
         return normalized_state, reward, done, info
@@ -467,25 +472,36 @@ class Env:
     
     def apply_action(self, action):
         theta_prime, length_prime = action
-        # 自身航向积分更新，解除对路径切向的绑定
-        self._current_direction_angle += theta_prime * self.interpolation_period
-        self._current_direction_angle = (self._current_direction_angle + np.pi) % (2 * np.pi) - np.pi
-
-        displacement = length_prime * self.interpolation_period
-        x_next = self.current_position[0] + displacement * self.fast_cos(self._current_direction_angle)
-        y_next = self.current_position[1] + displacement * self.fast_sin(self._current_direction_angle)
-
-        self.current_position = np.array([x_next, y_next])
+        # 路径切向基准 + 相对偏移（旧版语义）
+        new_pos = self.calculate_new_position(theta_prime, length_prime)
+        self.current_position = new_pos
         self.trajectory.append(self.current_position.copy())
         tau_next = self.calculate_direction_deviation(self.current_position)
         self.current_segment_idx, distance_to_next_turn = self._update_segment_info()
-        overall_progress = self._calculate_closed_path_progress(self.current_position) if self.closed else self._calculate_path_progress(self.current_position)
+        overall_progress = (
+            self._calculate_closed_path_progress(self.current_position)
+            if self.closed
+            else self._calculate_path_progress(self.current_position)
+        )
         next_angle = self._get_next_angle(self.current_segment_idx)
 
         lookahead_features = self._compute_lookahead_features()
-        base_state = np.array([theta_prime, length_prime, tau_next, distance_to_next_turn, overall_progress,
-                               next_angle, self.velocity, self.acceleration, self.jerk,
-                               self.angular_vel, self.angular_acc, self.angular_jerk])
+        base_state = np.array(
+            [
+                theta_prime,
+                length_prime,
+                tau_next,
+                distance_to_next_turn,
+                overall_progress,
+                next_angle,
+                self.velocity,
+                self.acceleration,
+                self.jerk,
+                self.angular_vel,
+                self.angular_acc,
+                self.angular_jerk,
+            ]
+        )
         return np.concatenate([base_state, lookahead_features])
 
     def _update_segment_info(self):

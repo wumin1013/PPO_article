@@ -88,6 +88,7 @@ class Env:
         self.MAX_ANG_JERK = float(
             MAX_ANG_JERK if MAX_ANG_JERK is not None else LEGACY_KINEMATICS["MAX_ANG_JERK"]
         )
+        self.lookahead_lateral_soft_k = 3.0  # d_i 归一化软因子（越大越不易饱和）
         self.current_step = 0
         self.trajectory = []
         self.trajectory_states = []
@@ -147,14 +148,19 @@ class Env:
             'Pr': pr,
             'polygons': None,
             'total_path_length': None,
-            'segment_info': {}  # 存储每个线段的缓存信
+            'segment_info': {},  # 存储每个线段的缓存信
+            'cumulative_lengths': None,
         }
         # 预计算并缓存几何特征
         self._precompute_and_cache_geometric_features()
         self.curvature_profile, self.curvature_rate_profile = self._compute_curvature_profile()
         max_segment = max(self.cache['segment_lengths'] or [1.0])
-        self.lookahead_longitudinal_scale = max(max_segment * self.lookahead_points, 1.0)
-        self.lookahead_lateral_scale = max(self.half_epsilon, 1.0)
+        total_length = self.cache['total_path_length'] or max_segment
+        # 前瞻距离按弧长等间距，保证尺度与路径长度相关
+        self.lookahead_spacing = max(total_length / (self.lookahead_points + 1), self.half_epsilon * 0.5)
+        self.lookahead_longitudinal_scale = max(self.lookahead_spacing * self.lookahead_points, 1.0)
+        # lateral scale 用 soft k 缩放，避免远端饱和
+        self.lookahead_lateral_scale = max(self.half_epsilon * self.lookahead_lateral_soft_k, 1.0)
         max_curvature_rate = max([abs(v) for v in self.curvature_rate_profile] + [0.0])
         self.curvature_rate_scale = max(max_curvature_rate, 1e-3)
         # 创建三角函数查找表
@@ -277,7 +283,12 @@ class Env:
         self.cache['segment_directions'] = segment_directions
             
         # 计算总路径长
-        self.cache['total_path_length'] = sum(segment_lengths) if segment_lengths else 0.0
+        total_length = sum(segment_lengths) if segment_lengths else 0.0
+        self.cache['total_path_length'] = total_length
+        cumulative = [0.0]
+        for l in segment_lengths:
+            cumulative.append(cumulative[-1] + l)
+        self.cache['cumulative_lengths'] = cumulative
         
         # 创建多边形并缓存（重用_create_polygons函数
         self.cache['polygons'] = self._create_polygons()
@@ -462,8 +473,12 @@ class Env:
             base = offset + idx * self.lookahead_feature_size
             if base + 2 >= len(state):
                 break
-            normalized[base] = np.clip(state[base] / self.lookahead_longitudinal_scale, -1, 1)
-            normalized[base + 1] = np.clip(state[base + 1] / self.lookahead_lateral_scale, -1, 1)
+            # s_i: 前向距离，归一化到[0,1]
+            normalized[base] = np.clip(state[base] / self.lookahead_longitudinal_scale, 0, 1)
+            # d_i: 法向距离，采用软缩放+ tanh 防饱和，左正右负
+            d_scaled = (state[base + 1] / max(self.half_epsilon, 1e-6)) / self.lookahead_lateral_soft_k
+            normalized[base + 1] = np.tanh(d_scaled)
+            # 曲率变化率（可选），压到[-1,1]
             if self.curvature_rate_scale > 0:
                 normalized[base + 2] = np.clip(state[base + 2] / self.curvature_rate_scale, -1, 1)
             else:
@@ -767,41 +782,70 @@ class Env:
 
         return curvatures, curvature_rate
 
-    def _get_lookahead_indices(self):
-        """Get indices of forward path points for closed or open paths"""
-        current_segment = self._find_containing_segment(self.current_position)
-        if current_segment < 0:
-            current_segment = max(self.current_segment_idx, 0)
-        start_idx = current_segment + 1
-        indices = []
-        total_points = len(self.Pm)
+    def _project_onto_path(self, pt):
+        """投影点到路径，返回投影坐标、段索引、弧长、切向/法向单位向量。"""
+        seg_idx = self._find_containing_segment(pt)
+        if seg_idx < 0:
+            seg_idx = max(self.current_segment_idx, 0)
+        p1 = np.array(self.Pm[seg_idx])
+        p2 = np.array(self.Pm[(seg_idx + 1) % len(self.Pm)])
+        seg_vec = p2 - p1
+        seg_len = np.linalg.norm(seg_vec)
+        if seg_len < 1e-8:
+            t_hat = np.array([1.0, 0.0])
+            proj = p1
+            t = 0.0
+        else:
+            t = np.clip(np.dot(pt - p1, seg_vec) / (seg_len**2), 0.0, 1.0)
+            proj = p1 + t * seg_vec
+            t_hat = seg_vec / seg_len
+        n_hat = np.array([-t_hat[1], t_hat[0]])  # 左侧为正
+        s_along = (self.cache['cumulative_lengths'][seg_idx] if self.cache['cumulative_lengths'] else 0.0) + t * seg_len
+        return proj, seg_idx, s_along, t_hat, n_hat
 
+    def _interpolate_point_at_s(self, s_value: float) -> tuple[np.ndarray, int, float]:
+        """按弧长获取路径点，返回坐标、段索引、局部t。"""
+        total = self.cache['total_path_length'] or 1.0
+        s_clamped = np.clip(s_value, 0.0, total)
+        cumulative = self.cache.get('cumulative_lengths') or []
+        if not cumulative or len(cumulative) < 2:
+            return np.array(self.Pm[0]), 0, 0.0
+        # 找到所在段
+        seg_idx = min(np.searchsorted(cumulative, s_clamped, side="right") - 1, len(self.Pm) - 2)
+        seg_start_s = cumulative[seg_idx]
+        seg_len = self.cache['segment_lengths'][seg_idx] if seg_idx < len(self.cache['segment_lengths']) else 1.0
+        if seg_len <= 0:
+            t = 0.0
+        else:
+            t = np.clip((s_clamped - seg_start_s) / seg_len, 0.0, 1.0)
+        p1 = np.array(self.Pm[seg_idx])
+        p2 = np.array(self.Pm[seg_idx + 1])
+        point = p1 + t * (p2 - p1)
+        return point, seg_idx, t
+
+    def _get_lookahead_targets(self, s_current: float):
+        """按弧长等间距向前采样目标点。"""
+        total = self.cache['total_path_length'] or 1.0
+        targets = []
         for i in range(self.lookahead_points):
-            idx = start_idx + i
-            if self.closed:
-                idx = idx % total_points
-            else:
-                idx = min(idx, total_points - 1)
-            indices.append(idx)
-        return indices
+            s_target = min(s_current + self.lookahead_spacing * (i + 1), total)
+            pt, seg_idx, _ = self._interpolate_point_at_s(s_target)
+            targets.append((pt, seg_idx))
+        return targets
 
     def _compute_lookahead_features(self):
-        """Transform forward path points to body frame as [x_body, y_body, d/ds]"""
-        heading = self._current_direction_angle
-        cos_h = self.fast_cos(heading)
-        sin_h = self.fast_sin(heading)
-
-        def world_to_body(delta):
-            x_body = delta[0] * cos_h + delta[1] * sin_h
-            y_body = -delta[0] * sin_h + delta[1] * cos_h
-            return x_body, y_body
-
+        """使用路径切向坐标系的前瞻特征: [s_i, d_i, curvature_rate]."""
+        proj, seg_idx, s_current, t_hat, n_hat = self._project_onto_path(self.current_position)
+        targets = self._get_lookahead_targets(s_current)
         features = []
-        for idx in self._get_lookahead_indices():
-            delta = np.array(self.Pm[idx]) - self.current_position
-            x_local, y_local = world_to_body(delta)
-            kappa_rate = self.curvature_rate_profile[idx] if idx < len(self.curvature_rate_profile) else 0.0
-            features.extend([x_local, y_local, kappa_rate])
+        for pt, target_seg in targets:
+            delta = pt - proj
+            s_along = float(np.dot(delta, t_hat))
+            d_signed = float(np.dot(delta, n_hat))  # 左正右负
+            kappa_rate = 0.0
+            if target_seg < len(self.curvature_rate_profile):
+                kappa_rate = float(self.curvature_rate_profile[target_seg])
+            features.extend([s_along, d_signed, kappa_rate])
         return np.array(features, dtype=float)
 
     def _get_path_direction(self, pt):

@@ -253,6 +253,7 @@ def start_training(
     kcm_overrides: Dict[str, float],
     path_override: Optional[dict] = None,
     mode: str = "train",
+    env_override: Optional[Dict[str, float]] = None,
 ) -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_dir = SAVED_MODELS_DIR / experiment_name / timestamp
@@ -263,6 +264,15 @@ def start_training(
         try:
             base_config, _ = load_config(str(config_path))
             merged_config = _apply_path_override(base_config, path_override)
+            if env_override:
+                merged_env = merged_config.get("environment", {})
+                merged_env.update(env_override)
+                merged_config["environment"] = merged_env
+            if kcm_overrides:
+                merged_kcm = merged_config.get("kinematic_constraints", {})
+                for k, v in kcm_overrides.items():
+                    merged_kcm[k] = v
+                merged_config["kinematic_constraints"] = merged_kcm
             runtime_config_path = experiment_dir / "config.runtime.yaml"
             with runtime_config_path.open("w", encoding="utf-8") as f:
                 yaml.safe_dump(merged_config, f, allow_unicode=True, sort_keys=False)
@@ -479,6 +489,20 @@ def render_training_sidebar() -> Dict[str, object]:
             val = st.number_input(label, value=base_value, step=0.1, format="%.4f", key=f"kcm_{cfg_key}")
             kcm_overrides[cfg_key] = float(val)
 
+    env_override: Dict[str, float] = {}
+    with st.sidebar.expander("Environment 参数", expanded=False):
+        env_cfg = config.get("environment", {})
+        base_dt = float(env_cfg.get("interpolation_period", 0.01))
+        base_eps = float(env_cfg.get("epsilon", 1.5))
+        base_steps = int(env_cfg.get("max_steps", 4000))
+        base_lookahead = int(env_cfg.get("lookahead_points", 5))
+        env_override["interpolation_period"] = st.number_input("插值周期 dt", value=base_dt, step=0.001, format="%.4f")
+        env_override["epsilon"] = st.number_input("容差带宽 epsilon", value=base_eps, step=0.1, format="%.3f")
+        env_override["max_steps"] = int(st.number_input("最大步数 max_steps", value=base_steps, step=50))
+        env_override["lookahead_points"] = int(
+            st.number_input("前瞻点数 lookahead_points", min_value=1, max_value=64, value=base_lookahead, step=1)
+        )
+
     path_override = _render_path_override_form(config, selected_path_type)
 
     col_start, col_stop = st.sidebar.columns(2)
@@ -491,6 +515,7 @@ def render_training_sidebar() -> Dict[str, object]:
             kcm_overrides,
             path_override,
             mode_choice,
+            env_override,
         )
     if col_stop.button("🛑 停止训练 (Stop)", width='stretch'):
         stop_training()

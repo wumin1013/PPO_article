@@ -1,0 +1,55 @@
+environment:
+  epsilon: 1.5
+  interpolation_period: 0.01
+  max_steps: 4000
+  lookahead_points: 8
+kinematic_constraints:
+  MAX_VEL: 1000.0
+  MAX_ACC: 5000.0
+  MAX_JERK: 50000.0
+  MAX_ANG_VEL: 6.283185307179586
+  MAX_ANG_ACC: 31.41592653589793
+  MAX_ANG_JERK: 314.1592653589793
+reward_weights:
+  w_velocity: 1.0
+  w_progress: 2.0
+  w_heading_align: 1.5
+  w_e: 0.5
+  w_action_smooth: 0.5
+  w_kcm_penalty: 1.5
+  w_violation: 5.0
+  w_survival: 0.05
+ppo:
+  actor_lr: 2.0e-05
+  critic_lr: 0.0001
+  hidden_dim: 256
+  gamma: 0.99
+  lmbda: 0.95
+  epochs: 10
+  eps: 0.1
+  batch_size: null
+  ent_coef: 0.0
+training:
+  num_episodes: 500
+  smoothing_factor: 0.9
+  save_interval: 100
+  log_interval: 50
+  checkpoint_interval_steps: 2048
+path:
+  type: line
+  closed: false
+  scale: 10.0
+  num_points: 200
+  s_shape:
+    amplitude: 5.0
+    periods: 2.0
+  s_shape_bspline:
+    control_points: null
+    smoothing: 0.0
+  line:
+    angle: 0.0
+experiment:
+  mode: baseline_s_curve
+  baseline_type: s_curve
+  enable_kcm: true
+  model_path: null

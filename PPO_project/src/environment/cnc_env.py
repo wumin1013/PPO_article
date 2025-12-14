@@ -71,15 +71,23 @@ class Env:
         self.rmax = 3 * epsilon
         self.device = device
         self.max_steps = max_steps
-        self.interpolation_period = float(LEGACY_INTERPOLATION_PERIOD)
+        self.interpolation_period = float(
+            interpolation_period if interpolation_period is not None else LEGACY_INTERPOLATION_PERIOD
+        )
         self.reward_weights = reward_weights or {}
         # 确保所有约束参数都是浮点数
-        self.MAX_VEL = float(LEGACY_KINEMATICS["MAX_VEL"])
-        self.MAX_ACC = float(LEGACY_KINEMATICS["MAX_ACC"])
-        self.MAX_JERK = float(LEGACY_KINEMATICS["MAX_JERK"])
-        self.MAX_ANG_VEL = float(LEGACY_KINEMATICS["MAX_ANG_VEL"])
-        self.MAX_ANG_ACC = float(LEGACY_KINEMATICS["MAX_ANG_ACC"])
-        self.MAX_ANG_JERK = float(LEGACY_KINEMATICS["MAX_ANG_JERK"])
+        self.MAX_VEL = float(MAX_VEL if MAX_VEL is not None else LEGACY_KINEMATICS["MAX_VEL"])
+        self.MAX_ACC = float(MAX_ACC if MAX_ACC is not None else LEGACY_KINEMATICS["MAX_ACC"])
+        self.MAX_JERK = float(MAX_JERK if MAX_JERK is not None else LEGACY_KINEMATICS["MAX_JERK"])
+        self.MAX_ANG_VEL = float(
+            MAX_ANG_VEL if MAX_ANG_VEL is not None else LEGACY_KINEMATICS["MAX_ANG_VEL"]
+        )
+        self.MAX_ANG_ACC = float(
+            MAX_ANG_ACC if MAX_ANG_ACC is not None else LEGACY_KINEMATICS["MAX_ANG_ACC"]
+        )
+        self.MAX_ANG_JERK = float(
+            MAX_ANG_JERK if MAX_ANG_JERK is not None else LEGACY_KINEMATICS["MAX_ANG_JERK"]
+        )
         self.current_step = 0
         self.trajectory = []
         self.trajectory_states = []
@@ -96,6 +104,7 @@ class Env:
             max_jerk=self.MAX_JERK,
             max_ang_jerk=self.MAX_ANG_JERK,
         )
+        self._log_effective_params()
         
         # 闭合路径追踪相关
         self.accumulated_distance = 0.0  # 累计距离
@@ -187,6 +196,15 @@ class Env:
         )
         
         self.reset()
+
+    def _log_effective_params(self) -> None:
+        """打印最终生效的时间步长与运动学约束，用于验证YAML是否生效。"""
+        print("[ENV] Effective parameters (from YAML or defaults):")
+        print(f"  dt (interpolation_period): {self.interpolation_period}")
+        print(
+            f"  MAX_VEL={self.MAX_VEL}, MAX_ACC={self.MAX_ACC}, MAX_JERK={self.MAX_JERK}, "
+            f"MAX_ANG_VEL={self.MAX_ANG_VEL}, MAX_ANG_ACC={self.MAX_ANG_ACC}, MAX_ANG_JERK={self.MAX_ANG_JERK}"
+        )
     
     def _create_trig_lookup_table(self):
         """Create trig lookup table for fast trig computation"""

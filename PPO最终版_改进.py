@@ -2002,7 +2002,7 @@ def run_training():
     # ===== 使用固定路径和允差 =====
     env_config = {
         "epsilon": 0.15,
-        "Pm": np.array([[0.0, 0.0], [1.0,0.0]]),
+        "Pm": np.array([[0.0, 0.0], [1.0,0.0], [1.0,1.0], [0.0,1.0], [0.0,0.0]]),  # 简单方形路径
         "interpolation_period": 0.01,
         "MAX_VEL": 1000,
         "MAX_ACC": 5000,

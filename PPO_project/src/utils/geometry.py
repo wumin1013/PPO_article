@@ -42,6 +42,90 @@ def find_intersection(line1: Tuple[float, float, float], line2: Tuple[float, flo
     return np.array([x, y], dtype=float)
 
 
+def cross2(a: Sequence[float], b: Sequence[float]) -> float:
+    """2D 叉积标量：a.x*b.y - a.y*b.x。"""
+    return float(a[0] * b[1] - a[1] * b[0])
+
+
+def left_normal(t: Sequence[float]) -> np.ndarray:
+    """左法向：给定切向 t=(tx,ty)，返回 nL=(-ty,tx)。"""
+    tx, ty = float(t[0]), float(t[1])
+    return np.array([-ty, tx], dtype=float)
+
+
+def right_normal(t: Sequence[float]) -> np.ndarray:
+    """右法向：给定切向 t=(tx,ty)，返回 nR=(ty,-tx)。"""
+    tx, ty = float(t[0]), float(t[1])
+    return np.array([ty, -tx], dtype=float)
+
+
+def _unit(v: np.ndarray, eps: float = 1e-12) -> np.ndarray:
+    length = float(np.linalg.norm(v))
+    if length < eps:
+        return np.zeros_like(v, dtype=float)
+    return v / length
+
+
+def _iter_segments(points: Sequence[np.ndarray], closed: bool) -> List[Tuple[np.ndarray, np.ndarray]]:
+    if len(points) < 2:
+        return []
+    segments = [(points[i], points[i + 1]) for i in range(len(points) - 1)]
+    if closed and len(points) > 2:
+        segments.append((points[-1], points[0]))
+    return segments
+
+
+def _as_point_list(points: Sequence[Sequence[float]]) -> List[np.ndarray]:
+    return [np.asarray(p, dtype=float) for p in points]
+
+
+def _resolve_closed_core(
+    points: List[np.ndarray],
+    closed: bool | None,
+    eps_len: float,
+) -> Tuple[List[np.ndarray], bool, bool]:
+    if not points:
+        return [], False, False
+    inferred_closed = len(points) > 2 and np.allclose(points[0], points[-1], atol=eps_len)
+    closed_effective = bool(closed) if closed is not None else inferred_closed
+    has_duplicate_last = closed_effective and inferred_closed
+    if has_duplicate_last:
+        return points[:-1], closed_effective, True
+    return points, closed_effective, False
+
+
+def _find_prev_distinct(points: Sequence[np.ndarray], i: int, closed: bool, eps_len: float) -> Optional[int]:
+    n = len(points)
+    if n == 0:
+        return None
+    steps = 0
+    j = (i - 1) % n if closed else i - 1
+    while 0 <= j < n and steps < n:
+        if np.linalg.norm(points[i] - points[j]) >= eps_len:
+            return j
+        if not closed and j == 0:
+            break
+        j = (j - 1) % n if closed else j - 1
+        steps += 1
+    return None
+
+
+def _find_next_distinct(points: Sequence[np.ndarray], i: int, closed: bool, eps_len: float) -> Optional[int]:
+    n = len(points)
+    if n == 0:
+        return None
+    steps = 0
+    j = (i + 1) % n if closed else i + 1
+    while 0 <= j < n and steps < n:
+        if np.linalg.norm(points[j] - points[i]) >= eps_len:
+            return j
+        if not closed and j == n - 1:
+            break
+        j = (j + 1) % n if closed else j + 1
+        steps += 1
+    return None
+
+
 def generate_offset_paths(
     Pm: Sequence[Sequence[float]],
     epsilon: float,
@@ -55,78 +139,262 @@ def generate_offset_paths(
         epsilon: 单侧偏移距离（Pl/Pr 到 Pm 的距离）。
         closed: 可选，显式指定是否闭合；默认按首尾点判断。
     """
-    pm = [np.array(p, dtype=float) for p in Pm]
-    n = len(pm)
-    if n == 0:
+    offset = float(epsilon)
+    if offset <= 0.0:
+        raise ValueError("epsilon must be positive")
+
+    eps_len = 1e-6
+    eps_miter = 1e-6
+    miter_limit = 4.0
+
+    pm_full = _as_point_list(Pm)
+    n_full = len(pm_full)
+    if n_full == 0:
         return [], []
 
-    if closed is None:
-        closed = n > 2 and np.allclose(pm[0], pm[-1], atol=1e-6)
+    pm_core, closed_effective, has_duplicate_last = _resolve_closed_core(pm_full, closed, eps_len=eps_len)
+    n_core = len(pm_core)
+    if n_core == 0:
+        return [], []
 
-    pl: List[Optional[np.ndarray]] = [None] * n
-    pr: List[Optional[np.ndarray]] = [None] * n
-    offset = float(epsilon)
+    def compute_joins(points: List[np.ndarray]) -> Tuple[List[np.ndarray], List[np.ndarray]]:
+        n_pts = len(points)
+        if n_pts == 0:
+            return [], []
 
-    def get_parallel_lines(p1: np.ndarray, p2: np.ndarray, offset_distance: float) -> Tuple[Tuple[float, float, float], Tuple[float, float, float]]:
-        dx = p2[0] - p1[0]
-        dy = p2[1] - p1[1]
-        normal_vector = np.array([-dy, dx], dtype=float)
-        unit_normal = normalize_vector(normal_vector)
-        A, B = unit_normal
+        def compute_join_point(i: int, side: str) -> np.ndarray:
+            p = points[i]
+            prev_idx = _find_prev_distinct(points, i, closed_effective, eps_len)
+            next_idx = _find_next_distinct(points, i, closed_effective, eps_len)
 
-        def line_equation(distance: float, point: np.ndarray = p1) -> Tuple[float, float, float]:
-            C = -(A * point[0] + B * point[1]) + distance
-            return A, B, C
+            t_prev = _unit(p - points[prev_idx], eps=eps_len) if prev_idx is not None else np.zeros(2, dtype=float)
+            t_next = _unit(points[next_idx] - p, eps=eps_len) if next_idx is not None else np.zeros(2, dtype=float)
+            if np.linalg.norm(t_prev) < eps_len and np.linalg.norm(t_next) < eps_len:
+                return p.copy()
+            if np.linalg.norm(t_prev) < eps_len:
+                t_prev = t_next
+            if np.linalg.norm(t_next) < eps_len:
+                t_next = t_prev
 
-        return line_equation(offset_distance), line_equation(-offset_distance)
+            is_endpoint = (not closed_effective) and (i == 0 or i == n_pts - 1)
+            if is_endpoint:
+                tangent = t_next if i == 0 else t_prev
+                n = left_normal(tangent) if side == "left" else right_normal(tangent)
+                return p + offset * n
 
-    def offset_point(p: np.ndarray, direction: np.ndarray, distance: float) -> np.ndarray:
-        return np.array([p[0] + direction[1] * distance, p[1] - direction[0] * distance], dtype=float)
+            cross_val = cross2(t_prev, t_next)
+            n_prev = left_normal(t_prev) if side == "left" else right_normal(t_prev)
+            n_next = left_normal(t_next) if side == "left" else right_normal(t_next)
 
-    for i in range(n):
-        if i == 0:
-            if not closed:
-                p1, p2 = pm[i], pm[i + 1]
-                direction = normalize_vector(p2 - p1)
-                pl[i] = offset_point(p1, direction, offset)
-                pr[i] = offset_point(p1, direction, -offset)
+            m = _unit(n_prev + n_next, eps=eps_len)
+            if np.linalg.norm(m) < eps_len:
+                m = _unit(n_prev, eps=eps_len)
+            denom = float(np.dot(m, n_prev))
+            if abs(denom) < eps_miter:
+                denom = eps_miter if denom >= 0.0 else -eps_miter
+            miter_len = offset / denom
+            limit = miter_limit * offset
+            if abs(miter_len) > limit:
+                miter_len = limit if miter_len >= 0.0 else -limit
+            joined = p + m * miter_len
+
+            # 凹角/翻折保护：若 join 落在“错误一侧”，退化为 bevel（用前一段法向）。
+            if float(np.dot(joined - p, n_prev)) <= 0.0 or float(np.dot(joined - p, n_next)) <= 0.0:
+                return p + offset * n_prev
+            if abs(cross_val) > 1e-12 and miter_len <= 0.0:
+                return p + offset * n_prev
+            return joined
+
+        left = [compute_join_point(i, side="left") for i in range(n_pts)]
+        right = [compute_join_point(i, side="right") for i in range(n_pts)]
+        return left, right
+
+    def build_kept_indices(points: List[np.ndarray]) -> List[int]:
+        n_pts = len(points)
+        if n_pts <= 2:
+            return list(range(n_pts))
+        kept = [0]
+        angle_eps = 1e-12
+        if closed_effective:
+            for i in range(1, n_pts):
+                prev = points[(i - 1) % n_pts]
+                cur = points[i]
+                nxt = points[(i + 1) % n_pts]
+                v1 = cur - prev
+                v2 = nxt - cur
+                if np.linalg.norm(v1) < eps_len or np.linalg.norm(v2) < eps_len:
+                    kept.append(i)
+                    continue
+                t1 = v1 / float(np.linalg.norm(v1))
+                t2 = v2 / float(np.linalg.norm(v2))
+                if abs(cross2(t1, t2)) > angle_eps or float(np.dot(t1, t2)) < 0.0:
+                    kept.append(i)
+            kept = sorted(set(kept))
+            if len(kept) < 3:
+                kept = list(range(n_pts))
+            return kept
+
+        for i in range(1, n_pts - 1):
+            prev = points[i - 1]
+            cur = points[i]
+            nxt = points[i + 1]
+            v1 = cur - prev
+            v2 = nxt - cur
+            if np.linalg.norm(v1) < eps_len or np.linalg.norm(v2) < eps_len:
+                kept.append(i)
+                continue
+            t1 = v1 / float(np.linalg.norm(v1))
+            t2 = v2 / float(np.linalg.norm(v2))
+            if abs(cross2(t1, t2)) > angle_eps or float(np.dot(t1, t2)) < 0.0:
+                kept.append(i)
+        kept.append(n_pts - 1)
+        return kept
+
+    kept = build_kept_indices(pm_core)
+    pm_simplified = [pm_core[i] for i in kept]
+    pl_s, pr_s = compute_joins(pm_simplified)
+
+    def fill_from_simplified(boundary_s: List[np.ndarray]) -> List[np.ndarray]:
+        full = [np.zeros(2, dtype=float) for _ in range(n_core)]
+
+        def fill_run(run_indices: List[int], b0: np.ndarray, b1: np.ndarray) -> None:
+            if not run_indices:
+                return
+            if len(run_indices) == 1:
+                full[run_indices[0]] = b0.copy()
+                return
+            dists = [0.0]
+            for idx in range(1, len(run_indices)):
+                a = pm_core[run_indices[idx - 1]]
+                b = pm_core[run_indices[idx]]
+                dists.append(dists[-1] + float(np.linalg.norm(b - a)))
+            total = dists[-1]
+            if total < eps_len:
+                for k in run_indices:
+                    full[k] = b0.copy()
+                return
+            for idx, k in enumerate(run_indices):
+                alpha = dists[idx] / total
+                full[k] = (1.0 - alpha) * b0 + alpha * b1
+
+        for s_idx in range(len(kept)):
+            start = kept[s_idx]
+            end = kept[(s_idx + 1) % len(kept)] if closed_effective else kept[s_idx + 1] if s_idx + 1 < len(kept) else None
+            if end is None:
+                break
+            b0 = boundary_s[s_idx]
+            b1 = boundary_s[(s_idx + 1) % len(boundary_s)] if closed_effective else boundary_s[s_idx + 1]
+
+            if not closed_effective and start > end:
+                continue
+            if closed_effective:
+                if start <= end:
+                    run = list(range(start, end + 1))
+                else:
+                    run = list(range(start, n_core)) + list(range(0, end + 1))
             else:
-                prev_point = pm[-2] if n >= 2 else pm[0]
-                next_point = pm[i + 1]
-                l1, r1 = get_parallel_lines(prev_point, pm[i], offset)
-                l2, r2 = get_parallel_lines(pm[i], next_point, offset)
-                pl[i] = find_intersection(l1, l2)
-                pr[i] = find_intersection(r1, r2)
-        elif i == n - 1:
-            if not closed:
-                p1, p2 = pm[i - 1], pm[i]
-                direction = normalize_vector(p2 - p1)
-                pl[i] = offset_point(p2, direction, offset)
-                pr[i] = offset_point(p2, direction, -offset)
-            else:
-                pl[i] = pl[0]
-                pr[i] = pr[0]
-        else:
-            prev_point = pm[i - 1]
-            current_point = pm[i]
-            next_point = pm[(i + 1) % n] if closed else pm[i + 1]
-            l1, r1 = get_parallel_lines(prev_point, current_point, offset)
-            l2, r2 = get_parallel_lines(current_point, next_point, offset)
+                run = list(range(start, end + 1))
+            fill_run(run, b0, b1)
+        return full
 
-            left = find_intersection(l1, l2)
-            right = find_intersection(r1, r2)
+    pl_core = fill_from_simplified(pl_s)
+    pr_core = fill_from_simplified(pr_s)
 
-            if left is None:
-                direction = normalize_vector(next_point - current_point)
-                left = offset_point(current_point, direction, offset)
-            if right is None:
-                direction = normalize_vector(next_point - current_point)
-                right = offset_point(current_point, direction, -offset)
+    if has_duplicate_last:
+        return pl_core + [pl_core[0]], pr_core + [pr_core[0]]
+    return pl_core, pr_core
 
-            pl[i] = left
-            pr[i] = right
 
-    return pl, pr
+def segment_intersects(
+    a1: Sequence[float],
+    a2: Sequence[float],
+    b1: Sequence[float],
+    b2: Sequence[float],
+    eps: float = 1e-9,
+) -> bool:
+    """判断两线段是否相交（包含端点），用于自检与防御。"""
+    a1p = np.asarray(a1, dtype=float)
+    a2p = np.asarray(a2, dtype=float)
+    b1p = np.asarray(b1, dtype=float)
+    b2p = np.asarray(b2, dtype=float)
+
+    def orient(p: np.ndarray, q: np.ndarray, r: np.ndarray) -> float:
+        return cross2(q - p, r - p)
+
+    def on_segment(p: np.ndarray, q: np.ndarray, r: np.ndarray) -> bool:
+        return (
+            min(p[0], r[0]) - eps <= q[0] <= max(p[0], r[0]) + eps
+            and min(p[1], r[1]) - eps <= q[1] <= max(p[1], r[1]) + eps
+        )
+
+    o1 = orient(a1p, a2p, b1p)
+    o2 = orient(a1p, a2p, b2p)
+    o3 = orient(b1p, b2p, a1p)
+    o4 = orient(b1p, b2p, a2p)
+
+    if (o1 > eps and o2 < -eps) or (o1 < -eps and o2 > eps):
+        if (o3 > eps and o4 < -eps) or (o3 < -eps and o4 > eps):
+            return True
+
+    if abs(o1) <= eps and on_segment(a1p, b1p, a2p):
+        return True
+    if abs(o2) <= eps and on_segment(a1p, b2p, a2p):
+        return True
+    if abs(o3) <= eps and on_segment(b1p, a1p, b2p):
+        return True
+    if abs(o4) <= eps and on_segment(b1p, a2p, b2p):
+        return True
+    return False
+
+
+def count_polyline_self_intersections(points: Sequence[Sequence[float]], closed: bool, eps: float = 1e-9) -> int:
+    """统计折线（可闭合）的自交次数（忽略相邻段与共享端点）。"""
+    pts = _as_point_list(points)
+    if len(pts) < 4:
+        return 0
+    segments = _iter_segments(pts, closed=closed)
+    count = 0
+    for i, (a1, a2) in enumerate(segments):
+        for j in range(i + 1, len(segments)):
+            if abs(i - j) <= 1:
+                continue
+            if closed and i == 0 and j == len(segments) - 1:
+                continue
+            b1, b2 = segments[j]
+            if segment_intersects(a1, a2, b1, b2, eps=eps):
+                shared = (
+                    np.linalg.norm(a1 - b1) <= eps
+                    or np.linalg.norm(a1 - b2) <= eps
+                    or np.linalg.norm(a2 - b1) <= eps
+                    or np.linalg.norm(a2 - b2) <= eps
+                )
+                if shared:
+                    continue
+                count += 1
+    return count
+
+
+def quad_is_degenerate(quad: Sequence[Sequence[float]], eps_len: float = 1e-9, eps_area: float = 1e-12) -> bool:
+    if len(quad) != 4:
+        return True
+    pts = _as_point_list(quad)
+    for i in range(4):
+        if np.linalg.norm(pts[(i + 1) % 4] - pts[i]) <= eps_len:
+            return True
+    area2 = 0.0
+    for i in range(4):
+        x1, y1 = float(pts[i][0]), float(pts[i][1])
+        x2, y2 = float(pts[(i + 1) % 4][0]), float(pts[(i + 1) % 4][1])
+        area2 += x1 * y2 - y1 * x2
+    return abs(area2) * 0.5 <= eps_area
+
+
+def quad_self_intersects(quad: Sequence[Sequence[float]], eps: float = 1e-9) -> bool:
+    """四边形是否自交（蝴蝶形）。"""
+    if len(quad) != 4:
+        return True
+    p = _as_point_list(quad)
+    return segment_intersects(p[0], p[1], p[2], p[3], eps=eps) or segment_intersects(p[1], p[2], p[3], p[0], eps=eps)
 
 
 def is_point_in_polygon(point: Sequence[float], polygon: Sequence[Sequence[float]]) -> bool:

@@ -1091,20 +1091,31 @@ class Env:
         return 0.0
     
     def _create_polygons(self):
-        polygons = []
+        polygons: List[List[np.ndarray]] = []
         n = len(self.Pm)
-        closed = np.allclose(self.Pm[0], self.Pm[-1], atol=1e-6)
-        
-        for i in range(n-1):
-            if self.cache['Pl'][i] is not None and self.cache['Pl'][i+1] is not None and \
-               self.cache['Pr'][i] is not None and self.cache['Pr'][i+1] is not None:
-                polygon = [self.cache['Pl'][i], self.cache['Pl'][i+1], self.cache['Pr'][i+1], self.cache['Pr'][i]]
-                polygons.append(polygon)
-        
-        if closed and self.cache['Pl'][0] is not None and self.cache['Pr'][0] is not None:
-            polygon = [self.cache['Pl'][-1], self.cache['Pl'][0], self.cache['Pr'][0], self.cache['Pr'][-1]]
-            polygons.append(polygon)
-        
+        if n < 2:
+            return polygons
+
+        closed = self.closed
+        has_duplicate_last = closed and np.allclose(self.Pm[0], self.Pm[-1], atol=1e-6)
+        m = (n - 1) if has_duplicate_last else n
+
+        if not closed:
+            for i in range(n - 1):
+                if (
+                    self.cache["Pl"][i] is not None
+                    and self.cache["Pl"][i + 1] is not None
+                    and self.cache["Pr"][i] is not None
+                    and self.cache["Pr"][i + 1] is not None
+                ):
+                    polygons.append([self.cache["Pl"][i], self.cache["Pl"][i + 1], self.cache["Pr"][i + 1], self.cache["Pr"][i]])
+            return polygons
+
+        for i in range(m):
+            j = (i + 1) % m
+            if self.cache["Pl"][i] is None or self.cache["Pl"][j] is None or self.cache["Pr"][i] is None or self.cache["Pr"][j] is None:
+                continue
+            polygons.append([self.cache["Pl"][i], self.cache["Pl"][j], self.cache["Pr"][j], self.cache["Pr"][i]])
         return polygons
     
     def get_contour_error(self, pt):

@@ -75,75 +75,6 @@ def generate_square_path(
     return [np.array(p) for p in path_points]
 
 
-def generate_parallelogram_path(
-    base_length: float = 10.0,
-    side_length: float = 6.0,
-    angle_deg: float = 60.0,
-    num_points: int = 200,
-) -> List[np.ndarray]:
-    """
-    生成包含锐角的平行四边形闭环路径（起点重复以闭合）。
-
-    Args:
-        base_length: 底边长度。
-        side_length: 侧边长度。
-        angle_deg: 底边与侧边夹角（度）。<90 为锐角平行四边形。
-        num_points: 总采样点数量（包含起点重复以闭合路径），需≥5。
-    """
-    if num_points < 5:
-        raise ValueError("num_points must be at least 5 to form a closed parallelogram path.")
-    if base_length <= 0 or side_length <= 0:
-        raise ValueError("base_length and side_length must be positive.")
-    if not (0.0 < angle_deg < 180.0):
-        raise ValueError("angle_deg must be in (0, 180).")
-
-    theta = float(angle_deg) * math.pi / 180.0
-    u = np.array([side_length * math.cos(theta), side_length * math.sin(theta)], dtype=float)
-
-    p0 = np.array([0.0, 0.0], dtype=float)
-    p1 = np.array([float(base_length), 0.0], dtype=float)
-    p2 = p1 + u
-    p3 = p0 + u
-
-    vertices = [p0, p1, p2, p3, p0]
-
-    points_to_distribute = num_points - 1
-    edge_lengths = np.array(
-        [
-            float(np.linalg.norm(p1 - p0)),
-            float(np.linalg.norm(p2 - p1)),
-            float(np.linalg.norm(p3 - p2)),
-            float(np.linalg.norm(p0 - p3)),
-        ],
-        dtype=float,
-    )
-    total = float(edge_lengths.sum())
-    if total <= 1e-12:
-        raise ValueError("Degenerate parallelogram.")
-
-    raw = edge_lengths / total * points_to_distribute
-    counts = np.floor(raw).astype(int)
-    remainder = points_to_distribute - int(counts.sum())
-    if remainder > 0:
-        frac_order = np.argsort(-(raw - counts))
-        for k in range(remainder):
-            counts[int(frac_order[k % 4])] += 1
-
-    path_points: List[np.ndarray] = [vertices[0]]
-    for edge_idx in range(4):
-        start = vertices[edge_idx]
-        end = vertices[edge_idx + 1]
-        count = int(counts[edge_idx])
-        if count <= 0:
-            continue
-        for t in np.linspace(0.0, 1.0, count + 1)[1:]:
-            path_points.append(start + t * (end - start))
-
-    if not np.allclose(path_points[-1], vertices[0]):
-        path_points.append(vertices[0].copy())
-    return [np.array(p) for p in path_points]
-
-
 def generate_s_shape_path(
     scale: float = 10.0,
     num_points: int = 200,
@@ -237,7 +168,6 @@ def get_path_by_name(
     path_generators = {
         "line": generate_line_path,
         "square": generate_square_path,
-        "parallelogram": generate_parallelogram_path,
         "s_shape": generate_s_shape_path,
         "s_shape_bspline": generate_s_shape_bspline,
         "sharp_angle": generate_sharp_angle_path,
@@ -252,13 +182,6 @@ def get_path_by_name(
         return generator(length=scale, num_points=num_points, angle=kwargs.get("angle", 0.0))
     if path_name == "square":
         return generator(side_length=scale, num_points=num_points)
-    if path_name == "parallelogram":
-        return generator(
-            base_length=kwargs.get("base_length", scale),
-            side_length=kwargs.get("side_length", scale * 0.6),
-            angle_deg=kwargs.get("angle_deg", 60.0),
-            num_points=num_points,
-        )
     if path_name == "s_shape":
         return generator(
             scale=scale,
@@ -321,7 +244,6 @@ def compute_path_curvature(path_points: List[np.ndarray]) -> List[float]:
 __all__ = [
     "generate_line_path",
     "generate_square_path",
-    "generate_parallelogram_path",
     "generate_s_shape_path",
     "generate_s_shape_bspline",
     "generate_sharp_angle_path",

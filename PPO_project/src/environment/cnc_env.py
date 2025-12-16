@@ -106,13 +106,31 @@ class Env:
             max_ang_jerk=self.MAX_ANG_JERK,
         )
         self._log_effective_params()
+
+        # Episode 结束诊断（默认关闭，tools 可开启）
+        self.enable_episode_diagnostics = False
+        self._episode_summary_printed = False
+
+        # P3.1 VirtualCorridor（走廊奖励/滞回开关）
+        self.enable_corridor = False
+        self._corridor_theta_enter = math.radians(15.0)
+        self._corridor_theta_exit = math.radians(8.0)
+        self._corridor_dist_enter = 0.0
+        self._corridor_dist_exit = 0.0
+        self._corridor_margin = 0.0
+        self._corridor_heading_weight = 2.0
+        self._corridor_outside_penalty_weight = 20.0
+        self.in_corner_phase = False
+        self.last_corridor_status = {}
         
-        # 闭合路径追踪相关
-        self.accumulated_distance = 0.0  # 累计距离
-        self.previous_segment_idx = -1   # 上一个线段索
-        self.reached_final_segment = False  # 是否到达最后一
-        self.lap_completed = False       # 是否完成一
-        self.segment_transition_history = []  # 线段转换历史
+        # 完成判据/闭环 lap 跟踪（P3.0）
+        self.lap_completed = False
+        self.s_travelled = 0.0
+        self._progress_s_prev = 0.0
+        self._progress_s_max = 0.0
+        self._progress_segment_lengths = []
+        self._progress_cumulative_lengths = []
+        self._progress_total_length = 0.0
         
         # 轨迹误差历史记录（用于过弯后修正
         self.error_history = []         # 最近的误差历史
@@ -200,6 +218,11 @@ class Env:
         self.observation_space = gym.spaces.Box(
             low=-np.inf, high=np.inf, shape=(self.observation_dim,), dtype=np.float32
         )
+
+        # 初始化走廊配置（允许通过 reward_weights.corridor 覆盖）
+        self._init_corridor_config()
+        # 初始化 P4.0 配置（turn-aware speed target / exit boost / stall / speed cap）
+        self._init_p4_config()
         
         self.reset()
 
@@ -320,6 +343,28 @@ class Env:
                 'next_angle': next_angle
             }
     
+    def _rebuild_progress_cache(self) -> None:
+        """预计算弧长累积，用于稳定的 progress/lap 判定（P3.0）。"""
+        n = len(self.Pm)
+        if n < 2:
+            self._progress_segment_lengths = []
+            self._progress_cumulative_lengths = [0.0]
+            self._progress_total_length = 0.0
+            return
+
+        seg_lengths = []
+        cumulative = [0.0]
+        total = 0.0
+        for i in range(n - 1):
+            seg_len = float(np.linalg.norm(self.Pm[i + 1] - self.Pm[i]))
+            seg_lengths.append(seg_len)
+            total += seg_len
+            cumulative.append(total)
+
+        self._progress_segment_lengths = seg_lengths
+        self._progress_cumulative_lengths = cumulative
+        self._progress_total_length = total
+
     def reset(self, random_start: bool = False):
         self.current_step = 0
         self.trajectory_states = []
@@ -329,13 +374,21 @@ class Env:
         self.current_position = np.array(self.Pm[0])
         self._current_direction_angle, self._current_step_length = self.initialize_starting_conditions()
         self.trajectory = [self.current_position.copy()]
+        self._episode_summary_printed = False
+        self.in_corner_phase = False
+        self.last_corridor_status = {}
+        self._p4_exit_boost_remaining = 0
+        self._p4_stall_counter = 0
+        self._p4_last_progress_for_stall = 0.0
+        self._p4_stall_triggered = False
+        self._p4_step_status = {}
 
-        # 重置闭合路径追踪状态
-        self.accumulated_distance = 0.0
-        self.previous_segment_idx = -1
-        self.reached_final_segment = False
+        # 重置完成判据相关状态（P3.0）
+        self._rebuild_progress_cache()
         self.lap_completed = False
-        self.segment_transition_history = []
+        self.s_travelled = 0.0
+        self._progress_s_prev = 0.0
+        self._progress_s_max = 0.0
 
         # 重置误差与成功标记
         self.error_history = []
@@ -404,16 +457,33 @@ class Env:
         policy_length = np.clip(policy_length, 0.0, 1.0)
         action_policy = np.array([policy_theta, policy_length], dtype=float)
 
-        # policy 意图作为物理量输入约束
-        raw_angular_vel_intent = policy_theta
-        raw_linear_vel_intent = policy_length
+        corner_phase_before = bool(getattr(self, "in_corner_phase", False))
+        exit_boost_before = int(getattr(self, "_p4_exit_boost_remaining", 0))
+
+        # P4.0：预计算 turn/speed 量（基于 s_t），用于速度目标与硬上限裁剪
+        p4_status = self._compute_p4_pre_step_status()
+        p4_status["v_ratio_policy"] = float(policy_length)
+        p4_status["exit_boost_remaining"] = float(exit_boost_before)
+
+        v_ratio_cap = float(p4_status.get("v_ratio_cap", 1.0))
+        if not bool(getattr(self, "_p4_speed_cap_enabled", True)):
+            v_ratio_cap = 1.0
+            p4_status["v_ratio_cap"] = 1.0
+
+        v_ratio_intent = float(min(float(policy_length), v_ratio_cap))
+        p4_status["v_ratio_exec"] = float(v_ratio_intent)
+
+        # policy 意图作为物理量输入约束（速度意图先经 turning-feasible cap，再进 KCM）
+        raw_angular_vel_intent = float(policy_theta)
+        raw_linear_vel_intent = float(v_ratio_intent)
+        max_vel_cap = float(self.MAX_VEL) * float(v_ratio_cap)
 
         # 使用Numba优化的约束计算
         (self.velocity, self.acceleration, self.jerk,
          self.angular_vel, self.angular_acc, self.angular_jerk) = apply_kinematic_constraints(
             prev_vel, prev_acc, prev_ang_vel, prev_ang_acc,
             raw_linear_vel_intent, raw_angular_vel_intent, self.interpolation_period,
-            self.MAX_VEL, self.MAX_ACC, self.MAX_JERK,
+            max_vel_cap, self.MAX_ACC, self.MAX_JERK,
             self.MAX_ANG_VEL, self.MAX_ANG_ACC, self.MAX_ANG_JERK
         )
         
@@ -429,14 +499,48 @@ class Env:
         self.state = next_state
         self.trajectory_states.append(next_state)
 
+        # P4.0：更新本步实际执行速度比（考虑 KCM 与 cap 后的最终速度）
+        v_ratio_exec = float(self.velocity / max(float(self.MAX_VEL), 1e-6))
+        p4_status["v_ratio_exec"] = float(v_ratio_exec)
+
+        # P4.0：停滞检测（progress_diff 很小 + 低速，持续 N 步则终止）
+        self._p4_stall_triggered = False
+        progress_now = float(self.state[4]) if len(self.state) > 4 else 0.0
+        progress_diff = max(0.0, progress_now - float(getattr(self, "_p4_last_progress_for_stall", 0.0)))
+        self._p4_last_progress_for_stall = float(progress_now)
+
+        if bool(getattr(self, "_p4_stall_enabled", True)) and not bool(getattr(self, "reached_target", False)):
+            if progress_diff < float(getattr(self, "_p4_stall_progress_eps", 1e-4)) and v_ratio_exec < float(
+                getattr(self, "_p4_stall_v_eps", 0.05)
+            ):
+                self._p4_stall_counter = int(getattr(self, "_p4_stall_counter", 0)) + 1
+            else:
+                self._p4_stall_counter = 0
+            if int(getattr(self, "_p4_stall_counter", 0)) >= int(getattr(self, "_p4_stall_steps", 300)):
+                self._p4_stall_triggered = True
+
+        p4_status["stall_counter"] = float(int(getattr(self, "_p4_stall_counter", 0)))
+        p4_status["stall_triggered"] = float(1.0 if bool(getattr(self, "_p4_stall_triggered", False)) else 0.0)
+
         # 更新误差历史
         current_error = self.get_contour_error(self.current_position)
         self.error_history.append(current_error)
         if len(self.error_history) > self.max_error_history:
             self.error_history.pop(0)  # 保持固定长度
-        
+
+        # 保存本步 P4 状态供 reward/info 使用（reward 基于 s_t 的目标 + s_{t+1} 的结果）
+        self._p4_step_status = dict(p4_status)
+
         reward = self.calculate_reward()
         done = self.is_done()
+
+        # P4.0：出弯 boost 更新（基于 corner_phase s_t -> s_{t+1} 的状态转移）
+        corner_phase_after = bool(getattr(self, "last_corridor_status", {}).get("corner_phase", False))
+        if bool(getattr(self, "_p4_exit_boost_enabled", True)) and corner_phase_before and not corner_phase_after:
+            self._p4_exit_boost_remaining = int(getattr(self, "_p4_exit_window_steps", 0))
+        else:
+            if int(getattr(self, "_p4_exit_boost_remaining", 0)) > 0:
+                self._p4_exit_boost_remaining = int(getattr(self, "_p4_exit_boost_remaining", 0)) - 1
 
         # 添加info字典作为第四个返回值
         info = {
@@ -447,6 +551,8 @@ class Env:
             "progress": self.state[4],  # 添加进度信息
             "jerk": self.jerk,  # 添加当前捷度指标
             "kcm_intervention": self.kcm_intervention,  # 添加运动学约束干预程度
+            "corridor_status": copy.deepcopy(getattr(self, "last_corridor_status", {})),
+            "p4_status": copy.deepcopy(getattr(self, "_p4_step_status", {})),
             "action_policy": action_policy.copy(),
             "action_exec": np.array(safe_action, dtype=float),
             "action_gap_abs": np.abs(np.array(safe_action, dtype=float) - action_policy),
@@ -540,134 +646,59 @@ class Env:
         return 0.0
     
     def _calculate_closed_path_progress(self, pt):
-        """Closed-path progress using segment jump detection"""
+        """Closed path: monotonic arc-length accumulation + start gate (P3.0)."""
         if not self.closed:
             return self._calculate_path_progress(pt)
-        
-        # 如果已完成一圈，直接返回1.0
+
         if self.lap_completed:
             return 1.0
-        
-        # 找到当前最近的线段
-        current_segment_idx = self._find_nearest_segment_for_progress(pt)
-        if current_segment_idx < 0:
+
+        total_length = float(getattr(self, "_progress_total_length", 0.0))
+        if total_length <= 1e-9:
             return 0.0
-        
-        # 检测线段跳转，判断是否完成一
-        self._detect_lap_completion_by_segment_jump(current_segment_idx)
-        
-        if self.lap_completed:
-            return 1.0
-        
-        # 正常进度计算（排除重复的最后一个点
-        total_segments = len(self.Pm) - 1  # 闭合路径实际只有n-1个线 
-        current_dist = 0.0
-        
-        # 累加到当前线段之前的所有长
-        for i in range(current_segment_idx):
-            if i < len(self.cache['segment_lengths']):
-                current_dist += self.cache['segment_lengths'][i]
-        
-        # 计算在当前线段上的投影位
-        if current_segment_idx < total_segments:
-            p1 = np.array(self.Pm[current_segment_idx])
-            p2 = np.array(self.Pm[current_segment_idx + 1])
-        else:
-            return 0.95  # 接近完成但还未完
-        
-        # 投影计算
+
+        seg_idx = self._find_nearest_segment_for_progress(pt)
+        if seg_idx < 0 or seg_idx >= len(self.Pm) - 1:
+            return 0.0
+        if seg_idx >= len(getattr(self, "_progress_segment_lengths", [])):
+            return 0.0
+
+        p1 = np.array(self.Pm[seg_idx])
+        p2 = np.array(self.Pm[seg_idx + 1])
         seg_vec = p2 - p1
-        pt_vec = pt - p1
-        seg_length = np.linalg.norm(seg_vec)
-        
-        if seg_length > 1e-6:
-            t = np.clip(np.dot(pt_vec, seg_vec) / (seg_length ** 2), 0, 1)
-            segment_progress = t * seg_length
-            current_dist += segment_progress
-        
-        # 计算真正的总路径长度（不包括回到起点的虚拟线段
-        actual_total_length = sum(self.cache['segment_lengths'][:total_segments])
-        raw_progress = current_dist / actual_total_length if actual_total_length > 0 else 0.0
-        
-        # 确保进度在合理范围内，但不会重置
-        return np.clip(raw_progress, 0.0, 0.99)  # 最.99，完成时才返.0
-    
-    def _detect_lap_completion(self, current_segment):
-        """Simplified lap detection to prevent infinite loops"""
-        # 只在非常明确的情况下才认为完成了一
-        if current_segment != self.previous_segment:
-            # 检测到回到起点附近且已经有很高的进
-            if (current_segment == 0 and self.last_raw_progress > 0.9 
-                and self.previous_segment == len(self.Pm) - 2):
-                
-                self.completed_laps += 1
-                
-                # 防止过度套圈 - 立即停止
-                if self.completed_laps >= 1:  # 只允许完成一
-                    self.last_raw_progress = 1.0  # 设置为完成状
-            
-            self.previous_segment = current_segment
-    
-    def _detect_lap_completion_by_segment_jump(self, current_segment_idx):
-        """Detect lap completion via segment jumps"""
-        if self.lap_completed:
-            return
-        
-        # 记录线段转换历史
-        if current_segment_idx != self.previous_segment_idx:
-            self.segment_transition_history.append({
-                'from': self.previous_segment_idx,
-                'to': current_segment_idx,
-                'step': self.current_step
-            })
-            
-            # 只保留最近的转换历史（避免内存过度使用）
-            if len(self.segment_transition_history) > 20:
-                self.segment_transition_history.pop(0)
-            
-            # 检测关键的线段跳转模式
-            total_segments = len(self.Pm) - 1  # 闭合路径的实际线段数
-            
-            # 模式1：从最后一个线段跳转到第一个线
-            if (self.previous_segment_idx == total_segments - 1 and 
-                current_segment_idx == 0):
-                
-                # 额外验证：确保已经访问过大部分线
-                visited_segments = set()
-                for transition in self.segment_transition_history:
-                    if transition['from'] >= 0:
-                        visited_segments.add(transition['from'])
-                    if transition['to'] >= 0:
-                        visited_segments.add(transition['to'])
-                
-                # 如果访问了超0%的线段，认为完成了一
-                coverage_ratio = len(visited_segments) / total_segments
-                if coverage_ratio > 0.7:
-                    self.lap_completed = True
-                    print(f"检测到完成一圈：从线段{self.previous_segment_idx}跳转到线段{current_segment_idx}，覆盖率{coverage_ratio:.2f}")
-            
-            # 模式2：连续访问模式检
-            elif len(self.segment_transition_history) >= 3:
-                # 检查是否有连续的线段访问模式表明完成了循环
-                recent_segments = [t['to'] for t in self.segment_transition_history[-5:] if t['to'] >= 0]
-                
-                # 如果最近访问的线段包含了从高索引到低索引的跳转
-                if len(recent_segments) >= 3:
-                    max_recent = max(recent_segments)
-                    min_recent = min(recent_segments)
-                    
-                    # 从接近末尾的线段跳转到接近开头的线段
-                    if (max_recent >= total_segments * 0.8 and 
-                        min_recent <= total_segments * 0.2 and 
-                        current_segment_idx <= 2):  # 当前在前几个线段
-                        
-                        # 再次检查覆盖率
-                        all_visited = set(recent_segments)
-                        if len(all_visited) >= total_segments * 0.6:
-                            self.lap_completed = True
-                            print(f"检测到完成一圈：连续访问模式，从线段{max_recent}区域跳转到线段{current_segment_idx}")
-            
-            self.previous_segment_idx = current_segment_idx
+        denom = float(np.dot(seg_vec, seg_vec))
+        t = 0.0
+        if denom > 1e-12:
+            t = float(np.dot(pt - p1, seg_vec) / denom)
+        t = float(np.clip(t, 0.0, 1.0))
+
+        s_current = float(self._progress_cumulative_lengths[seg_idx] + t * self._progress_segment_lengths[seg_idx])
+
+        s_prev = float(getattr(self, "_progress_s_prev", 0.0))
+        delta_s = s_current - s_prev
+        # 过起点时 s 会从接近 total 跳到接近 0：解包裹为正增量
+        if delta_s < -0.5 * total_length:
+            delta_s += total_length
+        # 保证单调（向后走/最近段抖动不回退）
+        if delta_s < 0.0:
+            delta_s = 0.0
+
+        self.s_travelled = float(getattr(self, "s_travelled", 0.0) + delta_s)
+        self._progress_s_prev = s_current
+        self._progress_s_max = max(float(getattr(self, "_progress_s_max", 0.0)), s_current)
+
+        tol = 0.02
+        start_tol = 0.6 * self.half_epsilon
+        dist_to_start = float(np.linalg.norm(pt - np.array(self.Pm[0])))
+        threshold = (1.0 - tol) * total_length
+
+        if self.s_travelled >= threshold and self._progress_s_max >= threshold and dist_to_start < start_tol:
+            self.lap_completed = True
+            self.reached_target = True
+            return 1.0
+
+        progress = self.s_travelled / total_length
+        return float(np.clip(progress, 0.0, 0.99))
     
     def calculate_new_position(self, theta_prime_action, length_prime_action):
         # === 关键修改：使用路径方向作为基准，而非累计角度 ===
@@ -848,6 +879,347 @@ class Env:
             features.extend([s_along, d_signed, kappa_rate])
         return np.array(features, dtype=float)
 
+    def _init_corridor_config(self) -> None:
+        """读取/初始化 VirtualCorridor 配置（P3.1，可在 YAML 的 reward_weights.corridor 下设置）。"""
+        cfg = {}
+        if isinstance(self.reward_weights, dict):
+            cfg = self.reward_weights.get("corridor", {}) or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+
+        self.enable_corridor = bool(cfg.get("enabled", False))
+
+        theta_enter_deg = float(cfg.get("theta_enter_deg", 15.0))
+        theta_exit_deg = float(cfg.get("theta_exit_deg", 8.0))
+        theta_enter = float(math.radians(theta_enter_deg))
+        theta_exit = float(math.radians(theta_exit_deg))
+        if theta_exit > theta_enter:
+            theta_exit = 0.5 * theta_enter
+        self._corridor_theta_enter = theta_enter
+        self._corridor_theta_exit = theta_exit
+
+        dist_enter = cfg.get("dist_enter", None)
+        dist_exit = cfg.get("dist_exit", None)
+        default_enter = 3.0 * float(getattr(self, "lookahead_spacing", 1.0))
+        self._corridor_dist_enter = float(default_enter if dist_enter is None else dist_enter)
+        self._corridor_dist_exit = float(1.5 * self._corridor_dist_enter if dist_exit is None else dist_exit)
+        if self._corridor_dist_exit <= self._corridor_dist_enter:
+            self._corridor_dist_exit = 1.5 * self._corridor_dist_enter
+
+        margin_ratio = float(cfg.get("margin_ratio", 0.1))
+        margin = margin_ratio * self.half_epsilon
+        self._corridor_margin = float(np.clip(margin, 0.0, 0.4 * self.half_epsilon))
+
+        self._corridor_heading_weight = float(cfg.get("heading_weight", 2.0))
+        self._corridor_outside_penalty_weight = float(cfg.get("outside_penalty_weight", 20.0))
+
+    def _init_p4_config(self) -> None:
+        """读取/初始化 P4.0 配置（可在 YAML 的 reward_weights.p4 下设置）。"""
+        cfg = {}
+        if isinstance(self.reward_weights, dict):
+            cfg = self.reward_weights.get("p4", {}) or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+
+        # 1) 每步时间惩罚：逼迫更快完成（负值）
+        self._p4_time_penalty = float(cfg.get("time_penalty", -0.01))
+
+        # 2) turn-aware speed_target
+        self._p4_v_max = float(cfg.get("v_max", 1.0))
+        self._p4_v_min = float(cfg.get("v_min", 0.35))
+        theta_max_deg = float(cfg.get("theta_max_deg", 90.0))
+        self._p4_theta_max = float(math.radians(theta_max_deg))
+        d_scale = cfg.get("d_scale", None)
+        default_d_scale = 3.0 * float(getattr(self, "lookahead_spacing", 1.0))
+        self._p4_d_scale = float(default_d_scale if d_scale is None else d_scale)
+        self._p4_speed_weight = float(cfg.get("speed_weight", 6.0))
+
+        # 3) exit boost
+        self._p4_exit_boost_enabled = bool(cfg.get("exit_boost_enabled", True))
+        exit_window_sec = float(cfg.get("exit_window_sec", 0.25))
+        default_exit_steps = max(5, int(exit_window_sec / max(self.interpolation_period, 1e-6)))
+        self._p4_exit_window_steps = int(cfg.get("exit_window_steps", default_exit_steps))
+        self._p4_exit_progress_mult = float(cfg.get("exit_progress_mult", 1.35))
+        self._p4_exit_speed_target_min = float(cfg.get("exit_speed_target_min", 0.9))
+
+        # 4) stall termination
+        self._p4_stall_enabled = bool(cfg.get("stall_enabled", True))
+        self._p4_stall_steps = int(cfg.get("stall_steps", 300))
+        self._p4_stall_progress_eps = float(cfg.get("stall_progress_eps", 1e-4))
+        self._p4_stall_v_eps = float(cfg.get("stall_v_eps", 0.05))
+        self._p4_stall_penalty = float(cfg.get("stall_penalty", -8.0))
+
+        # 5) speed cap derived from MAX_ANG_VEL
+        self._p4_speed_cap_enabled = bool(cfg.get("speed_cap_enabled", True))
+        self._p4_speed_cap_eps = float(cfg.get("speed_cap_eps", 1e-6))
+
+        # kappa 估计使用的 lookahead 弧长（默认按 lookahead_spacing*k，并做上限截断，避免过长导致 kappa 过小）
+        k = int(cfg.get("speed_cap_k", 4))
+        k = int(np.clip(k, 1, max(1, int(getattr(self, "lookahead_points", 1)))))
+        base_s = float(getattr(self, "lookahead_spacing", 1.0)) * float(k)
+        s_min = float(cfg.get("speed_cap_s_min", 0.5 * self.half_epsilon))
+        s_max = float(cfg.get("speed_cap_s_max", 2.0 * self.half_epsilon))
+        if s_max < s_min:
+            s_max = max(s_min, s_max)
+        self._p4_speed_cap_s = float(np.clip(base_s, max(s_min, 1e-6), max(s_max, 1e-6)))
+
+        # 诊断输出开关（默认关闭）
+        self.enable_p4_diagnostics = bool(cfg.get("debug", False))
+
+        # 运行时状态（reset 时会重置）
+        self._p4_exit_boost_remaining = 0
+        self._p4_stall_counter = 0
+        self._p4_last_progress_for_stall = 0.0
+        self._p4_stall_triggered = False
+        self._p4_step_status = {}
+
+    def _wrap_angle(self, angle: float) -> float:
+        return (float(angle) + math.pi) % (2 * math.pi) - math.pi
+
+    def _compute_p4_pre_step_status(self) -> Dict[str, float]:
+        """计算 P4.0 的 turn/speed 相关量（基于当前状态 s_t，用于裁剪与奖励）。"""
+        status: Dict[str, float] = {
+            "kappa": 0.0,
+            "v_cap": float(self.MAX_VEL),
+            "v_ratio_cap": 1.0,
+            "v_ratio_policy": 0.0,
+            "v_ratio_exec": 0.0,
+            "speed_target": float(getattr(self, "_p4_v_max", 1.0)),
+            "turn_severity": 0.0,
+            "dist_to_turn": float("inf"),
+            "s_lookahead": float(getattr(self, "_p4_speed_cap_s", 0.0)),
+            "progress_multiplier": 1.0,
+            "time_penalty": float(getattr(self, "_p4_time_penalty", 0.0)),
+        }
+
+        # dist_to_turn：使用状态里的“到下一拐点距离”（欧氏距离）
+        if getattr(self, "state", None) is not None and len(self.state) > 3:
+            status["dist_to_turn"] = float(self.state[3])
+
+        proj, _, s_now, t_hat, _ = self._project_onto_progress_path(self.current_position)
+        _ = proj  # proj 仅用于保持结构一致
+        theta_now = float(math.atan2(float(t_hat[1]), float(t_hat[0])))
+
+        total = float(getattr(self, "_progress_total_length", 0.0))
+        s_lookahead = float(getattr(self, "_p4_speed_cap_s", 0.0))
+        if total > 1e-9 and s_lookahead > 1e-9:
+            s_far = s_now + s_lookahead
+            if self.closed:
+                s_far = s_far % total
+            else:
+                s_far = float(np.clip(s_far, 0.0, total))
+            theta_far = self._tangent_angle_at_s(s_far)
+            delta_theta = self._wrap_angle(theta_far - theta_now)
+            kappa = abs(delta_theta) / (s_lookahead + float(getattr(self, "_p4_speed_cap_eps", 1e-6)))
+
+            v_cap = float(self.MAX_ANG_VEL) / (kappa + float(getattr(self, "_p4_speed_cap_eps", 1e-6)))
+            v_ratio_cap = float(np.clip(v_cap / max(float(self.MAX_VEL), 1e-6), 0.0, 1.0))
+
+            theta_max = max(float(getattr(self, "_p4_theta_max", math.pi / 2)), 1e-6)
+            turn_severity = float(np.clip(abs(delta_theta) / theta_max, 0.0, 1.0))
+
+            status.update(
+                {
+                    "kappa": float(kappa),
+                    "v_cap": float(v_cap),
+                    "v_ratio_cap": float(v_ratio_cap),
+                    "turn_severity": float(turn_severity),
+                }
+            )
+
+        # speed_target（先按 turn_severity/near 计算，再应用 cap）
+        v_min = float(getattr(self, "_p4_v_min", 0.35))
+        v_max = float(getattr(self, "_p4_v_max", 1.0))
+        d_scale = max(float(getattr(self, "_p4_d_scale", 1.0)), 1e-6)
+        dist_to_turn = float(status["dist_to_turn"])
+        near = float(math.exp(-dist_to_turn / d_scale)) if math.isfinite(dist_to_turn) else 0.0
+        speed_target = v_min + (v_max - v_min) * (1.0 - float(status["turn_severity"]) * near)
+
+        # 出弯 boost：窗口内强制目标更快回升（仍受 cap 限制）
+        if int(getattr(self, "_p4_exit_boost_remaining", 0)) > 0:
+            speed_target = max(speed_target, float(getattr(self, "_p4_exit_speed_target_min", 0.9)))
+            status["progress_multiplier"] = float(getattr(self, "_p4_exit_progress_mult", 1.35))
+
+        speed_target = float(np.clip(speed_target, 0.0, v_max))
+        speed_target = float(min(speed_target, float(status["v_ratio_cap"])))
+        status["speed_target"] = float(speed_target)
+
+        return status
+
+    def _project_onto_progress_path(self, pt: np.ndarray) -> tuple[np.ndarray, int, float, np.ndarray, np.ndarray]:
+        """基于 progress cache 的投影（用于走廊/turn 检测，避免依赖 pnpoly/rtree 的抖动）。"""
+        if not getattr(self, "_progress_segment_lengths", None):
+            self._rebuild_progress_cache()
+        seg_idx = self._find_nearest_segment_for_progress(pt)
+        if seg_idx < 0:
+            seg_idx = 0
+
+        p1 = np.array(self.Pm[seg_idx])
+        p2 = np.array(self.Pm[seg_idx + 1])
+        seg_vec = p2 - p1
+        seg_len = float(np.linalg.norm(seg_vec))
+        if seg_len < 1e-9:
+            t = 0.0
+            proj = p1
+            t_hat = np.array([1.0, 0.0], dtype=float)
+        else:
+            t = float(np.clip(np.dot(pt - p1, seg_vec) / (seg_len**2), 0.0, 1.0))
+            proj = p1 + t * seg_vec
+            t_hat = seg_vec / seg_len
+        n_hat = np.array([-t_hat[1], t_hat[0]], dtype=float)
+        s_base = float(self._progress_cumulative_lengths[seg_idx]) if getattr(self, "_progress_cumulative_lengths", None) else 0.0
+        s_along = s_base + t * seg_len
+        return proj, seg_idx, s_along, t_hat, n_hat
+
+    def _tangent_angle_at_s(self, s_value: float) -> float:
+        if not getattr(self, "_progress_segment_lengths", None):
+            self._rebuild_progress_cache()
+        total = float(getattr(self, "_progress_total_length", 0.0))
+        if total <= 1e-9:
+            return float(getattr(self, "_current_direction_angle", 0.0))
+
+        s = float(s_value)
+        if self.closed:
+            s = s % total
+        else:
+            s = float(np.clip(s, 0.0, total))
+
+        cumulative = self._progress_cumulative_lengths
+        seg_idx = int(np.searchsorted(cumulative, s, side="right") - 1)
+        seg_idx = int(np.clip(seg_idx, 0, len(self._progress_segment_lengths) - 1))
+        p1 = np.array(self.Pm[seg_idx])
+        p2 = np.array(self.Pm[seg_idx + 1])
+        v = p2 - p1
+        if float(np.linalg.norm(v)) < 1e-9:
+            return float(getattr(self, "_current_direction_angle", 0.0))
+        return float(math.atan2(float(v[1]), float(v[0])))
+
+    def _compute_corridor_status(self) -> Dict[str, object]:
+        """计算并更新走廊状态（P3.1），并可用于 reward/info。"""
+        status: Dict[str, object] = {
+            "enabled": bool(getattr(self, "enable_corridor", False)),
+            "corner_phase": False,
+            "turn_sign": 0,
+            "e_n": 0.0,
+            "lower": 0.0,
+            "upper": 0.0,
+            "e_target": 0.0,
+            "in_corridor": False,
+            "dist_to_interval": 0.0,
+        }
+
+        proj, _, s_now, t_hat, n_hat = self._project_onto_progress_path(self.current_position)
+        e_n = float(np.dot(self.current_position - proj, n_hat))  # 左正右负
+        theta_now = float(math.atan2(float(t_hat[1]), float(t_hat[0])))
+
+        corridor_enabled = bool(getattr(self, "enable_corridor", False))
+        total = float(getattr(self, "_progress_total_length", 0.0))
+        step = float(getattr(self, "lookahead_spacing", 0.0)) or 0.0
+
+        dist_to_turn_enter = float("inf")
+        dist_to_turn_exit = float("inf")
+        delta_theta_enter = 0.0
+        delta_theta_exit = 0.0
+        theta_far_enter = theta_now
+        theta_far_exit = theta_now
+
+        if step > 1e-9 and total > 1e-9:
+            for i in range(1, int(getattr(self, "lookahead_points", 1)) + 1):
+                s_probe = s_now + step * i
+                if self.closed:
+                    s_probe = s_probe % total
+                else:
+                    s_probe = float(np.clip(s_probe, 0.0, total))
+
+                theta_probe = self._tangent_angle_at_s(s_probe)
+                delta = self._wrap_angle(theta_probe - theta_now)
+                abs_delta = abs(delta)
+
+                if dist_to_turn_exit == float("inf") and abs_delta >= self._corridor_theta_exit:
+                    dist_to_turn_exit = step * i
+                    delta_theta_exit = delta
+                    theta_far_exit = theta_probe
+
+                if abs_delta >= self._corridor_theta_enter:
+                    dist_to_turn_enter = step * i
+                    delta_theta_enter = delta
+                    theta_far_enter = theta_probe
+                    if dist_to_turn_exit == float("inf"):
+                        dist_to_turn_exit = dist_to_turn_enter
+                        delta_theta_exit = delta_theta_enter
+                        theta_far_exit = theta_far_enter
+                    break
+
+        if dist_to_turn_enter != float("inf"):
+            delta_theta = float(delta_theta_enter)
+            theta_far = float(theta_far_enter)
+            dist_to_turn = float(dist_to_turn_enter)
+        else:
+            delta_theta = float(delta_theta_exit)
+            theta_far = float(theta_far_exit)
+            dist_to_turn = float(dist_to_turn_exit)
+
+        turn_sign = 0
+        if abs(delta_theta) > 1e-6:
+            turn_sign = 1 if delta_theta > 0 else -1
+
+        abs_delta_enter = abs(float(delta_theta_enter)) if dist_to_turn_enter != float("inf") else 0.0
+        abs_delta_exit = abs(float(delta_theta_exit)) if dist_to_turn_exit != float("inf") else 0.0
+
+        # corner_phase：带滞回的拐角阶段检测（P3.1/P4.0 共用），不依赖 corridor 开关
+        if not self.in_corner_phase:
+            if turn_sign != 0 and abs_delta_enter >= self._corridor_theta_enter and dist_to_turn_enter < self._corridor_dist_enter:
+                self.in_corner_phase = True
+        else:
+            if turn_sign == 0 or abs_delta_exit <= self._corridor_theta_exit or dist_to_turn_exit > self._corridor_dist_exit:
+                self.in_corner_phase = False
+
+        lower = 0.0
+        upper = 0.0
+        e_target = 0.0
+        in_corridor = False
+        dist_to_interval = 0.0
+
+        corridor_half = max(self.half_epsilon - float(self._corridor_margin), 0.0)
+        if corridor_enabled and self.in_corner_phase and turn_sign != 0 and corridor_half > 0.0:
+            if turn_sign > 0:
+                lower, upper = 0.0, corridor_half
+            else:
+                lower, upper = -corridor_half, 0.0
+            e_target = 0.5 * corridor_half * float(turn_sign)
+
+            in_corridor = bool(lower <= e_n <= upper)
+            if e_n < lower:
+                dist_to_interval = float(lower - e_n)
+            elif e_n > upper:
+                dist_to_interval = float(e_n - upper)
+
+        heading_cos = float(
+            math.cos(self._wrap_angle(float(getattr(self, "_current_direction_angle", 0.0)) - float(theta_far)))
+        )
+
+        status.update(
+            {
+                "corner_phase": bool(self.in_corner_phase),
+                "turn_sign": int(turn_sign),
+                "e_n": float(e_n),
+                "lower": float(lower),
+                "upper": float(upper),
+                "e_target": float(e_target),
+                "in_corridor": bool(in_corridor),
+                "dist_to_interval": float(dist_to_interval),
+                "delta_theta": float(delta_theta),
+                "theta_far": float(theta_far),
+                "heading_cos": float(heading_cos),
+                "dist_to_turn": float(dist_to_turn),
+                "dist_to_turn_enter": float(dist_to_turn_enter),
+                "dist_to_turn_exit": float(dist_to_turn_exit),
+            }
+        )
+
+        self.last_corridor_status = status
+        return status
+
     def _get_path_direction(self, pt):
         """Use cached heading array"""
         segment_index = self._find_containing_segment(pt)
@@ -870,6 +1242,22 @@ class Env:
         end_point = np.array(self.Pm[-1])
         end_distance = float(np.linalg.norm(self.current_position - end_point))
         lap_done = self.lap_completed or getattr(self, "reached_target", False)
+        corridor_status = self._compute_corridor_status()
+        corridor_active = bool(corridor_status.get("enabled")) and bool(corridor_status.get("corner_phase")) and int(
+            corridor_status.get("turn_sign", 0)
+        ) != 0
+        corridor_target_error = abs(float(corridor_status.get("e_n", 0.0)) - float(corridor_status.get("e_target", 0.0)))
+        corridor_heading_cos = float(corridor_status.get("heading_cos", 0.0))
+
+        p4_status = getattr(self, "_p4_step_status", {}) or {}
+        if not isinstance(p4_status, dict):
+            p4_status = {}
+        speed_target = p4_status.get("speed_target", None)
+        speed_target = float(speed_target) if speed_target is not None else None
+        v_ratio_exec = p4_status.get("v_ratio_exec", None)
+        v_ratio_exec = float(v_ratio_exec) if v_ratio_exec is not None else None
+        progress_multiplier = float(p4_status.get("progress_multiplier", 1.0))
+        time_penalty = float(p4_status.get("time_penalty", getattr(self, "_p4_time_penalty", 0.0)))
 
         reward, components = self.reward_calculator.calculate_reward(
             contour_error=contour_error,
@@ -882,6 +1270,21 @@ class Env:
             angular_jerk=self.angular_jerk,
             lap_completed=lap_done,
             is_closed=self.closed,
+            v_ratio_exec=v_ratio_exec,
+            speed_target=speed_target,
+            speed_weight=float(getattr(self, "_p4_speed_weight", 6.0)),
+            time_penalty=time_penalty,
+            progress_multiplier=progress_multiplier,
+            stall_triggered=bool(getattr(self, "_p4_stall_triggered", False)),
+            stall_penalty=float(getattr(self, "_p4_stall_penalty", 0.0)),
+            corridor_enabled=bool(corridor_status.get("enabled", False)),
+            corridor_active=corridor_active,
+            corridor_in_corridor=bool(corridor_status.get("in_corridor", False)),
+            corridor_target_error=float(corridor_target_error),
+            corridor_outside_distance=float(corridor_status.get("dist_to_interval", 0.0)),
+            corridor_heading_cos=float(corridor_heading_cos),
+            corridor_heading_weight=float(self._corridor_heading_weight),
+            corridor_outside_penalty_weight=float(self._corridor_outside_penalty_weight),
         )
 
         self.last_reward_components = components
@@ -1278,30 +1681,76 @@ class Env:
             if dist < min_dist:
                 min_dist = dist
         return min_dist
+
+    def _open_reached_target(self, pt: np.ndarray) -> bool:
+        """Open path: allow crossing the finish line on last segment (P3.0)."""
+        if self.closed or len(self.Pm) < 2:
+            return False
+
+        p1 = np.array(self.Pm[-2])
+        p2 = np.array(self.Pm[-1])
+        seg_vec = p2 - p1
+        denom = float(np.dot(seg_vec, seg_vec))
+        if denom < 1e-12:
+            return False
+
+        t = float(np.dot(pt - p1, seg_vec) / denom)  # do NOT clip upper bound
+        dist_to_finish_line = float(point_to_line_distance(pt, p1, p2))
+        return t >= 1.0 and dist_to_finish_line <= self.half_epsilon
+
+    def _maybe_print_episode_summary(self, *, contour_error: float) -> None:
+        if not getattr(self, "enable_episode_diagnostics", False):
+            return
+        if getattr(self, "_episode_summary_printed", False):
+            return
+
+        progress = float(self.state[4]) if getattr(self, "state", None) is not None and len(self.state) > 4 else 0.0
+        end_point = np.array(self.Pm[-1])
+        start_point = np.array(self.Pm[0])
+        end_distance = float(np.linalg.norm(self.current_position - end_point))
+        dist_to_start = float(np.linalg.norm(self.current_position - start_point))
+
+        mean_velocity = float(self.velocity)
+        if getattr(self, "trajectory_states", None):
+            try:
+                v_samples = [float(s[6]) for s in self.trajectory_states if len(s) > 6]
+                if v_samples:
+                    mean_velocity = float(np.mean(v_samples))
+            except Exception:
+                mean_velocity = float(self.velocity)
+
+        print(
+            "[EPISODE_END] "
+            f"closed={bool(self.closed)} lap_completed={bool(self.lap_completed)} reached_target={bool(getattr(self, 'reached_target', False))} "
+            f"final_progress={progress:.4f} final_end_distance={end_distance:.4f} final_dist_to_start={dist_to_start:.4f} "
+            f"final_contour_error={float(contour_error):.4f} mean_velocity={mean_velocity:.4f} steps={int(self.current_step)} dt={float(self.interpolation_period)}"
+        )
+        self._episode_summary_printed = True
     
     def is_done(self):
-        contour_error = self.get_contour_error(self.current_position)
+        contour_error = float(self.get_contour_error(self.current_position))
         
         # 基本结束条件：误差超限或步数过多
         # 修正：使half_epsilon，因为边界在 ±epsilon/2 
         if contour_error > self.half_epsilon or self.current_step >= self.max_steps:
+            self._maybe_print_episode_summary(contour_error=contour_error)
             return True
-        
-        # 成功到达终点的判断（这些情况不应该被视为失败
-        end_point = np.array(self.Pm[-1])
-        end_distance = np.linalg.norm(self.current_position - end_point)
-        progress = self.state[4]
-        
-        # 标记成功到达终点的情
-        # 修正：使half_epsilon 作为基准
-        if progress > 0.95 and end_distance < self.half_epsilon * 0.6:
-            # 设置成功标志，便于后续奖励计
-            self.reached_target = True
+
+        # P4.0：停滞终止（避免无意义拖回合）
+        if bool(getattr(self, "_p4_stall_triggered", False)):
+            self._maybe_print_episode_summary(contour_error=contour_error)
             return True
         
         # 闭合路径：完成一圈也算成
         if self.closed and self.lap_completed:
             self.reached_target = True
+            self._maybe_print_episode_summary(contour_error=contour_error)
+            return True
+
+        # Open path：允许越过终点线触发 success（不依赖 end_distance 变小）
+        if self._open_reached_target(self.current_position):
+            self.reached_target = True
+            self._maybe_print_episode_summary(contour_error=contour_error)
             return True
         
         return False

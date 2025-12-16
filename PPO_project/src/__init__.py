@@ -1,11 +1,29 @@
-"""源代码包"""
-from . import environment
-from . import utils
+"""源代码包。
 
-# 延迟导入 algorithms，避免在未安装 torch 时阻塞轻量脚本（如 parity_check）。
-try:
-    from . import algorithms  # type: ignore
-    __all__ = ['algorithms', 'environment', 'utils']
-except Exception:  # pragma: no cover - 仅作降级
-    algorithms = None  # type: ignore
-    __all__ = ['environment', 'utils']
+保持轻量：避免在 import 阶段就引入重依赖（如 scipy），通过惰性导入按需加载子模块。
+"""
+
+from __future__ import annotations
+
+import importlib
+from typing import Any
+
+__all__ = ["algorithms", "environment", "utils"]
+
+
+def __getattr__(name: str) -> Any:  # pragma: no cover
+    if name == "algorithms":
+        try:
+            module = importlib.import_module(f"{__name__}.algorithms")
+        except Exception:
+            globals()["algorithms"] = None
+            return None
+        globals()["algorithms"] = module
+        return module
+
+    if name in {"environment", "utils"}:
+        module = importlib.import_module(f"{__name__}.{name}")
+        globals()[name] = module
+        return module
+
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

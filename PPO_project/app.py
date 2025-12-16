@@ -125,6 +125,37 @@ def _apply_path_override(config: dict, path_override: Optional[dict]) -> dict:
     return cfg
 
 
+def _apply_runtime_overrides(
+    base_config: dict,
+    *,
+    path_override: Optional[dict],
+    env_override: Optional[Dict[str, float]],
+    kcm_overrides: Dict[str, float],
+    corridor_override: Optional[dict],
+) -> dict:
+    cfg = _apply_path_override(base_config, path_override) if path_override else copy.deepcopy(base_config)
+
+    if env_override:
+        merged_env = cfg.get("environment", {})
+        merged_env.update(env_override)
+        cfg["environment"] = merged_env
+
+    if kcm_overrides:
+        merged_kcm = cfg.get("kinematic_constraints", {})
+        for k, v in kcm_overrides.items():
+            merged_kcm[k] = v
+        cfg["kinematic_constraints"] = merged_kcm
+
+    if corridor_override is not None:
+        reward_weights = cfg.get("reward_weights", {}) or {}
+        if not isinstance(reward_weights, dict):
+            reward_weights = {}
+        reward_weights["corridor"] = dict(corridor_override)
+        cfg["reward_weights"] = reward_weights
+
+    return cfg
+
+
 def _build_geometry_from_config(config: dict) -> Dict[str, object]:
     if not isinstance(config, dict) or "environment" not in config or "kinematic_constraints" not in config:
         return {"ref_points": [], "pl": [], "pr": [], "ranges": {}}
@@ -254,25 +285,23 @@ def start_training(
     path_override: Optional[dict] = None,
     mode: str = "train",
     env_override: Optional[Dict[str, float]] = None,
+    corridor_override: Optional[dict] = None,
 ) -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_dir = SAVED_MODELS_DIR / experiment_name / timestamp
     experiment_dir.mkdir(parents=True, exist_ok=True)
 
     runtime_config_path = config_path
-    if path_override:
+    if path_override or env_override or kcm_overrides or corridor_override is not None:
         try:
             base_config, _ = load_config(str(config_path))
-            merged_config = _apply_path_override(base_config, path_override)
-            if env_override:
-                merged_env = merged_config.get("environment", {})
-                merged_env.update(env_override)
-                merged_config["environment"] = merged_env
-            if kcm_overrides:
-                merged_kcm = merged_config.get("kinematic_constraints", {})
-                for k, v in kcm_overrides.items():
-                    merged_kcm[k] = v
-                merged_config["kinematic_constraints"] = merged_kcm
+            merged_config = _apply_runtime_overrides(
+                base_config,
+                path_override=path_override,
+                env_override=env_override,
+                kcm_overrides=kcm_overrides,
+                corridor_override=corridor_override,
+            )
             runtime_config_path = experiment_dir / "config.runtime.yaml"
             with runtime_config_path.open("w", encoding="utf-8") as f:
                 yaml.safe_dump(merged_config, f, allow_unicode=True, sort_keys=False)
@@ -505,6 +534,103 @@ def render_training_sidebar() -> Dict[str, object]:
 
     path_override = _render_path_override_form(config, selected_path_type)
 
+    corridor_override: Optional[dict] = None
+    with st.sidebar.expander("P3.1 VirtualCorridor 走廊奖励", expanded=False):
+        reward_weights = config.get("reward_weights", {}) or {}
+        corridor_cfg = reward_weights.get("corridor", {}) if isinstance(reward_weights, dict) else {}
+        if not isinstance(corridor_cfg, dict):
+            corridor_cfg = {}
+
+        enabled_default = bool(corridor_cfg.get("enabled", False))
+        corridor_enabled = st.checkbox("启用 VirtualCorridor (enabled)", value=enabled_default)
+
+        theta_enter_deg = st.number_input(
+            "theta_enter_deg (进入阈值, °)",
+            value=float(corridor_cfg.get("theta_enter_deg", 15.0)),
+            step=1.0,
+            format="%.1f",
+        )
+        theta_exit_deg = st.number_input(
+            "theta_exit_deg (退出阈值, °)",
+            value=float(corridor_cfg.get("theta_exit_deg", 8.0)),
+            step=1.0,
+            format="%.1f",
+        )
+        dist_enter = st.number_input(
+            "dist_enter (进入距离阈值)",
+            value=float(corridor_cfg.get("dist_enter", 3.0)),
+            step=0.1,
+            format="%.3f",
+        )
+        dist_exit = st.number_input(
+            "dist_exit (退出距离阈值)",
+            value=float(corridor_cfg.get("dist_exit", 4.5)),
+            step=0.1,
+            format="%.3f",
+        )
+        margin_ratio = st.number_input(
+            "margin_ratio (边界留白比例)",
+            value=float(corridor_cfg.get("margin_ratio", 0.1)),
+            step=0.01,
+            format="%.3f",
+        )
+        heading_weight = st.number_input(
+            "heading_weight (朝向一致性权重)",
+            value=float(corridor_cfg.get("heading_weight", 2.0)),
+            step=0.1,
+            format="%.3f",
+        )
+        outside_penalty_weight = st.number_input(
+            "outside_penalty_weight (走廊外惩罚权重)",
+            value=float(corridor_cfg.get("outside_penalty_weight", 20.0)),
+            step=1.0,
+            format="%.1f",
+        )
+
+        corridor_override = {
+            "enabled": bool(corridor_enabled),
+            "theta_enter_deg": float(theta_enter_deg),
+            "theta_exit_deg": float(theta_exit_deg),
+            "dist_enter": float(dist_enter),
+            "dist_exit": float(dist_exit),
+            "margin_ratio": float(margin_ratio),
+            "heading_weight": float(heading_weight),
+            "outside_penalty_weight": float(outside_penalty_weight),
+        }
+
+        col_save_runtime, col_save_yaml = st.columns(2)
+        with col_save_runtime:
+            if st.button("写入本次训练 runtime yaml", width="stretch"):
+                try:
+                    merged = _apply_runtime_overrides(
+                        config,
+                        path_override=path_override,
+                        env_override=env_override,
+                        kcm_overrides=kcm_overrides,
+                        corridor_override=corridor_override,
+                    )
+                    preview_path = CONFIG_DIR / "_runtime_preview.yaml"
+                    with preview_path.open("w", encoding="utf-8") as f:
+                        yaml.safe_dump(merged, f, allow_unicode=True, sort_keys=False)
+                    st.success(f"已写入: {preview_path}")
+                except Exception as exc:
+                    st.warning(f"写入失败: {exc}")
+        with col_save_yaml:
+            if st.button("写回当前 YAML (危险)", width="stretch"):
+                try:
+                    merged = _apply_runtime_overrides(
+                        config,
+                        path_override=path_override,
+                        env_override=env_override,
+                        kcm_overrides=kcm_overrides,
+                        corridor_override=corridor_override,
+                    )
+                    with config_path.open("w", encoding="utf-8") as f:
+                        yaml.safe_dump(merged, f, allow_unicode=True, sort_keys=False)
+                    st.success(f"已写回: {config_path}")
+                except Exception as exc:
+                    st.warning(f"写回失败: {exc}")
+
     col_start, col_stop = st.sidebar.columns(2)
     if col_start.button("🚀 启动训练 (Start)", width='stretch'):
         start_training(
@@ -516,6 +642,7 @@ def render_training_sidebar() -> Dict[str, object]:
             path_override,
             mode_choice,
             env_override,
+            corridor_override,
         )
     if col_stop.button("🛑 停止训练 (Stop)", width='stretch'):
         stop_training()

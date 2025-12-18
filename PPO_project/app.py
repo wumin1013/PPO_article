@@ -71,6 +71,8 @@ def ensure_state_defaults() -> None:
     st.session_state.setdefault("config_path", None)
     st.session_state.setdefault("experiment_name", None)
     st.session_state.setdefault("paper_results", None)
+    st.session_state.setdefault("saved_exp_dir", None)
+    st.session_state.setdefault("saved_run_dir", None)
 
 
 def resolve_python() -> str:
@@ -238,6 +240,50 @@ def _find_latest_log_dir() -> Optional[Path]:
     if not candidates:
         return None
     return sorted(candidates, key=lambda x: x[0], reverse=True)[0][1]
+
+
+def _list_saved_experiment_dirs() -> List[Path]:
+    """列出 saved_models 下包含至少一个 logs 的实验目录（按最近日志时间倒序）。"""
+    if not SAVED_MODELS_DIR.exists():
+        return []
+
+    candidates: List[Tuple[float, Path]] = []
+    for exp_dir in SAVED_MODELS_DIR.iterdir():
+        if not exp_dir.is_dir():
+            continue
+        latest_mtime: Optional[float] = None
+        for run_dir in exp_dir.iterdir():
+            log_dir = run_dir / "logs"
+            if not log_dir.exists():
+                continue
+            try:
+                mtime = float(log_dir.stat().st_mtime)
+            except OSError:
+                continue
+            latest_mtime = mtime if latest_mtime is None else max(latest_mtime, mtime)
+
+        if latest_mtime is not None:
+            candidates.append((latest_mtime, exp_dir))
+
+    return [p for _, p in sorted(candidates, key=lambda x: x[0], reverse=True)]
+
+
+def _list_saved_run_dirs(exp_dir: Path) -> List[Path]:
+    """列出某实验目录下包含 logs 的运行目录（按最近日志时间倒序）。"""
+    if not exp_dir or not exp_dir.exists() or not exp_dir.is_dir():
+        return []
+
+    candidates: List[Tuple[float, Path]] = []
+    for run_dir in exp_dir.iterdir():
+        log_dir = run_dir / "logs"
+        if not log_dir.exists():
+            continue
+        try:
+            candidates.append((float(log_dir.stat().st_mtime), run_dir))
+        except OSError:
+            continue
+
+    return [p for _, p in sorted(candidates, key=lambda x: x[0], reverse=True)]
 
 
 def _latest_experiment_name(config_path: Path) -> str:
@@ -484,8 +530,114 @@ def load_live_data(log_dir: Optional[Path], config_path: Path, path_override: Op
     return {"training": training_df, "paper": paper_df, "trajectory": traj_df, "geom": geom}
 
 
+def render_saved_models_sidebar() -> Dict[str, object]:
+    st.sidebar.markdown("### 已训练模型可视化 · Saved Models")
+
+    exp_dirs = _list_saved_experiment_dirs()
+    if not exp_dirs:
+        st.sidebar.warning("未找到 saved_models 下包含 logs 的实验目录。")
+        return {"log_dir": None, "config_path": CONFIG_DIR / "train_line.yaml"}
+
+    exp_labels = [str(p.relative_to(BASE_DIR)) for p in exp_dirs]
+    default_exp_label = exp_labels[0]
+    cached_exp = st.session_state.get("saved_exp_dir")
+    if cached_exp:
+        try:
+            cached_exp_path = Path(cached_exp)
+            if cached_exp_path in exp_dirs:
+                default_exp_label = str(cached_exp_path.relative_to(BASE_DIR))
+        except Exception:
+            pass
+
+    chosen_exp = st.sidebar.selectbox(
+        "选择 saved_models 实验目录",
+        exp_labels,
+        index=exp_labels.index(default_exp_label),
+        help="对应 saved_models/<experiment_name>",
+    )
+    saved_exp_dir = exp_dirs[exp_labels.index(chosen_exp)]
+    st.session_state["saved_exp_dir"] = str(saved_exp_dir)
+
+    run_dirs = _list_saved_run_dirs(saved_exp_dir)
+    if not run_dirs:
+        st.sidebar.warning("该实验目录下未找到包含 logs 的运行目录。")
+        return {"log_dir": None, "config_path": CONFIG_DIR / "train_line.yaml"}
+
+    run_labels = [str(p.relative_to(BASE_DIR)) for p in run_dirs]
+    default_run_label = run_labels[0]
+    cached_run = st.session_state.get("saved_run_dir")
+    if cached_run:
+        try:
+            cached_run_path = Path(cached_run)
+            if cached_run_path in run_dirs:
+                default_run_label = str(cached_run_path.relative_to(BASE_DIR))
+        except Exception:
+            pass
+
+    chosen_run = st.sidebar.selectbox(
+        "选择运行目录",
+        run_labels,
+        index=run_labels.index(default_run_label),
+        help="对应 saved_models/<experiment_name>/<run_timestamp>",
+    )
+    saved_run_dir = run_dirs[run_labels.index(chosen_run)]
+    st.session_state["saved_run_dir"] = str(saved_run_dir)
+
+    log_dir = saved_run_dir / "logs"
+    st.sidebar.caption(f"日志目录: {log_dir}")
+
+    fallback_config = CONFIG_DIR / "train_line.yaml"
+    if not fallback_config.exists() and SCENARIOS:
+        fallback_config = next(iter(SCENARIOS.values()))
+    return {"log_dir": log_dir, "config_path": fallback_config}
+
+
+def render_saved_models_view() -> None:
+    sidebar_state = render_saved_models_sidebar()
+    log_dir: Optional[Path] = sidebar_state["log_dir"]
+    config_path: Path = sidebar_state["config_path"]
+
+    data = load_live_data(log_dir, config_path, None)
+    training_df: pd.DataFrame = data["training"]
+    paper_df: pd.DataFrame = data["paper"]
+    traj_df: pd.DataFrame = data["trajectory"]
+    geom = data["geom"]
+
+    current_episode = "-"
+    if not training_df.empty and "episode_idx" in training_df.columns:
+        current_episode = int(training_df["episode_idx"].max())
+
+    last_reward = "-"
+    if not training_df.empty and "reward" in training_df.columns:
+        last_reward = float(training_df["reward"].iloc[-1])
+
+    mean_error = "-"
+    if not paper_df.empty and "rmse_error" in paper_df.columns:
+        mean_error = float(paper_df["rmse_error"].iloc[-1])
+
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Last Episode", current_episode)
+    m2.metric("Last Reward", last_reward)
+    m3.metric("Mean Error (RMSE)", mean_error)
+
+    col_left, col_right = st.columns([1, 2])
+    with col_left:
+        st.markdown("#### Reward & Loss")
+        reward_fig = _build_reward_loss_fig(training_df)
+        st.plotly_chart(reward_fig, width='stretch')
+        if training_df.empty and log_dir:
+            st.info(f"未在该日志目录找到训练曲线数据（期望: {log_dir / 'training_log.csv'}）。")
+    with col_right:
+        st.markdown("#### Trajectory")
+        traj_fig = _build_trajectory_fig(traj_df, geom)
+        st.plotly_chart(traj_fig, width='stretch')
+        if traj_df.empty and log_dir:
+            st.info(f"未在该日志目录找到轨迹数据（期望: {log_dir / 'latest_trajectory.csv'}）。")
+
+
 def render_training_sidebar() -> Dict[str, object]:
     st.sidebar.markdown("### 训练监控 · Training Ops")
+
     scenario = st.sidebar.selectbox("场景选择", list(SCENARIOS.keys()))
     mode_choice = st.sidebar.selectbox(
         "运行模式",
@@ -541,48 +693,67 @@ def render_training_sidebar() -> Dict[str, object]:
         if not isinstance(corridor_cfg, dict):
             corridor_cfg = {}
 
+        def _safe_float(value: object, default: float) -> float:
+            if value is None:
+                return float(default)
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return float(default)
+
         enabled_default = bool(corridor_cfg.get("enabled", False))
         corridor_enabled = st.checkbox("启用 VirtualCorridor (enabled)", value=enabled_default)
 
         theta_enter_deg = st.number_input(
             "theta_enter_deg (进入阈值, °)",
-            value=float(corridor_cfg.get("theta_enter_deg", 15.0)),
+            value=_safe_float(corridor_cfg.get("theta_enter_deg", 15.0), 15.0),
             step=1.0,
             format="%.1f",
         )
         theta_exit_deg = st.number_input(
             "theta_exit_deg (退出阈值, °)",
-            value=float(corridor_cfg.get("theta_exit_deg", 8.0)),
+            value=_safe_float(corridor_cfg.get("theta_exit_deg", 8.0), 8.0),
             step=1.0,
             format="%.1f",
         )
+
+        dist_enter_cfg = corridor_cfg.get("dist_enter", None)
+        dist_exit_cfg = corridor_cfg.get("dist_exit", None)
+        dist_enter_auto = st.checkbox("dist_enter 自动 (null，使用 env 默认)", value=(dist_enter_cfg is None))
+        dist_enter_default = _safe_float(dist_enter_cfg, 3.0)
         dist_enter = st.number_input(
             "dist_enter (进入距离阈值)",
-            value=float(corridor_cfg.get("dist_enter", 3.0)),
+            value=float(dist_enter_default),
             step=0.1,
             format="%.3f",
+            disabled=bool(dist_enter_auto),
         )
+
+        dist_exit_default_fallback = 1.5 * float(dist_enter_default)
+        dist_exit_auto = st.checkbox("dist_exit 自动 (null，使用 env 默认)", value=(dist_exit_cfg is None))
+        dist_exit_default = _safe_float(dist_exit_cfg, dist_exit_default_fallback)
         dist_exit = st.number_input(
             "dist_exit (退出距离阈值)",
-            value=float(corridor_cfg.get("dist_exit", 4.5)),
+            value=float(dist_exit_default),
             step=0.1,
             format="%.3f",
+            disabled=bool(dist_exit_auto),
         )
         margin_ratio = st.number_input(
             "margin_ratio (边界留白比例)",
-            value=float(corridor_cfg.get("margin_ratio", 0.1)),
+            value=_safe_float(corridor_cfg.get("margin_ratio", 0.1), 0.1),
             step=0.01,
             format="%.3f",
         )
         heading_weight = st.number_input(
             "heading_weight (朝向一致性权重)",
-            value=float(corridor_cfg.get("heading_weight", 2.0)),
+            value=_safe_float(corridor_cfg.get("heading_weight", 2.0), 2.0),
             step=0.1,
             format="%.3f",
         )
         outside_penalty_weight = st.number_input(
             "outside_penalty_weight (走廊外惩罚权重)",
-            value=float(corridor_cfg.get("outside_penalty_weight", 20.0)),
+            value=_safe_float(corridor_cfg.get("outside_penalty_weight", 20.0), 20.0),
             step=1.0,
             format="%.1f",
         )
@@ -591,8 +762,8 @@ def render_training_sidebar() -> Dict[str, object]:
             "enabled": bool(corridor_enabled),
             "theta_enter_deg": float(theta_enter_deg),
             "theta_exit_deg": float(theta_exit_deg),
-            "dist_enter": float(dist_enter),
-            "dist_exit": float(dist_exit),
+            "dist_enter": None if bool(dist_enter_auto) else float(dist_enter),
+            "dist_exit": None if bool(dist_exit_auto) else float(dist_exit),
             "margin_ratio": float(margin_ratio),
             "heading_weight": float(heading_weight),
             "outside_penalty_weight": float(outside_penalty_weight),
@@ -647,7 +818,9 @@ def render_training_sidebar() -> Dict[str, object]:
     if col_stop.button("🛑 停止训练 (Stop)", width='stretch'):
         stop_training()
 
-    active_log_dir = _safe_log_dir(st.session_state.get("log_dir")) or _find_latest_log_dir()
+    active_log_dir = _safe_log_dir(st.session_state.get("log_dir"))
+    if active_log_dir is None:
+        active_log_dir = _find_latest_log_dir()
     st.sidebar.caption(f"日志目录: {active_log_dir}" if active_log_dir else "日志目录: 未找到")
     if st.session_state.get("train_pid"):
         st.sidebar.success(f"运行中 PID: {st.session_state['train_pid']}")
@@ -695,10 +868,14 @@ def render_training_view() -> None:
         st.markdown("#### Reward & Loss")
         reward_fig = _build_reward_loss_fig(training_df)
         st.plotly_chart(reward_fig, width='stretch')
+        if training_df.empty and log_dir:
+            st.info(f"未在该日志目录找到训练曲线数据（期望: {log_dir / 'training_log.csv'}）。")
     with col_right:
         st.markdown("#### Real-time Trajectory")
         traj_fig = _build_trajectory_fig(traj_df, geom)
         st.plotly_chart(traj_fig, width='stretch')
+        if traj_df.empty and log_dir:
+            st.info(f"未在该日志目录找到轨迹数据（期望: {log_dir / 'latest_trajectory.csv'}）。")
 
     if st.session_state.get("is_training"):
         time.sleep(1)
@@ -1020,9 +1197,15 @@ def render_paper_view() -> None:
 # --------------------------------------------------------------------------------------
 def main() -> None:
     ensure_state_defaults()
-    mode = st.sidebar.radio("系统模式", ["训练监控 (Training Ops)", "论文评估 (Paper Mode)"], index=0)
+    mode = st.sidebar.radio(
+        "系统模式",
+        ["训练监控 (Training Ops)", "已训练模型可视化 (Saved Models)", "论文评估 (Paper Mode)"],
+        index=0,
+    )
     if mode == "训练监控 (Training Ops)":
         render_training_view()
+    elif mode == "已训练模型可视化 (Saved Models)":
+        render_saved_models_view()
     else:
         render_paper_view()
 

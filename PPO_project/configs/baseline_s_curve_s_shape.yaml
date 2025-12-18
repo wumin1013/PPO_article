@@ -19,6 +19,25 @@ reward_weights:
   w_kcm_penalty: 1.5
   w_violation: 5.0
   w_survival: 0.05
+  corridor:
+    enabled: false
+    dist_enter: null
+    dist_exit: null
+    center_weight: 0.0
+    barrier_weight: 2.0
+  p4:
+    v_min: 0.35
+    exit_speed_target_min: 0.90
+    speed_cap_preview_points: 8
+    speed_cap_use_wdot: true
+    speed_cap_use_wddot: true
+  p6_1:
+    w_du: 0.01
+    du_mode: l1
+    v_target_mode: accel
+    a_ref_max_ratio: 0.5
+    j_ref_enabled: true
+    j_ref_max_ratio: 0.5
 ppo:
   actor_lr: 2.0e-05
   critic_lr: 0.0001

@@ -152,7 +152,10 @@ def _apply_runtime_overrides(
         reward_weights = cfg.get("reward_weights", {}) or {}
         if not isinstance(reward_weights, dict):
             reward_weights = {}
-        reward_weights["corridor"] = dict(corridor_override)
+        corridor_cfg = reward_weights.get("corridor", {}) if isinstance(reward_weights.get("corridor", {}), dict) else {}
+        merged_corridor = copy.deepcopy(corridor_cfg)
+        merged_corridor.update(dict(corridor_override))
+        reward_weights["corridor"] = merged_corridor
         cfg["reward_weights"] = reward_weights
 
     return cfg
@@ -701,6 +704,14 @@ def render_training_sidebar() -> Dict[str, object]:
             except (TypeError, ValueError):
                 return float(default)
 
+        def _safe_int(value: object, default: int) -> int:
+            if value is None:
+                return int(default)
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                return int(default)
+
         enabled_default = bool(corridor_cfg.get("enabled", False))
         corridor_enabled = st.checkbox("启用 VirtualCorridor (enabled)", value=enabled_default)
 
@@ -758,6 +769,65 @@ def render_training_sidebar() -> Dict[str, object]:
             format="%.1f",
         )
 
+        st.sidebar.markdown("##### P7.1 走廊细节（内切/回中）")
+        safe_margin_ratio = st.number_input(
+            "safe_margin_ratio (安全边界比例)",
+            value=_safe_float(corridor_cfg.get("safe_margin_ratio", 0.2), 0.2),
+            step=0.01,
+            format="%.3f",
+        )
+        barrier_scale_ratio = st.number_input(
+            "barrier_scale_ratio (势垒尺度比例)",
+            value=_safe_float(corridor_cfg.get("barrier_scale_ratio", 0.05), 0.05),
+            step=0.01,
+            format="%.3f",
+        )
+        barrier_weight = st.number_input(
+            "barrier_weight (势垒权重)",
+            value=_safe_float(corridor_cfg.get("barrier_weight", 2.0), 2.0),
+            step=0.1,
+            format="%.3f",
+        )
+
+        dt_effective = float(env_override.get("interpolation_period", base_dt))
+        exit_steps_default_fallback = int(max(10, int(1.0 / max(dt_effective, 1e-6))))
+        exit_steps_cfg = corridor_cfg.get("exit_center_ramp_steps", None)
+        exit_steps_auto = st.checkbox("exit_center_ramp_steps 自动 (null，使用 dt 推导)", value=(exit_steps_cfg is None))
+        exit_steps_default = _safe_int(exit_steps_cfg, exit_steps_default_fallback)
+        exit_center_ramp_steps = st.number_input(
+            "exit_center_ramp_steps (出弯回中 ramp 步数)",
+            min_value=1,
+            max_value=20000,
+            value=int(exit_steps_default),
+            step=10,
+            disabled=bool(exit_steps_auto),
+        )
+
+        center_weight = st.number_input(
+            "center_weight (回中权重上限)",
+            value=_safe_float(corridor_cfg.get("center_weight", 0.0), 0.0),
+            step=0.1,
+            format="%.3f",
+        )
+        center_power = st.number_input(
+            "center_power (回中惩罚幂次)",
+            value=_safe_float(corridor_cfg.get("center_power", 2.0), 2.0),
+            step=0.1,
+            format="%.3f",
+        )
+        dir_pref_weight = st.number_input(
+            "dir_pref_weight (内切方向偏好权重)",
+            value=_safe_float(corridor_cfg.get("dir_pref_weight", 0.0), 0.0),
+            step=0.1,
+            format="%.3f",
+        )
+        dir_pref_beta = st.number_input(
+            "dir_pref_beta (方向偏好 tanh 强度)",
+            value=_safe_float(corridor_cfg.get("dir_pref_beta", 2.0), 2.0),
+            step=0.1,
+            format="%.3f",
+        )
+
         corridor_override = {
             "enabled": bool(corridor_enabled),
             "theta_enter_deg": float(theta_enter_deg),
@@ -767,6 +837,14 @@ def render_training_sidebar() -> Dict[str, object]:
             "margin_ratio": float(margin_ratio),
             "heading_weight": float(heading_weight),
             "outside_penalty_weight": float(outside_penalty_weight),
+            "safe_margin_ratio": float(safe_margin_ratio),
+            "barrier_scale_ratio": float(barrier_scale_ratio),
+            "barrier_weight": float(barrier_weight),
+            "exit_center_ramp_steps": None if bool(exit_steps_auto) else int(exit_center_ramp_steps),
+            "center_weight": float(center_weight),
+            "center_power": float(center_power),
+            "dir_pref_weight": float(dir_pref_weight),
+            "dir_pref_beta": float(dir_pref_beta),
         }
 
         col_save_runtime, col_save_yaml = st.columns(2)

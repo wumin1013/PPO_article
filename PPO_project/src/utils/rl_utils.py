@@ -1,4 +1,24 @@
-from tqdm import tqdm
+try:
+    from tqdm import tqdm
+except ImportError:  # pragma: no cover
+    class _TqdmNoop:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def update(self, n: int = 1) -> None:
+            return
+
+        def set_postfix(self, *args, **kwargs) -> None:
+            return
+
+    def tqdm(*args, **kwargs):
+        return _TqdmNoop()
 import numpy as np
 import torch
 import collections

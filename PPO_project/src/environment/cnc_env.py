@@ -4,11 +4,17 @@ from __future__ import annotations
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import copy
+import json
 import math
+import time
+from pathlib import Path
 
 import gymnasium as gym
 import numpy as np
-from rtree import index
+try:
+    from rtree import index as rtree_index
+except ImportError:  # pragma: no cover
+    rtree_index = None
 
 from src.environment.kinematics import apply_kinematic_constraints
 from src.environment.reward import RewardCalculator
@@ -187,15 +193,17 @@ class Env:
         # 添加新属性用于跟踪线段信
         self.current_segment_idx = 0
         self.segment_count = len(self.Pm) - 1 if not self.closed else len(self.Pm)
-        # 创建 R-tree 空间索引
-        self.rtree_idx = index.Index()
-        for idx, polygon in enumerate(self.cache['polygons']):
-            if polygon:
-                min_x = min(p[0] for p in polygon)
-                min_y = min(p[1] for p in polygon)
-                max_x = max(p[0] for p in polygon)
-                max_y = max(p[1] for p in polygon)
-                self.rtree_idx.insert(idx, (min_x, min_y, max_x, max_y))
+        # 创建 R-tree 空间索引（可选依赖；缺失时退化为投影搜索）
+        self.rtree_idx = None
+        if rtree_index is not None:
+            self.rtree_idx = rtree_index.Index()
+            for idx, polygon in enumerate(self.cache["polygons"]):
+                if polygon:
+                    min_x = min(p[0] for p in polygon)
+                    min_y = min(p[1] for p in polygon)
+                    max_x = max(p[0] for p in polygon)
+                    max_y = max(p[1] for p in polygon)
+                    self.rtree_idx.insert(idx, (min_x, min_y, max_x, max_y))
         
         # 现在缓存已经填充，可以安全地设置归一化参        
         self.normalization_params = {
@@ -225,6 +233,8 @@ class Env:
         self._init_p4_config()
         # 初始化 P6.1 配置（抑制抖动：Δu 惩罚 + 目标速度平滑器）
         self._init_p6_1_config()
+        # 初始化 P7.3 配置（平滑与终点可靠性）
+        self._init_p7_3_config()
         
         self.reset()
 
@@ -375,9 +385,18 @@ class Env:
         self.current_segment_idx = 0
         self.current_position = np.array(self.Pm[0])
         self._current_direction_angle, self._current_step_length = self.initialize_starting_conditions()
+        # P7.0：显式维护航向积分（禁止每步用 path_direction 重置航向）
+        self.heading = float(self._current_direction_angle)
         self.trajectory = [self.current_position.copy()]
         self._episode_summary_printed = False
         self.in_corner_phase = False
+        # P7.3：kappa 执行量（奇异点保护）与平滑状态（每回合重置）
+        self._p7_3_prev_kappa_exec = 0.0
+        self._p7_3_kappa_filt = 0.0
+        self._p7_3_trace_ring = []
+        # P7.1：出弯回中 ramp + corner_phase 抖动计数（每回合重置）
+        self._p7_1_exit_timer = -1
+        self._p7_1_corner_toggle_count = 0
         self.last_corridor_status = {}
         self._p4_exit_boost_remaining = 0
         self._p4_stall_counter = 0
@@ -552,6 +571,9 @@ class Env:
         p4_status["v_target"] = float(v_target)
         raw_linear_vel_intent = float(v_target)
 
+        # P7.3：曲率平滑（基于执行量定义 kappa=|omega|/(v+eps)），在约束前做温和滤波（默认关闭）
+        raw_angular_vel_intent = float(self._p7_3_apply_kappa_smoothing(raw_angular_vel_intent, raw_linear_vel_intent))
+
         # 使用Numba优化的约束计算
         (self.velocity, self.acceleration, self.jerk,
          self.angular_vel, self.angular_acc, self.angular_jerk) = apply_kinematic_constraints(
@@ -561,10 +583,10 @@ class Env:
             self.MAX_ANG_VEL, self.MAX_ANG_ACC, self.MAX_ANG_JERK
         )
         
-        # === 计算KCM干预程度：原始意图与实际执行动作的差===
-        velocity_diff = abs(self.velocity - raw_linear_vel_intent)
-        angular_vel_diff = abs(self.angular_vel - raw_angular_vel_intent)
-        self.kcm_intervention = velocity_diff + angular_vel_diff
+        # === 计算KCM干预程度：物理量差值（归一化到约[0,2]量级，避免奖励尺度爆炸）===
+        velocity_diff = abs(self.velocity - raw_linear_vel_intent) / max(float(self.MAX_VEL), 1e-6)
+        angular_vel_diff = abs(self.angular_vel - raw_angular_vel_intent) / max(float(self.MAX_ANG_VEL), 1e-6)
+        self.kcm_intervention = float(velocity_diff + angular_vel_diff)
         
         # === 使用修正后的动作执行状态转===
         # 构建最终安全动
@@ -581,6 +603,20 @@ class Env:
         p4_status["omega_exec"] = float(self.angular_vel)
         p4_status["v_exec"] = float(self.velocity)
 
+        # P7.3：执行曲率（奇异点保护）+ dkappa 诊断（用于验收脚本）
+        kappa_exec = float(self._p7_3_compute_kappa_exec(v_exec=float(self.velocity), omega_exec=float(self.angular_vel)))
+        prev_kappa_exec = float(getattr(self, "_p7_3_prev_kappa_exec", 0.0))
+        dkappa_exec = float(abs(kappa_exec - prev_kappa_exec))
+        self._p7_3_prev_kappa_exec = float(kappa_exec)
+        p4_status["kappa_exec"] = float(kappa_exec)
+        p4_status["dkappa_exec"] = float(dkappa_exec)
+
+        # P7.3：数值安全（kappa/dkappa/state/reward/obs 永不 NaN/Inf；异常立刻 dump）
+        self._p7_3_trace_append(p4_status=p4_status)
+        self._p7_3_assert_finite(name="kappa_exec", value=kappa_exec, p4_status=p4_status)
+        self._p7_3_assert_finite(name="dkappa_exec", value=dkappa_exec, p4_status=p4_status)
+        self._p7_3_assert_finite_array(name="state", arr=self.state, p4_status=p4_status)
+
         # P4.0：停滞检测（progress_diff 很小 + 低速，持续 N 步则终止）
         self._p4_stall_triggered = False
         progress_now = float(self.state[4]) if len(self.state) > 4 else 0.0
@@ -588,12 +624,21 @@ class Env:
         self._p4_last_progress_for_stall = float(progress_now)
 
         if bool(getattr(self, "_p4_stall_enabled", True)) and not bool(getattr(self, "reached_target", False)):
-            if progress_diff < float(getattr(self, "_p4_stall_progress_eps", 1e-4)) and v_ratio_exec < float(
-                getattr(self, "_p4_stall_v_eps", 0.05)
-            ):
-                self._p4_stall_counter = int(getattr(self, "_p4_stall_counter", 0)) + 1
-            else:
+            # P7.3：stall 与 corner_phase/cap 联动
+            if bool(corner_phase_before):
+                # corner_phase 内不触发 stall（避免转弯低速被误杀）
                 self._p4_stall_counter = 0
+            else:
+                stall_progress_eps = float(getattr(self, "_p4_stall_progress_eps", 1e-4))
+                stall_v_eps = float(getattr(self, "_p4_stall_v_eps", 0.05))
+                cap_low = float(getattr(self, "_p7_3_stall_cap_low", 0.25))
+                v_ratio_cap_now = float(p4_status.get("v_ratio_cap", 1.0))
+                low_cap = bool(math.isfinite(v_ratio_cap_now) and v_ratio_cap_now < cap_low)
+
+                if progress_diff < stall_progress_eps and (low_cap or v_ratio_exec < stall_v_eps):
+                    self._p4_stall_counter = int(getattr(self, "_p4_stall_counter", 0)) + 1
+                else:
+                    self._p4_stall_counter = 0
             if int(getattr(self, "_p4_stall_counter", 0)) >= int(getattr(self, "_p4_stall_steps", 300)):
                 self._p4_stall_triggered = True
 
@@ -610,6 +655,7 @@ class Env:
         self._p4_step_status = dict(p4_status)
 
         reward = self.calculate_reward()
+        self._p7_3_assert_finite(name="reward", value=reward, p4_status=p4_status)
         done = self.is_done()
 
         # P4.0：出弯 boost 更新（基于 corner_phase s_t -> s_{t+1} 的状态转移）
@@ -649,6 +695,7 @@ class Env:
             "action_gap_abs": np.abs(np.array([omega_u_exec, v_ratio_exec], dtype=float) - action_policy),
         }
         normalized_state = self.normalize_state(self.state)
+        self._p7_3_assert_finite_array(name="obs", arr=normalized_state, p4_status=p4_status)
         return normalized_state, reward, done, info
     
     def normalize_state(self, state):
@@ -792,19 +839,22 @@ class Env:
         return float(np.clip(progress, 0.0, 0.99))
     
     def calculate_new_position(self, theta_prime_action, length_prime_action):
-        # === 关键修改：使用路径方向作为基准，而非累计角度 ===
-        # 1. 获取当前点的路径方向
-        path_angle = self._get_path_direction(self.current_position)
-        
-        # 2. 将动作角度视为相对路径方向的偏移
-        effective_angle = path_angle + theta_prime_action * self.interpolation_period
-        self._current_direction_angle = effective_angle
-        # 3. 计算新位置（保留原有速度计算
-        displacement = length_prime_action * self.interpolation_period
-        x_next = self.current_position[0] + displacement * np.cos(effective_angle)
-        y_next = self.current_position[1] + displacement * np.sin(effective_angle)
-        
-        return np.array([x_next, y_next])
+        # P7.0：航向积分（heading += omega_exec*dt）+ 位移积分（pos += v_exec*dt*[cos,sin]）
+        dt = float(self.interpolation_period)
+        if not hasattr(self, "heading"):
+            self.heading = float(getattr(self, "_current_direction_angle", 0.0))
+
+        omega_exec = float(theta_prime_action)
+        v_exec = float(length_prime_action)
+
+        self.heading = float(self.heading + omega_exec * dt)
+        self._current_direction_angle = float(self.heading)
+
+        displacement = v_exec * dt
+        x_next = float(self.current_position[0]) + displacement * float(np.cos(self.heading))
+        y_next = float(self.current_position[1]) + displacement * float(np.sin(self.heading))
+
+        return np.array([x_next, y_next], dtype=float)
 
     def _compute_geometric_features(self):
         """
@@ -1017,6 +1067,18 @@ class Env:
         self._corridor_center_weight = float(cfg.get("center_weight", 0.0))
         self._corridor_center_power = float(cfg.get("center_power", 2.0))
 
+        # P7.1：方向性偏好（tanh 弱引导） + 出弯回中权重线性 ramp
+        self._corridor_dir_pref_weight = float(cfg.get("dir_pref_weight", 0.0))
+        self._corridor_dir_pref_beta = float(cfg.get("dir_pref_beta", 2.0))
+        if not math.isfinite(self._corridor_dir_pref_beta) or self._corridor_dir_pref_beta <= 0.0:
+            self._corridor_dir_pref_beta = 1.0
+
+        exit_steps = cfg.get("exit_center_ramp_steps", None)
+        if exit_steps is None:
+            dt = float(max(float(getattr(self, "interpolation_period", 0.1)), 1e-6))
+            exit_steps = max(10, int(1.0 / dt))
+        self._corridor_exit_center_ramp_steps = int(max(1, int(exit_steps)))
+
     def _init_p4_config(self) -> None:
         """读取/初始化 P4.0 配置（可在 YAML 的 reward_weights.p4 下设置）。"""
         cfg = {}
@@ -1055,7 +1117,20 @@ class Env:
 
         # 5) speed cap derived from MAX_ANG_VEL
         self._p4_speed_cap_enabled = bool(cfg.get("speed_cap_enabled", True))
-        self._p4_speed_cap_eps = float(cfg.get("speed_cap_eps", 1e-6))
+        # eps 仅用于防止除零；默认取更小值，避免在 κ≈0 的直线段因 ω̈ 公式被误限速
+        self._p4_speed_cap_eps = float(cfg.get("speed_cap_eps", 1e-12))
+
+        # P7.2：自适应预瞄（d_target = d0 + k*v_exec）
+        d0_default = float(getattr(self, "lookahead_spacing", 1.0))
+        d_min_default = 0.5 * d0_default
+        d_max_default = 4.0 * d0_default
+        k_default = d0_default / max(float(self.MAX_VEL), 1e-6)
+        self._p7_2_d0 = float(cfg.get("p7_2_d0", d0_default))
+        self._p7_2_k = float(cfg.get("p7_2_k", k_default))
+        self._p7_2_d_min = float(cfg.get("p7_2_d_min", d_min_default))
+        self._p7_2_d_max = float(cfg.get("p7_2_d_max", d_max_default))
+        if self._p7_2_d_max < self._p7_2_d_min:
+            self._p7_2_d_max = float(self._p7_2_d_min)
 
         # kappa 估计使用的 lookahead 弧长（默认按 lookahead_spacing*k，并做上限截断，避免过长导致 kappa 过小）
         k = int(cfg.get("speed_cap_k", 4))
@@ -1120,6 +1195,183 @@ class Env:
         self._p6_a_ref_prev = 0.0
         self._p6_v_target_initialized = False
 
+    def _init_p7_3_config(self) -> None:
+        """读取/初始化 P7.3 配置（平滑与终点可靠性）。"""
+        cfg = {}
+        if isinstance(self.reward_weights, dict):
+            cfg = self.reward_weights.get("p7_3", {}) or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+
+        # A) kappa 奇异点保护：v_eps 按 MAX_VEL 缩放（写死默认值）
+        self._p7_3_v_eps = float(max(1e-6 * float(getattr(self, "MAX_VEL", 1.0)), 1e-12))
+
+        # B) stall 与 cap 联动阈值（cap 很低时不以低速判 stall）
+        stall_cap_low = cfg.get("stall_cap_low", 0.25)
+        try:
+            stall_cap_low = float(stall_cap_low)
+        except Exception:
+            stall_cap_low = 0.25
+        self._p7_3_stall_cap_low = float(np.clip(stall_cap_low, 0.0, 1.0))
+
+        # C) kappa 平滑：用于削弱 dkappa 尖峰（默认关闭，避免影响 P7.0~P7.2）
+        self._p7_3_kappa_smoothing_enabled = bool(cfg.get("kappa_smoothing_enabled", False))
+        beta = cfg.get("kappa_smoothing_beta", 0.25)
+        try:
+            beta = float(beta)
+        except Exception:
+            beta = 0.25
+        self._p7_3_kappa_smoothing_beta = float(np.clip(beta, 0.0, 1.0))
+        dkappa_limit = cfg.get("kappa_dkappa_limit", None)
+        if dkappa_limit is None:
+            self._p7_3_kappa_dkappa_limit = float("inf")
+        else:
+            try:
+                dkappa_limit = float(dkappa_limit)
+            except Exception:
+                dkappa_limit = float("inf")
+            self._p7_3_kappa_dkappa_limit = float(max(dkappa_limit, 0.0))
+
+        # D) trace ring buffer（仅用于 NaN/Inf dump）
+        ring = cfg.get("trace_ring_size", 200)
+        try:
+            ring = int(ring)
+        except Exception:
+            ring = 200
+        self._p7_3_trace_ring_size = int(max(50, min(ring, 2000)))
+
+    def _p7_3_compute_kappa_exec(self, *, v_exec: float, omega_exec: float) -> float:
+        """P7.3：执行曲率（奇异点保护）。"""
+        v = float(v_exec) if math.isfinite(float(v_exec)) else 0.0
+        w = float(omega_exec) if math.isfinite(float(omega_exec)) else 0.0
+        v = float(max(v, 0.0))
+        v_eps = float(getattr(self, "_p7_3_v_eps", 1e-12))
+        denom = float(v + v_eps)
+        kappa = float(abs(w) / denom) if denom > 0.0 else 0.0
+        if not math.isfinite(kappa):
+            return 0.0
+        return float(kappa)
+
+    def _p7_3_apply_kappa_smoothing(self, omega_intent: float, v_intent: float) -> float:
+        """P7.3：对曲率 kappa=|omega|/(v+eps) 做简单一阶滤波，抑制 dkappa 尖峰（KISS）。"""
+        if not bool(getattr(self, "_p7_3_kappa_smoothing_enabled", False)):
+            return float(omega_intent)
+
+        beta = float(getattr(self, "_p7_3_kappa_smoothing_beta", 0.0))
+        if not math.isfinite(beta) or beta <= 0.0:
+            return float(omega_intent)
+
+        v_eps = float(getattr(self, "_p7_3_v_eps", 1e-12))
+        v = float(v_intent) if math.isfinite(float(v_intent)) else 0.0
+        v = float(max(v, 0.0))
+        denom = float(v + v_eps)
+
+        w = float(omega_intent) if math.isfinite(float(omega_intent)) else 0.0
+        sign = 0.0
+        if w > 0.0:
+            sign = 1.0
+        elif w < 0.0:
+            sign = -1.0
+
+        kappa_des = float(abs(w) / denom) if denom > 0.0 else 0.0
+        prev = float(getattr(self, "_p7_3_kappa_filt", 0.0))
+        if not math.isfinite(prev) or prev < 0.0:
+            prev = 0.0
+
+        # 先做指数平滑，再做 dkappa 限幅（对尖峰更有效）
+        kappa_raw = float((1.0 - beta) * prev + beta * kappa_des)
+        dkappa_limit = float(getattr(self, "_p7_3_kappa_dkappa_limit", float("inf")))
+        if math.isfinite(dkappa_limit) and dkappa_limit > 0.0:
+            delta = float(np.clip(kappa_raw - prev, -dkappa_limit, dkappa_limit))
+            kappa_filt = float(prev + delta)
+        else:
+            kappa_filt = float(kappa_raw)
+        if not math.isfinite(kappa_filt) or kappa_filt < 0.0:
+            kappa_filt = 0.0
+        self._p7_3_kappa_filt = float(kappa_filt)
+
+        w_smooth = float(sign * kappa_filt * denom)
+        w_max = float(getattr(self, "MAX_ANG_VEL", 0.0))
+        if math.isfinite(w_max) and w_max > 0.0:
+            w_smooth = float(np.clip(w_smooth, -w_max, w_max))
+        return float(w_smooth)
+
+    def _p7_3_trace_append(self, *, p4_status: Dict[str, float]) -> None:
+        ring = getattr(self, "_p7_3_trace_ring", None)
+        if not isinstance(ring, list):
+            ring = []
+            self._p7_3_trace_ring = ring
+
+        try:
+            ring.append(
+                {
+                    "step": int(getattr(self, "current_step", 0)),
+                    "pos": [float(self.current_position[0]), float(self.current_position[1])],
+                    "progress": float(self.state[4]) if getattr(self, "state", None) is not None and len(self.state) > 4 else float("nan"),
+                    "contour_error": float(self.get_contour_error(self.current_position)),
+                    "v_exec": float(p4_status.get("v_exec", float("nan"))),
+                    "omega_exec": float(p4_status.get("omega_exec", float("nan"))),
+                    "v_ratio_exec": float(p4_status.get("v_ratio_exec", float("nan"))),
+                    "v_ratio_cap": float(p4_status.get("v_ratio_cap", float("nan"))),
+                    "kappa_exec": float(p4_status.get("kappa_exec", float("nan"))),
+                    "dkappa_exec": float(p4_status.get("dkappa_exec", float("nan"))),
+                    "alpha": float(p4_status.get("alpha", float("nan"))),
+                }
+            )
+        except Exception:
+            return
+
+        max_len = int(getattr(self, "_p7_3_trace_ring_size", 200))
+        if len(ring) > max_len:
+            del ring[: max(0, len(ring) - max_len)]
+
+    def _p7_3_dump_trace(self, *, reason: str, p4_status: Dict[str, float], extra: Optional[Dict[str, object]] = None) -> None:
+        """P7.3：发现 NaN/Inf 时 dump trace 到 PPO_project/out。"""
+        try:
+            ppo_root = Path(__file__).resolve().parents[2]
+            out_dir = ppo_root / "out" / "p7_3_nan_dumps"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            stamp = int(time.time() * 1000.0)
+            path = out_dir / f"dump_{stamp}_{reason}.json"
+
+            payload = {
+                "reason": str(reason),
+                "step": int(getattr(self, "current_step", 0)),
+                "p4_status": {k: float(v) for k, v in (p4_status or {}).items() if isinstance(v, (int, float, np.floating))},
+                "trace_tail": list(getattr(self, "_p7_3_trace_ring", []) or []),
+            }
+            if extra:
+                payload["extra"] = extra
+            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            return
+
+    def _p7_3_assert_finite(self, *, name: str, value: float, p4_status: Dict[str, float]) -> None:
+        v = float(value)
+        if math.isfinite(v):
+            return
+        self._p7_3_dump_trace(reason=f"non_finite_{name}", p4_status=p4_status, extra={"value": str(value)})
+        raise AssertionError(f"[P7.3] non-finite {name}: {value}")
+
+    def _p7_3_assert_finite_array(self, *, name: str, arr: np.ndarray, p4_status: Dict[str, float]) -> None:
+        try:
+            a = np.asarray(arr, dtype=float)
+        except Exception:
+            self._p7_3_dump_trace(reason=f"non_numeric_{name}", p4_status=p4_status)
+            raise AssertionError(f"[P7.3] non-numeric {name}")
+
+        finite = np.isfinite(a)
+        if bool(np.all(finite)):
+            return
+
+        nan_count = int(a.size - int(np.count_nonzero(finite)))
+        self._p7_3_dump_trace(
+            reason=f"non_finite_{name}",
+            p4_status=p4_status,
+            extra={"shape": list(a.shape), "nan_count": int(nan_count)},
+        )
+        raise AssertionError(f"[P7.3] non-finite {name}: nan_count={nan_count}")
+
     def _wrap_angle(self, angle: float) -> float:
         return (float(angle) + math.pi) % (2 * math.pi) - math.pi
 
@@ -1146,6 +1398,10 @@ class Env:
             "turn_severity": 0.0,
             "dist_to_turn": float("inf"),
             "s_lookahead": float(getattr(self, "_p4_speed_cap_s", 0.0)),
+            # P7.2: 自适应预瞄诊断字段
+            "d_target": 0.0,
+            "d_chosen": 0.0,
+            "kappa_chosen": 0.0,
             "progress_multiplier": 1.0,
             "time_penalty": float(getattr(self, "_p4_time_penalty", 0.0)),
         }
@@ -1160,28 +1416,73 @@ class Env:
             proj, _, s_now, _t_hat, _n_hat = self._project_onto_progress_path(self.current_position)
             _ = proj  # proj 仅用于保持结构一致
 
-            los = self._compute_los_metrics(s_now=float(s_now), s_lookahead=float(s_lookahead))
-            alpha = float(los.get("alpha", 0.0))
-            L = float(los.get("L", float("inf")))
-            kappa_los = float(los.get("kappa_los", 0.0))
-            theta_los = float(los.get("theta_los", float(getattr(self, "_current_direction_angle", 0.0))))
-
             eps = float(getattr(self, "_p4_speed_cap_eps", 1e-6))
-            # P6.0：多预瞄 minimax（每个点都算 cap_i，再取 min）
-            preview_points = int(getattr(self, "_p6_speed_cap_points", 1))
-            preview_points = int(max(1, preview_points))
-            preview_spacing = float(getattr(self, "_p6_speed_cap_spacing", float(s_lookahead)))
-            preview_spacing = float(max(preview_spacing, 1e-6))
+
+            # P7.2：自适应预瞄距离
+            v_exec_now = float(getattr(self, "velocity", 0.0))
+            d0 = float(getattr(self, "_p7_2_d0", float(getattr(self, "lookahead_spacing", 1.0))))
+            k_adapt = float(getattr(self, "_p7_2_k", 1.0))
+            d_min = float(getattr(self, "_p7_2_d_min", 0.5 * d0))
+            d_max = float(getattr(self, "_p7_2_d_max", 3.0 * d0))
+            if d_max < d_min:
+                d_max = d_min
+            d_target = float(d0 + k_adapt * max(v_exec_now, 0.0))
+            d_target = float(np.clip(d_target, max(d_min, 1e-6), max(d_max, 1e-6)))
+            status["d_target"] = float(d_target)
+
+            # 预瞄候选：基于 lookahead_spacing 等间距
+            preview_points = int(max(1, int(getattr(self, "lookahead_points", 5))))
+            preview_spacing = float(max(float(getattr(self, "lookahead_spacing", 1.0)), 1e-6))
+
             use_wdot = bool(getattr(self, "_p6_speed_cap_use_wdot", True))
             use_wddot = bool(getattr(self, "_p6_speed_cap_use_wddot", True))
 
             v_cap_w_min = float("inf")
             v_cap_wdot_min = float("inf")
             v_cap_wddot_min = float("inf")
-            v_cap_final = float(self.MAX_VEL)
             kappa_max = 0.0
             alpha_at_kappa_max = 0.0
 
+            # 选择与 d_target 最接近的预瞄距离
+            remaining = float(max(0.0, float(total) - float(s_now))) if not bool(getattr(self, "closed", False)) else float("inf")
+            best = None  # (abs_err, s_i_eff)
+            for i in range(int(preview_points)):
+                s_i = float(preview_spacing) * float(i + 1)
+                s_i_eff = float(min(s_i, remaining)) if math.isfinite(remaining) else s_i
+                err = abs(s_i_eff - float(d_target))
+                if best is None or err < best[0]:
+                    best = (err, s_i_eff)
+            s_sel = float(best[1]) if best is not None else float(min(preview_spacing, remaining))
+            status["d_chosen"] = float(s_sel)
+
+            # 计算选中预瞄点的 LOS 指标与 cap
+            p_far_sel = self._interpolate_progress_point_at_s(float(s_now) + float(s_sel))
+            r_sel = np.array(p_far_sel, dtype=float) - np.array(self.current_position, dtype=float)
+            L_sel = float(np.linalg.norm(r_sel))
+            heading = float(getattr(self, "_current_direction_angle", 0.0))
+            if not math.isfinite(L_sel) or L_sel <= 1e-12:
+                alpha_sel = 0.0
+                theta_los_sel = heading
+            else:
+                theta_los_sel = float(math.atan2(float(r_sel[1]), float(r_sel[0])))
+                alpha_sel = float(self._wrap_angle(theta_los_sel - heading))
+            kappa_sel = float(abs(alpha_sel) / (L_sel + float(eps))) if math.isfinite(L_sel) else 0.0
+            status["kappa_chosen"] = float(kappa_sel)
+
+            s_eff_sel = float(max(float(s_sel), float(L_sel))) if math.isfinite(L_sel) else float(s_sel)
+            denom_sel = float(kappa_sel + float(eps))
+            v_cap_w_sel = float(self.MAX_ANG_VEL) / denom_sel
+            v_cap_wdot_sel = float("inf")
+            if use_wdot:
+                v_cap_wdot_sel = float(math.sqrt(float(self.MAX_ANG_ACC) * float(s_eff_sel) / denom_sel))
+            v_cap_wddot_sel = float("inf")
+            if use_wddot:
+                v_cap_wddot_sel = float(
+                    (0.5 * float(self.MAX_ANG_JERK) * float(s_eff_sel) * float(s_eff_sel) / denom_sel) ** (1.0 / 3.0)
+                )
+            v_cap_final = float(min(float(self.MAX_VEL), v_cap_w_sel, v_cap_wdot_sel, v_cap_wddot_sel))
+
+            # 诊断：同时计算预瞄集合中的最严格约束（便于排查震荡/主导边界）
             for i in range(int(preview_points)):
                 s_i = float(preview_spacing) * float(i + 1)
                 if not bool(getattr(self, "closed", False)):
@@ -1193,7 +1494,6 @@ class Env:
                     continue
 
                 theta_los_i = float(math.atan2(float(r_i[1]), float(r_i[0])))
-                heading = float(getattr(self, "_current_direction_angle", 0.0))
                 alpha_i = float(self._wrap_angle(theta_los_i - heading))
                 kappa_i = float(abs(alpha_i) / (L_i + float(eps)))
                 if kappa_i > float(kappa_max):
@@ -1218,20 +1518,20 @@ class Env:
                     v_cap_wddot_min = float(min(v_cap_wddot_min, v_cap_wddot))
 
                 v_cap_i = float(min(float(self.MAX_VEL), v_cap_w, v_cap_wdot, v_cap_wddot))
-                v_cap_final = float(min(v_cap_final, v_cap_i))
+                _ = v_cap_i  # keep structure; v_cap_final uses selected lookahead
 
             v_ratio_cap = float(np.clip(v_cap_final / max(float(self.MAX_VEL), 1e-6), 0.0, 1.0))
 
             theta_max = max(float(getattr(self, "_p4_theta_max", math.pi / 2)), 1e-6)
-            turn_severity = float(np.clip(abs(alpha) / theta_max, 0.0, 1.0))
+            turn_severity = float(np.clip(abs(alpha_sel) / theta_max, 0.0, 1.0))
 
             status.update(
                 {
-                    "kappa": float(kappa_los),
-                    "kappa_los": float(kappa_los),
-                    "alpha": float(alpha),
-                    "L": float(L),
-                    "theta_los": float(theta_los),
+                    "kappa": float(kappa_sel),
+                    "kappa_los": float(kappa_sel),
+                    "alpha": float(alpha_sel),
+                    "L": float(L_sel),
+                    "theta_los": float(theta_los_sel),
                     "v_cap": float(v_cap_final),
                     "v_cap_w_min": float(v_cap_w_min),
                     "v_cap_wdot_min": float(v_cap_wdot_min),
@@ -1361,6 +1661,12 @@ class Env:
         status: Dict[str, object] = {
             "enabled": bool(getattr(self, "enable_corridor", False)),
             "corner_phase": False,
+            # P7.1: 抖动/回中诊断字段
+            "toggle_count": 0,
+            "exit_timer": -1,
+            "exit_ramp_steps": int(getattr(self, "_corridor_exit_center_ramp_steps", 0)),
+            "exit_ratio": 0.0,
+            "w_center": 0.0,
             "turn_sign": 0,
             "e_n": 0.0,
             "lower": 0.0,
@@ -1385,7 +1691,7 @@ class Env:
             "dist_to_turn_exit": float("inf"),
         }
 
-        proj, _, s_now, _t_hat, n_hat = self._project_onto_progress_path(self.current_position)
+        proj, seg_idx, s_now, _t_hat, n_hat = self._project_onto_progress_path(self.current_position)
         e_n = float(np.dot(self.current_position - proj, n_hat))  # 左正右负
         corridor_enabled = bool(getattr(self, "enable_corridor", False))
         # P5.1: LOS 角误差 alpha（内切敏感）+ 滞回 corner_phase
@@ -1397,20 +1703,50 @@ class Env:
         theta_los = float(los.get("theta_los", float(getattr(self, "_current_direction_angle", 0.0))))
 
         abs_alpha = abs(alpha)
-        turn_sign = 0
-        if abs_alpha > 1e-6:
-            turn_sign = 1 if alpha > 0 else -1
 
-        if not self.in_corner_phase:
-            if abs_alpha >= float(getattr(self, "_corridor_theta_enter", 0.0)) and L <= float(
+        # turn_sign / dist_to_turn：使用“下一处真实拐角（angles 非零）”的几何信息
+        # - turn_sign: 下一个拐角的旋向（逆时针为正）
+        # - dist_to_turn: 沿路径弧长到该拐角的距离（用于 corner_phase 的 enter/exit）
+        dist_to_turn = float("inf")
+        turn_sign = 0
+        angles = self.cache.get("angles", []) if isinstance(getattr(self, "cache", None), dict) else []
+        cumulative = getattr(self, "_progress_cumulative_lengths", None)
+        if isinstance(angles, list) and angles and cumulative is not None:
+            angle_thresh = float(math.radians(5.0))
+            start = int(max(0, min(int(seg_idx) + 1, len(angles) - 1)))
+            for j in range(start, len(angles)):
+                ang = float(angles[j])
+                if abs(ang) >= angle_thresh:
+                    if j < len(cumulative):
+                        dist_to_turn = float(cumulative[j] - float(s_now))
+                    turn_sign = 1 if ang > 0.0 else -1
+                    break
+
+        corner_before = bool(self.in_corner_phase)
+        if not corner_before:
+            if abs_alpha >= float(getattr(self, "_corridor_theta_enter", 0.0)) and dist_to_turn <= float(
                 getattr(self, "_corridor_dist_enter", float("inf"))
             ):
                 self.in_corner_phase = True
         else:
-            if abs_alpha <= float(getattr(self, "_corridor_theta_exit", 0.0)) or L >= float(
+            if abs_alpha <= float(getattr(self, "_corridor_theta_exit", 0.0)) or dist_to_turn >= float(
                 getattr(self, "_corridor_dist_exit", float("inf"))
             ):
                 self.in_corner_phase = False
+        corner_after = bool(self.in_corner_phase)
+
+        # P7.1：corner_phase toggle 计数 + exit_timer
+        if corner_after != corner_before:
+            self._p7_1_corner_toggle_count = int(getattr(self, "_p7_1_corner_toggle_count", 0)) + 1
+        if corner_after:
+            self._p7_1_exit_timer = -1
+        else:
+            if corner_before and not corner_after:
+                self._p7_1_exit_timer = 0
+            else:
+                prev_exit_timer = int(getattr(self, "_p7_1_exit_timer", -1))
+                if prev_exit_timer >= 0:
+                    self._p7_1_exit_timer = prev_exit_timer + 1
 
         lower = 0.0
         upper = 0.0
@@ -1436,9 +1772,23 @@ class Env:
 
         heading_cos = float(math.cos(float(self._wrap_angle(float(getattr(self, "_current_direction_angle", 0.0)) - theta_los))))
 
+        # P7.1：回中 ramp 权重（严格线性）
+        exit_timer = int(getattr(self, "_p7_1_exit_timer", -1))
+        ramp_steps = int(getattr(self, "_corridor_exit_center_ramp_steps", 0))
+        exit_ratio = 0.0
+        w_center = 0.0
+        if exit_timer >= 0 and ramp_steps > 0:
+            exit_ratio = float(np.clip(float(exit_timer) / max(float(ramp_steps), 1.0), 0.0, 1.0))
+            w_center = abs(float(getattr(self, "_corridor_center_weight", 0.0))) * float(exit_ratio)
+
         status.update(
             {
                 "corner_phase": bool(self.in_corner_phase),
+                "toggle_count": int(getattr(self, "_p7_1_corner_toggle_count", 0)),
+                "exit_timer": int(exit_timer),
+                "exit_ramp_steps": int(ramp_steps),
+                "exit_ratio": float(exit_ratio),
+                "w_center": float(w_center),
                 "turn_sign": int(turn_sign),
                 "e_n": float(e_n),
                 "lower": float(lower),
@@ -1454,9 +1804,9 @@ class Env:
                 "delta_theta": float(alpha),
                 "theta_far": float(theta_los),
                 "heading_cos": float(heading_cos),
-                "dist_to_turn": float(L),
-                "dist_to_turn_enter": float(L),
-                "dist_to_turn_exit": float(L),
+                "dist_to_turn": float(dist_to_turn),
+                "dist_to_turn_enter": float(dist_to_turn),
+                "dist_to_turn_exit": float(dist_to_turn),
             }
         )
 
@@ -1486,14 +1836,18 @@ class Env:
         end_distance = float(np.linalg.norm(self.current_position - end_point))
         lap_done = self.lap_completed or getattr(self, "reached_target", False)
         corridor_status = self._compute_corridor_status()
-        corridor_active = bool(corridor_status.get("enabled")) and bool(corridor_status.get("corner_phase")) and int(
-            corridor_status.get("turn_sign", 0)
-        ) != 0
+        corridor_corner_phase = bool(corridor_status.get("corner_phase"))
+        turn_sign = int(corridor_status.get("turn_sign", 0))
+        exit_timer = int(corridor_status.get("exit_timer", -1))
+        exit_steps = int(corridor_status.get("exit_ramp_steps", 0))
+        exit_active = bool(exit_timer >= 0 and exit_steps > 0 and exit_timer <= exit_steps)
+        corridor_active = bool(corridor_status.get("enabled")) and bool((corridor_corner_phase and turn_sign != 0) or exit_active)
         corridor_e_n = float(corridor_status.get("e_n", 0.0))
         corridor_target_error = abs(corridor_e_n - float(corridor_status.get("e_target", 0.0)))
         corridor_heading_cos = float(corridor_status.get("heading_cos", 0.0))
         corridor_margin_to_edge = corridor_status.get("margin_to_edge", float("nan"))
         corridor_margin_to_edge = float(corridor_margin_to_edge) if corridor_margin_to_edge is not None else float("nan")
+        w_center = float(corridor_status.get("w_center", 0.0))
 
         p4_status = getattr(self, "_p4_step_status", {}) or {}
         if not isinstance(p4_status, dict):
@@ -1540,11 +1894,15 @@ class Env:
             corridor_safe_margin=float(getattr(self, "_corridor_safe_margin", 0.0)),
             corridor_barrier_scale=float(getattr(self, "_corridor_barrier_scale", 0.0)),
             corridor_barrier_weight=float(getattr(self, "_corridor_barrier_weight", 0.0)),
-            corridor_center_weight=float(getattr(self, "_corridor_center_weight", 0.0)),
+            corridor_center_weight=float(w_center),
             corridor_center_power=float(getattr(self, "_corridor_center_power", 2.0)),
             corridor_heading_cos=float(corridor_heading_cos),
             corridor_heading_weight=float(self._corridor_heading_weight),
             corridor_outside_penalty_weight=float(self._corridor_outside_penalty_weight),
+            corridor_corner_phase=bool(corridor_corner_phase),
+            corridor_turn_sign=int(turn_sign),
+            corridor_dir_pref_weight=float(getattr(self, "_corridor_dir_pref_weight", 0.0)),
+            corridor_dir_pref_beta=float(getattr(self, "_corridor_dir_pref_beta", 2.0)),
         )
 
         if isinstance(corridor_status, dict):
@@ -1795,6 +2153,9 @@ class Env:
  
     def _find_containing_segment(self, pt):
         """Use R-tree for faster queries"""
+        if self.rtree_idx is None:
+            return self._find_nearest_segment_by_projection(pt)
+
         x, y = pt
         candidate_idxs = list(self.rtree_idx.intersection((x, y, x, y)))
         
@@ -1982,40 +2343,65 @@ class Env:
             except Exception:
                 mean_velocity = float(self.velocity)
 
+        p4 = getattr(self, "_p4_step_status", {}) or {}
+        if not isinstance(p4, dict):
+            p4 = {}
+        v_intent = float(p4.get("v_intent", float("nan")))
+        v_target = float(p4.get("v_target", float("nan")))
+        v_exec = float(p4.get("v_exec", float(getattr(self, "velocity", 0.0))))
+        v_ratio_exec = float(p4.get("v_ratio_exec", float("nan")))
+        v_ratio_cap = float(p4.get("v_ratio_cap", float("nan")))
+        omega_intent = float(p4.get("omega_intent", float("nan")))
+        omega_exec = float(p4.get("omega_exec", float(getattr(self, "angular_vel", 0.0))))
+
         print(
             "[EPISODE_END] "
             f"closed={bool(self.closed)} lap_completed={bool(self.lap_completed)} reached_target={bool(getattr(self, 'reached_target', False))} "
             f"final_progress={progress:.4f} final_end_distance={end_distance:.4f} final_dist_to_start={dist_to_start:.4f} "
-            f"final_contour_error={float(contour_error):.4f} mean_velocity={mean_velocity:.4f} steps={int(self.current_step)} dt={float(self.interpolation_period)}"
+            f"final_contour_error={float(contour_error):.4f} mean_velocity={mean_velocity:.4f} steps={int(self.current_step)} dt={float(self.interpolation_period)} "
+            f"v_intent={v_intent:.4f} v_target={v_target:.4f} v_exec={v_exec:.4f} v_ratio_exec={v_ratio_exec:.4f} v_ratio_cap={v_ratio_cap:.4f} "
+            f"omega_intent={omega_intent:.4f} omega_exec={omega_exec:.4f}"
         )
         self._episode_summary_printed = True
     
     def is_done(self):
         contour_error = float(self.get_contour_error(self.current_position))
         
-        # 基本结束条件：误差超限或步数过多
-        # 修正：使half_epsilon，因为边界在 ±epsilon/2 
-        if contour_error > self.half_epsilon or self.current_step >= self.max_steps:
+        # 1) OOB：误差超限立即终止
+        # 修正：使用 half_epsilon，因为边界在 ±epsilon/2
+        if contour_error > self.half_epsilon:
             self._maybe_print_episode_summary(contour_error=contour_error)
             return True
 
-        # P4.0：停滞终止（避免无意义拖回合）
-        if bool(getattr(self, "_p4_stall_triggered", False)):
-            self._maybe_print_episode_summary(contour_error=contour_error)
-            return True
-        
-        # 闭合路径：完成一圈也算成
+        # 2) success（优先于 stall/max_steps，避免“到终点但被误判失败”）
         if self.closed and self.lap_completed:
             self.reached_target = True
             self._maybe_print_episode_summary(contour_error=contour_error)
             return True
 
-        # Open path：允许越过终点线触发 success（不依赖 end_distance 变小）
-        if self._open_reached_target(self.current_position):
-            self.reached_target = True
+        if not self.closed:
+            progress = float(self.state[4]) if getattr(self, "state", None) is not None and len(self.state) > 4 else 0.0
+            end_point = np.array(self.Pm[-1])
+            end_distance = float(np.linalg.norm(self.current_position - end_point))
+
+            # 保留跨终点线，同时加备用判据（P7.3）：progress 足够大且终点距离足够小
+            if self._open_reached_target(self.current_position) or (
+                progress > 0.995 and end_distance < self.half_epsilon
+            ):
+                self.reached_target = True
+                self._maybe_print_episode_summary(contour_error=contour_error)
+                return True
+
+        # 3) stall：避免无意义拖回合
+        if bool(getattr(self, "_p4_stall_triggered", False)):
             self._maybe_print_episode_summary(contour_error=contour_error)
             return True
-        
+
+        # 4) max_steps：最后兜底
+        if self.current_step >= self.max_steps:
+            self._maybe_print_episode_summary(contour_error=contour_error)
+            return True
+
         return False
 
 

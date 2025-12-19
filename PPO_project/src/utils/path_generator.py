@@ -31,32 +31,45 @@ def generate_line_path(
 def generate_square_path(
     side_length: float = 10.0,
     num_points: int = 200,
+    closed: bool = True,
 ) -> List[np.ndarray]:
     """
-    生成从(0,0)出发、逆时针的正方形路径，确保四边点均匀分布且闭合。
+    生成从(0,0)出发、逆时针的正方形路径。
+
+    - closed=True：四边闭合（回到起点）
+    - closed=False：open square（仅 3 条边，不回到起点），用于“有拐角且有终点”的训练/验收场景
 
     Args:
         side_length: 正方形边长。
-        num_points: 总采样点数量（包含起点重复以闭合路径），需≥5。
+        num_points: 总采样点数量。
+            - closed=True：包含起点重复以闭合路径，需≥5。
+            - closed=False：不包含闭合点，需≥4。
+        closed: 是否闭合。
     """
-    if num_points < 5:
+    if closed and num_points < 5:
         raise ValueError("num_points must be at least 5 to form a closed square path.")
+    if not closed and num_points < 4:
+        raise ValueError("num_points must be at least 4 to form an open square path.")
 
-    points_to_distribute = num_points - 1  # 预留一个点用于闭合
-    base = points_to_distribute // 4
-    remainder = points_to_distribute % 4
-    counts = [base + (1 if i < remainder else 0) for i in range(4)]
+    edges = 4 if closed else 3
+    points_to_distribute = num_points - 1  # 预留首点
+    if closed:
+        points_to_distribute = num_points - 1  # 预留一个点用于闭合（重复起点）
+    base = points_to_distribute // edges
+    remainder = points_to_distribute % edges
+    counts = [base + (1 if i < remainder else 0) for i in range(edges)]
 
     vertices = [
         np.array([0.0, 0.0]),
         np.array([side_length, 0.0]),
         np.array([side_length, side_length]),
         np.array([0.0, side_length]),
-        np.array([0.0, 0.0]),
     ]
+    if closed:
+        vertices.append(np.array([0.0, 0.0]))
 
     path_points: List[np.ndarray] = [vertices[0]]
-    for edge_idx in range(4):
+    for edge_idx in range(edges):
         start = vertices[edge_idx]
         end = vertices[edge_idx + 1]
         count = counts[edge_idx]
@@ -68,9 +81,10 @@ def generate_square_path(
             point = start + t * (end - start)
             path_points.append(point)
 
-    # 确保闭合：最后一个点即为起点
-    if not np.allclose(path_points[-1], vertices[0]):
-        path_points.append(vertices[0].copy())
+    if closed:
+        # 确保闭合：最后一个点即为起点
+        if not np.allclose(path_points[-1], vertices[0]):
+            path_points.append(vertices[0].copy())
 
     return [np.array(p) for p in path_points]
 
@@ -181,7 +195,7 @@ def get_path_by_name(
     if path_name == "line":
         return generator(length=scale, num_points=num_points, angle=kwargs.get("angle", 0.0))
     if path_name == "square":
-        return generator(side_length=scale, num_points=num_points)
+        return generator(side_length=scale, num_points=num_points, closed=bool(kwargs.get("closed", True)))
     if path_name == "s_shape":
         return generator(
             scale=scale,

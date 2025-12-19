@@ -15,7 +15,12 @@ from typing import Mapping, Optional, Sequence, Tuple
 import numpy as np
 import torch
 import yaml
-from tqdm import tqdm
+
+try:
+    from tqdm import tqdm
+except ImportError:  # pragma: no cover
+    def tqdm(iterable, *args, **kwargs):
+        return iterable
 
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
@@ -285,6 +290,9 @@ def _build_path(path_config: dict) -> list[np.ndarray]:
     kwargs = {}
     if path_type in path_config:
         kwargs.update(path_config[path_type])
+    # square 支持 open/closed：优先使用 path.closed（与 Streamlit 面板配置一致）
+    if path_type == "square" and "closed" in path_config:
+        kwargs.setdefault("closed", bool(path_config.get("closed")))
     Pm = get_path_by_name(path_type, scale=scale, num_points=num_points, **kwargs)
     print(f"使用参数化路径 {path_type}, 采样点数: {len(Pm)}")
     return Pm

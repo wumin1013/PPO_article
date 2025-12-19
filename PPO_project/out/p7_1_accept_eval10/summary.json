@@ -1,0 +1,26 @@
+{
+  "config": "PPO_project\\configs\\original_configs\\p7_1_accept.yaml",
+  "episodes": 5,
+  "seed": 42,
+  "dt": 0.1,
+  "tests": {
+    "t1_free_amplitude_and_direction": true,
+    "t2_exit_recenter": false,
+    "t3_phase_hysteresis_no_chatter": true,
+    "t4_line_speed_not_suppressed": true
+  },
+  "metrics": {
+    "t1_std_e_n_min": 0.08660391584456968,
+    "t1_dir_ratio_min": 1.0,
+    "t2_median_abs_e_n_max": 0.24776195635925613,
+    "t2_zero_cross_max": 0,
+    "t3_chatter_max": 0,
+    "t4_mean_v_ratio_exec_last20_line": 1.0,
+    "ramp_steps": 30
+  },
+  "redlines": {
+    "nan_count": 0,
+    "cap_violation_count": 0,
+    "omega_violation_count": 0
+  }
+}

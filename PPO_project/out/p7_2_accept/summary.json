@@ -1,0 +1,32 @@
+{
+  "config": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\configs\\train_square.yaml",
+  "episodes": 10,
+  "seed": 42,
+  "dt": 0.01,
+  "tests": {
+    "t1_line_cap_open": false,
+    "t2_square_cap_early_drop": true,
+    "t3_adaptive_preview": false,
+    "t4_inner_cut_coupling": false
+  },
+  "metrics": {
+    "t1_line_v_ratio_cap_p50_last_half_median": 0.5788218976308936,
+    "t2_corner_progress": 0.3333333333333327,
+    "t2_drop_step": 2,
+    "t2_drop_progress": 0.00666666263657871,
+    "t3_d_target_median_low": 3.4350197784870917,
+    "t3_d_target_median_high": 3.4350197784870917,
+    "t3_drop_step_low": 2,
+    "t3_drop_step_high": 2,
+    "t4_mean_cap_early_first50": 0.3429396639385339,
+    "t4_mean_cap_late_first50": 0.3427787570140889,
+    "t4_cap_gain": 0.00016090692444503674,
+    "t4_corner_progress": 0.3333333333333327,
+    "t4_late_progress_gate": 0.2833333333333327
+  },
+  "redlines": {
+    "nan_count": 0,
+    "cap_violation_count": 0,
+    "omega_violation_count": 0
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "config": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\configs\\original_configs\\p7_3_accept.yaml",
+  "episodes": 5,
+  "seed": 42,
+  "tests": {
+    "t1_smoothness_dkappa_reduced": false,
+    "t2_finish_reliability": true,
+    "t3_numerical_safety": true
+  },
+  "metrics": {
+    "baseline_dkappa_p95": 0.24095069852056264,
+    "baseline_dkappa_p95_corner": 0.28176012641733106,
+    "smooth_kappa_max": 3.384857802000507,
+    "smooth_dkappa_max": 0.5533141964218391,
+    "smooth_dkappa_p95": 0.25682310683231657,
+    "smooth_dkappa_p95_corner": 0.3385275718412615,
+    "dkappa_reduction_ratio": -0.06587409129423788,
+    "line_success_rate": 1.0,
+    "square_success_rate": 1.0,
+    "line_stall_rate": 0.0,
+    "square_stall_rate": 0.0,
+    "line_oob_rate": 0.0,
+    "square_oob_rate": 0.0
+  },
+  "redlines": {
+    "nan_count": 0,
+    "cap_violation_count": 0,
+    "omega_violation_count": 0
+  }
+}

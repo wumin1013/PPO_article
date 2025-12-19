@@ -69,6 +69,11 @@ class RewardCalculator:
         corridor_heading_cos: float = 0.0,
         corridor_heading_weight: float = 2.0,
         corridor_outside_penalty_weight: float = 20.0,
+        # P7.1：方向性偏好（tanh 弱引导）
+        corridor_corner_phase: bool = False,
+        corridor_turn_sign: int = 0,
+        corridor_dir_pref_weight: float = 0.0,
+        corridor_dir_pref_beta: float = 2.0,
         **_: object,
     ) -> Tuple[float, Dict[str, float]]:
         """精确复现单文件脚本中的奖励逻辑。"""
@@ -91,6 +96,7 @@ class RewardCalculator:
         corridor_center_penalty = 0.0
         corridor_outside_penalty = 0.0
         corridor_heading_reward = 0.0
+        corridor_dir_reward = 0.0
         if use_corridor:
             # P5.2：取消固定 e_target 跟踪，改为“边界势垒 + 轻微中心偏好（可选）”
             m = float(corridor_margin_to_edge)
@@ -112,6 +118,16 @@ class RewardCalculator:
             outside_ratio = float(np.clip(float(corridor_outside_distance) / self.half_epsilon, 0.0, 2.0))
             corridor_outside_penalty = -float(corridor_outside_penalty_weight) * (outside_ratio**2)
             corridor_heading_reward = float(corridor_heading_weight) * float(np.clip(corridor_heading_cos, -1.0, 1.0))
+
+            # P7.1：方向性偏好（自由幅度，不钉死 e_target）
+            if bool(corridor_corner_phase) and int(corridor_turn_sign) != 0:
+                w_dir = abs(float(corridor_dir_pref_weight))
+                if w_dir > 0.0:
+                    beta = float(corridor_dir_pref_beta)
+                    if not math.isfinite(beta) or beta <= 0.0:
+                        beta = 1.0
+                    e_scaled = float(corridor_turn_sign) * float(corridor_e_n) / max(float(self.half_epsilon), 1e-6)
+                    corridor_dir_reward = w_dir * float(math.tanh(beta * e_scaled))
 
         speed_target_reward = 0.0
         if speed_target is not None and v_ratio_exec is not None:
@@ -168,6 +184,7 @@ class RewardCalculator:
             + corridor_center_penalty
             + corridor_outside_penalty
             + corridor_heading_reward
+            + corridor_dir_reward
             + completion_reward
             + survival_reward
             + step_time_penalty
@@ -198,6 +215,7 @@ class RewardCalculator:
             "corridor_center_penalty": float(corridor_center_penalty),
             "corridor_outside_penalty": float(corridor_outside_penalty),
             "corridor_heading_reward": float(corridor_heading_reward),
+            "corridor_dir_reward": float(corridor_dir_reward),
             "completion_reward": float(completion_reward),
             "survival_reward": float(survival_reward),
             "time_penalty": float(step_time_penalty),

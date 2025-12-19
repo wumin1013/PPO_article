@@ -1,0 +1,38 @@
+environment:
+  # 更宽的走廊，避免在“早/晚转向”对比中因越界过早终止
+  epsilon: 1.5
+  interpolation_period: 0.1
+  max_steps: 300
+  lookahead_points: 5
+kinematic_constraints:
+  # 采用归一化速度尺度，便于用 a_v=0.4/0.9 做确定性验收
+  MAX_VEL: 1.0
+  MAX_ACC: 2.0
+  MAX_JERK: 3.0
+  # 收紧角速度能力，让 open_square 在拐角前出现 cap 下压（可控性边界可观测）
+  MAX_ANG_VEL: 0.7
+  MAX_ANG_ACC: 1.4
+  MAX_ANG_JERK: 2.8
+reward_weights:
+  corridor:
+    enabled: false
+  p4:
+    v_min: 0.35
+    exit_speed_target_min: 0.90
+    speed_cap_preview_points: 5
+    speed_cap_use_wdot: true
+    speed_cap_use_wddot: true
+  p6_1:
+    w_du: 0.01
+    du_mode: l1
+    v_target_mode: accel
+    a_ref_max_ratio: 0.5
+    j_ref_enabled: true
+    j_ref_max_ratio: 0.5
+path:
+  # accept 脚本会自行构造 open_line/open_square，这里仅提供尺度/分辨率
+  scale: 2.0
+  num_points: 50
+experiment:
+  mode: train
+  enable_kcm: true

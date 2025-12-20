@@ -91,6 +91,24 @@ def read_live_csv(path: Path) -> pd.DataFrame:
         return pd.DataFrame()
 
 
+def _ensure_csv_header(path: Path, columns: Sequence[str]) -> None:
+    """确保 CSV 文件存在且包含表头，避免面板初启动时出现“找不到 csv 文件”的报错/噪声。"""
+    try:
+        if path.exists() and path.stat().st_size > 0:
+            return
+    except OSError:
+        # 路径不可访问时不阻塞前端
+        return
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with path.open("w", encoding="utf-8", newline="") as f:
+            f.write(",".join(map(str, columns)) + "\n")
+    except OSError:
+        # 静默失败避免前端崩溃
+        return
+
+
 def _build_env_from_config(config: dict, device: torch.device = torch.device("cpu")) -> Env:
     env_cfg = config["environment"]
     kcm_cfg = config["kinematic_constraints"]
@@ -339,6 +357,10 @@ def start_training(
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_dir = SAVED_MODELS_DIR / experiment_name / timestamp
     experiment_dir.mkdir(parents=True, exist_ok=True)
+    logs_dir = experiment_dir / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    _ensure_csv_header(logs_dir / "training_log.csv", ["episode_idx", "reward", "actor_loss", "critic_loss", "wall_time"])
+    _ensure_csv_header(logs_dir / "latest_trajectory.csv", ["x", "y"])
 
     runtime_config_path = config_path
     if path_override or env_override or kcm_overrides or corridor_override is not None:
@@ -403,7 +425,7 @@ def start_training(
 
     st.session_state["is_training"] = True
     st.session_state["train_pid"] = process.pid
-    st.session_state["log_dir"] = str(experiment_dir / "logs")
+    st.session_state["log_dir"] = str(logs_dir)
     st.session_state["config_path"] = str(runtime_config_path)
     st.session_state["active_path_override"] = path_override or None
     st.session_state["experiment_name"] = experiment_name
@@ -628,14 +650,22 @@ def render_saved_models_view() -> None:
         st.markdown("#### Reward & Loss")
         reward_fig = _build_reward_loss_fig(training_df)
         st.plotly_chart(reward_fig, width='stretch')
-        if training_df.empty and log_dir:
-            st.info(f"未在该日志目录找到训练曲线数据（期望: {log_dir / 'training_log.csv'}）。")
+        if log_dir:
+            training_csv = log_dir / "training_log.csv"
+            if not training_csv.exists():
+                st.warning(f"未找到训练曲线 CSV: {training_csv}")
+            elif training_df.empty:
+                st.info("训练曲线暂无数据，等待首回合输出...")
     with col_right:
         st.markdown("#### Trajectory")
         traj_fig = _build_trajectory_fig(traj_df, geom)
         st.plotly_chart(traj_fig, width='stretch')
-        if traj_df.empty and log_dir:
-            st.info(f"未在该日志目录找到轨迹数据（期望: {log_dir / 'latest_trajectory.csv'}）。")
+        if log_dir:
+            traj_csv = log_dir / "latest_trajectory.csv"
+            if not traj_csv.exists():
+                st.warning(f"未找到轨迹 CSV: {traj_csv}")
+            elif traj_df.empty:
+                st.info("轨迹暂无数据，等待首回合输出...")
 
 
 def render_training_sidebar() -> Dict[str, object]:
@@ -946,14 +976,22 @@ def render_training_view() -> None:
         st.markdown("#### Reward & Loss")
         reward_fig = _build_reward_loss_fig(training_df)
         st.plotly_chart(reward_fig, width='stretch')
-        if training_df.empty and log_dir:
-            st.info(f"未在该日志目录找到训练曲线数据（期望: {log_dir / 'training_log.csv'}）。")
+        if log_dir:
+            training_csv = log_dir / "training_log.csv"
+            if not training_csv.exists():
+                st.warning(f"未找到训练曲线 CSV: {training_csv}")
+            elif training_df.empty:
+                st.info("训练曲线暂无数据，等待首回合输出...")
     with col_right:
         st.markdown("#### Real-time Trajectory")
         traj_fig = _build_trajectory_fig(traj_df, geom)
         st.plotly_chart(traj_fig, width='stretch')
-        if traj_df.empty and log_dir:
-            st.info(f"未在该日志目录找到轨迹数据（期望: {log_dir / 'latest_trajectory.csv'}）。")
+        if log_dir:
+            traj_csv = log_dir / "latest_trajectory.csv"
+            if not traj_csv.exists():
+                st.warning(f"未找到轨迹 CSV: {traj_csv}")
+            elif traj_df.empty:
+                st.info("轨迹暂无数据，等待首回合输出...")
 
     if st.session_state.get("is_training"):
         time.sleep(1)

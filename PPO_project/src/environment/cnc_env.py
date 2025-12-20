@@ -235,6 +235,8 @@ class Env:
         self._init_p6_1_config()
         # 初始化 P7.3 配置（平滑与终点可靠性）
         self._init_p7_3_config()
+        # 初始化 P8.0 配置（真实几何 + 刹车包络）
+        self._init_p8_config()
         
         self.reset()
 
@@ -432,10 +434,14 @@ class Env:
         self._p6_v_target_initialized = False
 
         # 初始观测对齐单文件脚本：固定起点、零进度、使用首段长度
-        distance_to_next_turn = self.cache['segment_lengths'][0] if self.cache['segment_lengths'] else 0.0
+        _proj, _seg_idx, s_now, _t_hat, _n_hat = self._project_onto_progress_path(self.current_position)
+        scan = self._scan_for_next_turn(float(s_now))
+        distance_to_next_turn = float(scan.get("dist_to_turn", float("inf")))
+        if not math.isfinite(distance_to_next_turn):
+            distance_to_next_turn = float(getattr(self, "_progress_total_length", 0.0))
         overall_progress = 0.0
         tau_initial = 0.0
-        next_angle = self._get_next_angle(self.current_segment_idx)
+        next_angle = float(scan.get("turn_angle", 0.0))
         lookahead_features = self._compute_lookahead_features()
 
         self.state = np.array(
@@ -505,8 +511,9 @@ class Env:
 
         v_ratio_cap = float(p4_status.get("v_ratio_cap", 1.0))
         if not bool(getattr(self, "_p4_speed_cap_enabled", True)):
-            v_ratio_cap = 1.0
-            p4_status["v_ratio_cap"] = 1.0
+            # P8.0：即便关闭 turning-feasible cap，也必须保留刹车包络（终点停下/进弯可刹住）
+            v_ratio_cap = float(p4_status.get("v_ratio_brake", 1.0))
+            p4_status["v_ratio_cap"] = float(v_ratio_cap)
 
         # === P5.0：比率层裁剪（仍是 ratio）===
         v_u_exec = float(min(v_u_policy, v_ratio_cap))
@@ -736,13 +743,20 @@ class Env:
         self.current_position = new_pos
         self.trajectory.append(self.current_position.copy())
         tau_next = self.calculate_direction_deviation(self.current_position)
-        self.current_segment_idx, distance_to_next_turn = self._update_segment_info()
+        seg_idx = int(self._find_containing_segment(self.current_position))
+        if seg_idx >= 0:
+            self.current_segment_idx = int(seg_idx)
+        _proj, _seg_idx_progress, s_now, _t_hat, _n_hat = self._project_onto_progress_path(self.current_position)
+        scan = self._scan_for_next_turn(float(s_now))
+        distance_to_next_turn = float(scan.get("dist_to_turn", float("inf")))
+        if not math.isfinite(distance_to_next_turn):
+            distance_to_next_turn = float(getattr(self, "_progress_total_length", 0.0))
         overall_progress = (
             self._calculate_closed_path_progress(self.current_position)
             if self.closed
             else self._calculate_path_progress(self.current_position)
         )
-        next_angle = self._get_next_angle(self.current_segment_idx)
+        next_angle = float(scan.get("turn_angle", 0.0))
 
         lookahead_features = self._compute_lookahead_features()
         base_state = np.array(
@@ -1240,6 +1254,35 @@ class Env:
             ring = 200
         self._p7_3_trace_ring_size = int(max(50, min(ring, 2000)))
 
+    def _init_p8_config(self) -> None:
+        """读取/初始化 P8.0 配置（turn scan + braking envelope）。"""
+        cfg = {}
+        if isinstance(self.reward_weights, dict):
+            cfg = self.reward_weights.get("p8", {}) or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+
+        kappa_th = cfg.get("kappa_th", 0.0)
+        try:
+            kappa_th = float(kappa_th)
+        except Exception:
+            kappa_th = 0.0
+        self._p8_kappa_th = float(max(kappa_th, 0.0))
+
+        refine = cfg.get("turn_refine_steps", 4)
+        try:
+            refine = int(refine)
+        except Exception:
+            refine = 4
+        self._p8_turn_refine_steps = int(max(1, min(refine, 50)))
+
+        w_mult = cfg.get("turn_angle_window_mult", 3)
+        try:
+            w_mult = int(w_mult)
+        except Exception:
+            w_mult = 3
+        self._p8_turn_angle_window_mult = int(max(2, min(w_mult, 20)))
+
     def _p7_3_compute_kappa_exec(self, *, v_exec: float, omega_exec: float) -> float:
         """P7.3：执行曲率（奇异点保护）。"""
         v = float(v_exec) if math.isfinite(float(v_exec)) else 0.0
@@ -1377,6 +1420,7 @@ class Env:
 
     def _compute_p4_pre_step_status(self) -> Dict[str, float]:
         """计算 P4.0 的 turn/speed 相关量（基于当前状态 s_t，用于裁剪与奖励）。"""
+        EPS = 1e-6
         status: Dict[str, float] = {
             "kappa": 0.0,
             "kappa_los": 0.0,
@@ -1392,11 +1436,21 @@ class Env:
             "alpha_max_ahead": 0.0,
             "kappa_max_ahead": 0.0,
             "v_ratio_cap": 1.0,
+            "v_ratio_cap_geom": 1.0,
+            "v_ratio_brake": 1.0,
             "v_ratio_policy": 0.0,
             "v_ratio_exec": 0.0,
             "speed_target": float(getattr(self, "_p4_v_max", 1.0)),
+            "speed_target_raw": float(getattr(self, "_p4_v_max", 1.0)),
+            "speed_target_brake": float(getattr(self, "_p4_v_max", 1.0)),
+            "speed_target_phys": float(getattr(self, "_p4_v_max", 1.0)) * float(self.MAX_VEL),
             "turn_severity": 0.0,
             "dist_to_turn": float("inf"),
+            "dist_to_end": float("inf"),
+            "turn_angle": 0.0,
+            "turn_sign": 0.0,
+            "turn_s": float("nan"),
+            "is_isolated_corner": 0.0,
             "s_lookahead": float(getattr(self, "_p4_speed_cap_s", 0.0)),
             # P7.2: 自适应预瞄诊断字段
             "d_target": 0.0,
@@ -1404,162 +1458,182 @@ class Env:
             "kappa_chosen": 0.0,
             "progress_multiplier": 1.0,
             "time_penalty": float(getattr(self, "_p4_time_penalty", 0.0)),
+            # P8.0: 刹车包络（physical + ratio）
+            "v_brake_turn": float(self.MAX_VEL),
+            "v_brake_end": float(self.MAX_VEL),
+            "v_brake_turn_ratio": 1.0,
+            "v_brake_end_ratio": 1.0,
         }
 
-        # dist_to_turn：使用状态里的“到下一拐点距离”（欧氏距离）
-        if getattr(self, "state", None) is not None and len(self.state) > 3:
-            status["dist_to_turn"] = float(self.state[3])
-
         total = float(getattr(self, "_progress_total_length", 0.0))
+        if not math.isfinite(total) or total <= 1e-9:
+            return status
+
+        proj, _seg_idx, s_now, _t_hat, _n_hat = self._project_onto_progress_path(self.current_position)
+        _ = proj  # 保持结构一致
+        s_now = float(s_now)
+
+        closed = bool(getattr(self, "closed", False))
+        remaining = float(max(0.0, total - s_now)) if not closed else float("inf")
+        status["dist_to_end"] = float(remaining if not closed else float("inf"))
+
+        # P8.0：从 s 域扫描下一处拐角事件（dist_to_turn/turn_angle 等）
+        scan = self._scan_for_next_turn(float(s_now))
+        dist_to_turn = float(scan.get("dist_to_turn", float("inf")))
+        turn_angle = float(scan.get("turn_angle", 0.0))
+        turn_sign = float(scan.get("turn_sign", 0.0))
+        status["dist_to_turn"] = float(dist_to_turn)
+        status["turn_angle"] = float(turn_angle)
+        status["turn_sign"] = float(turn_sign)
+        status["turn_s"] = float(scan.get("turn_s", float("nan")))
+        status["is_isolated_corner"] = 1.0 if bool(scan.get("is_isolated_corner", False)) else 0.0
+
+        # LOS 指标仅用于 debug/reward（不得参与 v_cap）
         s_lookahead = float(getattr(self, "_p4_speed_cap_s", 0.0))
-        if total > 1e-9 and s_lookahead > 1e-9:
-            proj, _, s_now, _t_hat, _n_hat = self._project_onto_progress_path(self.current_position)
-            _ = proj  # proj 仅用于保持结构一致
+        if not closed:
+            s_lookahead = float(min(s_lookahead, max(0.0, total - s_now)))
+        los = self._compute_los_metrics(s_now=float(s_now), s_lookahead=float(s_lookahead))
+        status["alpha"] = float(los.get("alpha", 0.0))
+        status["L"] = float(los.get("L", float("inf")))
+        status["kappa_los"] = float(los.get("kappa_los", 0.0))
+        status["theta_los"] = float(los.get("theta_los", float(getattr(self, "_current_direction_angle", 0.0))))
 
-            eps = float(getattr(self, "_p4_speed_cap_eps", 1e-6))
+        # P7.2：自适应预瞄距离（保留诊断字段；不再用于 v_cap 选择）
+        v_exec_now = float(getattr(self, "velocity", 0.0))
+        d0 = float(getattr(self, "_p7_2_d0", float(getattr(self, "lookahead_spacing", 1.0))))
+        k_adapt = float(getattr(self, "_p7_2_k", 1.0))
+        d_min = float(getattr(self, "_p7_2_d_min", 0.5 * d0))
+        d_max = float(getattr(self, "_p7_2_d_max", 3.0 * d0))
+        if d_max < d_min:
+            d_max = d_min
+        d_target = float(d0 + k_adapt * max(v_exec_now, 0.0))
+        d_target = float(np.clip(d_target, max(d_min, EPS), max(d_max, EPS)))
+        status["d_target"] = float(d_target)
 
-            # P7.2：自适应预瞄距离
-            v_exec_now = float(getattr(self, "velocity", 0.0))
-            d0 = float(getattr(self, "_p7_2_d0", float(getattr(self, "lookahead_spacing", 1.0))))
-            k_adapt = float(getattr(self, "_p7_2_k", 1.0))
-            d_min = float(getattr(self, "_p7_2_d_min", 0.5 * d0))
-            d_max = float(getattr(self, "_p7_2_d_max", 3.0 * d0))
-            if d_max < d_min:
-                d_max = d_min
-            d_target = float(d0 + k_adapt * max(v_exec_now, 0.0))
-            d_target = float(np.clip(d_target, max(d_min, 1e-6), max(d_max, 1e-6)))
-            status["d_target"] = float(d_target)
+        # P8.0：turning-feasible v_cap 只能由路径几何 + 动力学决定
+        preview_points = int(max(1, int(getattr(self, "_p6_speed_cap_points", getattr(self, "lookahead_points", 5)))))
+        preview_spacing = float(max(float(getattr(self, "lookahead_spacing", 1.0)), EPS))
 
-            # 预瞄候选：基于 lookahead_spacing 等间距
-            preview_points = int(max(1, int(getattr(self, "lookahead_points", 5))))
-            preview_spacing = float(max(float(getattr(self, "lookahead_spacing", 1.0)), 1e-6))
+        use_wdot = bool(getattr(self, "_p6_speed_cap_use_wdot", True))
+        use_wddot = bool(getattr(self, "_p6_speed_cap_use_wddot", True))
 
-            use_wdot = bool(getattr(self, "_p6_speed_cap_use_wdot", True))
-            use_wddot = bool(getattr(self, "_p6_speed_cap_use_wddot", True))
+        half_eps = float(getattr(self, "half_epsilon", 0.0))
+        kappa_tol = 1.0 / (half_eps + EPS)
 
-            v_cap_w_min = float("inf")
-            v_cap_wdot_min = float("inf")
-            v_cap_wddot_min = float("inf")
-            kappa_max = 0.0
-            alpha_at_kappa_max = 0.0
+        theta0 = float(self._tangent_angle_at_s(float(s_now)))
+        v_cap_geom = float(self.MAX_VEL)
+        v_cap_w_min = float("inf")
+        v_cap_wdot_min = float("inf")
+        v_cap_wddot_min = float("inf")
+        kappa_max = 0.0
+        delta_at_kappa_max = 0.0
 
-            # 选择与 d_target 最接近的预瞄距离
-            remaining = float(max(0.0, float(total) - float(s_now))) if not bool(getattr(self, "closed", False)) else float("inf")
-            best = None  # (abs_err, s_i_eff)
-            for i in range(int(preview_points)):
-                s_i = float(preview_spacing) * float(i + 1)
-                s_i_eff = float(min(s_i, remaining)) if math.isfinite(remaining) else s_i
-                err = abs(s_i_eff - float(d_target))
-                if best is None or err < best[0]:
-                    best = (err, s_i_eff)
-            s_sel = float(best[1]) if best is not None else float(min(preview_spacing, remaining))
-            status["d_chosen"] = float(s_sel)
+        d_chosen = 0.0
+        kappa_chosen = 0.0
+        for i in range(int(preview_points)):
+            s_i = float(preview_spacing) * float(i + 1)
+            if not closed:
+                s_i = float(min(s_i, remaining))
+            if s_i <= 1e-9:
+                continue
 
-            # 计算选中预瞄点的 LOS 指标与 cap
-            p_far_sel = self._interpolate_progress_point_at_s(float(s_now) + float(s_sel))
-            r_sel = np.array(p_far_sel, dtype=float) - np.array(self.current_position, dtype=float)
-            L_sel = float(np.linalg.norm(r_sel))
-            heading = float(getattr(self, "_current_direction_angle", 0.0))
-            if not math.isfinite(L_sel) or L_sel <= 1e-12:
-                alpha_sel = 0.0
-                theta_los_sel = heading
-            else:
-                theta_los_sel = float(math.atan2(float(r_sel[1]), float(r_sel[0])))
-                alpha_sel = float(self._wrap_angle(theta_los_sel - heading))
-            kappa_sel = float(abs(alpha_sel) / (L_sel + float(eps))) if math.isfinite(L_sel) else 0.0
-            status["kappa_chosen"] = float(kappa_sel)
+            theta1 = float(self._tangent_angle_at_s(float(s_now) + float(s_i)))
+            delta = float(self._wrap_angle(theta1 - theta0))
+            kappa_i = abs(delta) / (s_i + EPS)
+            if kappa_i > kappa_max:
+                kappa_max = float(kappa_i)
+                delta_at_kappa_max = float(delta)
 
-            s_eff_sel = float(max(float(s_sel), float(L_sel))) if math.isfinite(L_sel) else float(s_sel)
-            denom_sel = float(kappa_sel + float(eps))
-            v_cap_w_sel = float(self.MAX_ANG_VEL) / denom_sel
-            v_cap_wdot_sel = float("inf")
+            kappa_eff = float(min(kappa_i, kappa_tol))
+            denom = float(kappa_eff + EPS)
+
+            v_cap_w = float(self.MAX_ANG_VEL) / denom
+            v_cap_w_min = float(min(v_cap_w_min, v_cap_w))
+
+            v_cap_wdot = float("inf")
             if use_wdot:
-                v_cap_wdot_sel = float(math.sqrt(float(self.MAX_ANG_ACC) * float(s_eff_sel) / denom_sel))
-            v_cap_wddot_sel = float("inf")
+                v_cap_wdot = float(math.sqrt(float(self.MAX_ANG_ACC) * float(s_i) / denom + EPS))
+                v_cap_wdot_min = float(min(v_cap_wdot_min, v_cap_wdot))
+
+            v_cap_wddot = float("inf")
             if use_wddot:
-                v_cap_wddot_sel = float(
-                    (0.5 * float(self.MAX_ANG_JERK) * float(s_eff_sel) * float(s_eff_sel) / denom_sel) ** (1.0 / 3.0)
-                )
-            v_cap_final = float(min(float(self.MAX_VEL), v_cap_w_sel, v_cap_wdot_sel, v_cap_wddot_sel))
+                v_cap_wddot = float((0.5 * float(self.MAX_ANG_JERK) * float(s_i) * float(s_i) / denom + EPS) ** (1.0 / 3.0))
+                v_cap_wddot_min = float(min(v_cap_wddot_min, v_cap_wddot))
 
-            # 诊断：同时计算预瞄集合中的最严格约束（便于排查震荡/主导边界）
-            for i in range(int(preview_points)):
-                s_i = float(preview_spacing) * float(i + 1)
-                if not bool(getattr(self, "closed", False)):
-                    s_i = float(min(s_i, max(0.0, float(total) - float(s_now))))
-                p_far_i = self._interpolate_progress_point_at_s(float(s_now) + float(s_i))
-                r_i = np.array(p_far_i, dtype=float) - np.array(self.current_position, dtype=float)
-                L_i = float(np.linalg.norm(r_i))
-                if not math.isfinite(L_i) or L_i <= 1e-12:
-                    continue
+            v_cap_i = float(min(float(self.MAX_VEL), v_cap_w, v_cap_wdot, v_cap_wddot))
+            if v_cap_i < v_cap_geom:
+                v_cap_geom = float(v_cap_i)
+                d_chosen = float(s_i)
+                kappa_chosen = float(kappa_eff)
 
-                theta_los_i = float(math.atan2(float(r_i[1]), float(r_i[0])))
-                alpha_i = float(self._wrap_angle(theta_los_i - heading))
-                kappa_i = float(abs(alpha_i) / (L_i + float(eps)))
-                if kappa_i > float(kappa_max):
-                    kappa_max = float(kappa_i)
-                    alpha_at_kappa_max = float(alpha_i)
+        v_ratio_cap_geom = float(np.clip(v_cap_geom / max(float(self.MAX_VEL), EPS), 0.0, 1.0))
+        status["v_ratio_cap_geom"] = float(v_ratio_cap_geom)
+        status["d_chosen"] = float(d_chosen)
+        status["kappa_chosen"] = float(kappa_chosen)
 
-                s_eff = float(max(float(s_i), float(L_i)))
-                denom = float(kappa_i + float(eps))
-                v_cap_w = float(self.MAX_ANG_VEL) / denom
-                v_cap_w_min = float(min(v_cap_w_min, v_cap_w))
+        # P8.0：刹车包络（拐角 + 终点）
+        a_abs = float(abs(float(self.MAX_ACC)))
 
-                v_cap_wdot = float("inf")
-                if use_wdot:
-                    v_cap_wdot = float(math.sqrt(float(self.MAX_ANG_ACC) * float(s_eff) / denom))
-                    v_cap_wdot_min = float(min(v_cap_wdot_min, v_cap_wdot))
+        v_brake_turn_ratio = 1.0
+        v_brake_turn = float(self.MAX_VEL)
+        if math.isfinite(dist_to_turn):
+            v_limit_at_turn = float(min(float(self.MAX_VEL), float(self.MAX_ANG_VEL) / (kappa_tol + EPS)))
+            v_brake_turn = float(math.sqrt(v_limit_at_turn * v_limit_at_turn + 2.0 * a_abs * max(dist_to_turn, 0.0) + EPS))
+            v_brake_turn_ratio = float(np.clip(v_brake_turn / max(float(self.MAX_VEL), EPS), 0.0, 1.0))
 
-                v_cap_wddot = float("inf")
-                if use_wddot:
-                    v_cap_wddot = float(
-                        (0.5 * float(self.MAX_ANG_JERK) * float(s_eff) * float(s_eff) / denom) ** (1.0 / 3.0)
-                    )
-                    v_cap_wddot_min = float(min(v_cap_wddot_min, v_cap_wddot))
+        v_brake_end_ratio = 1.0
+        v_brake_end = float(self.MAX_VEL)
+        if not closed:
+            dist_to_end = float(max(total - s_now, 0.0))
+            status["dist_to_end"] = float(dist_to_end)
+            v_brake_end = float(math.sqrt(2.0 * a_abs * dist_to_end + EPS))
+            v_brake_end_ratio = float(np.clip(v_brake_end / max(float(self.MAX_VEL), EPS), 0.0, 1.0))
 
-                v_cap_i = float(min(float(self.MAX_VEL), v_cap_w, v_cap_wdot, v_cap_wddot))
-                _ = v_cap_i  # keep structure; v_cap_final uses selected lookahead
+        v_ratio_brake = float(min(v_brake_turn_ratio, v_brake_end_ratio))
+        v_ratio_cap = float(min(v_ratio_cap_geom, v_ratio_brake))
 
-            v_ratio_cap = float(np.clip(v_cap_final / max(float(self.MAX_VEL), 1e-6), 0.0, 1.0))
-
-            theta_max = max(float(getattr(self, "_p4_theta_max", math.pi / 2)), 1e-6)
-            turn_severity = float(np.clip(abs(alpha_sel) / theta_max, 0.0, 1.0))
-
-            status.update(
-                {
-                    "kappa": float(kappa_sel),
-                    "kappa_los": float(kappa_sel),
-                    "alpha": float(alpha_sel),
-                    "L": float(L_sel),
-                    "theta_los": float(theta_los_sel),
-                    "v_cap": float(v_cap_final),
-                    "v_cap_w_min": float(v_cap_w_min),
-                    "v_cap_wdot_min": float(v_cap_wdot_min),
-                    "v_cap_wddot_min": float(v_cap_wddot_min),
-                    "v_cap_final": float(v_cap_final),
-                    "alpha_max_ahead": float(alpha_at_kappa_max),
-                    "kappa_max_ahead": float(kappa_max),
-                    "v_ratio_cap": float(v_ratio_cap),
-                    "turn_severity": float(turn_severity),
-                }
-            )
+        status.update(
+            {
+                "kappa": float(kappa_chosen),
+                "v_cap_final": float(v_cap_geom),
+                "v_cap_w_min": float(v_cap_w_min),
+                "v_cap_wdot_min": float(v_cap_wdot_min),
+                "v_cap_wddot_min": float(v_cap_wddot_min),
+                "alpha_max_ahead": float(delta_at_kappa_max),
+                "kappa_max_ahead": float(kappa_max),
+                "v_brake_turn": float(v_brake_turn),
+                "v_brake_end": float(v_brake_end),
+                "v_brake_turn_ratio": float(v_brake_turn_ratio),
+                "v_brake_end_ratio": float(v_brake_end_ratio),
+                "v_ratio_brake": float(v_ratio_brake),
+                "v_ratio_cap": float(v_ratio_cap),
+                "v_cap": float(v_ratio_cap) * float(self.MAX_VEL),
+            }
+        )
 
         # speed_target（先按 turn_severity/near 计算，再应用 cap）
         v_min = float(getattr(self, "_p4_v_min", 0.35))
         v_max = float(getattr(self, "_p4_v_max", 1.0))
-        d_scale = max(float(getattr(self, "_p4_d_scale", 1.0)), 1e-6)
-        dist_to_turn = float(status["dist_to_turn"])
+        d_scale = max(float(getattr(self, "_p4_d_scale", 1.0)), EPS)
         near = float(math.exp(-dist_to_turn / d_scale)) if math.isfinite(dist_to_turn) else 0.0
-        speed_target = v_min + (v_max - v_min) * (1.0 - float(status["turn_severity"]) * near)
+        theta_max = max(float(getattr(self, "_p4_theta_max", math.pi / 2)), EPS)
+        turn_severity = float(np.clip(abs(turn_angle) / theta_max, 0.0, 1.0))
+        status["turn_severity"] = float(turn_severity)
+
+        speed_target_raw = v_min + (v_max - v_min) * (1.0 - turn_severity * near)
 
         # 出弯 boost：窗口内强制目标更快回升（仍受 cap 限制）
         if int(getattr(self, "_p4_exit_boost_remaining", 0)) > 0:
-            speed_target = max(speed_target, float(getattr(self, "_p4_exit_speed_target_min", 0.9)))
+            speed_target_raw = max(speed_target_raw, float(getattr(self, "_p4_exit_speed_target_min", 0.9)))
             status["progress_multiplier"] = float(getattr(self, "_p4_exit_progress_mult", 1.35))
 
-        speed_target = float(np.clip(speed_target, 0.0, v_max))
-        speed_target = float(min(speed_target, float(status["v_ratio_cap"])))
+        speed_target_raw = float(np.clip(speed_target_raw, 0.0, v_max))
+        speed_target_brake = float(min(speed_target_raw, float(status["v_brake_turn_ratio"]), float(status["v_brake_end_ratio"])))
+        speed_target = float(min(speed_target_brake, float(status["v_ratio_cap"])))
+        status["speed_target_raw"] = float(speed_target_raw)
+        status["speed_target_brake"] = float(speed_target_brake)
         status["speed_target"] = float(speed_target)
+        status["speed_target_phys"] = float(speed_target) * float(self.MAX_VEL)
 
         return status
 
@@ -1610,6 +1684,180 @@ class Env:
         if float(np.linalg.norm(v)) < 1e-9:
             return float(getattr(self, "_current_direction_angle", 0.0))
         return float(math.atan2(float(v[1]), float(v[0])))
+
+    def _scan_for_next_turn(self, s_now: float) -> Dict[str, object]:
+        """在弧长 s 域扫描下一处显著转向事件（P8.0）。
+
+        返回字段：dist_to_turn/turn_angle/turn_sign/turn_s/is_isolated_corner。
+        注意：直线路径可能返回 dist_to_turn=inf。
+        """
+        EPS = 1e-6
+        total = float(getattr(self, "_progress_total_length", 0.0))
+        if not math.isfinite(total) or total <= 1e-9:
+            return {
+                "dist_to_turn": float("inf"),
+                "turn_angle": 0.0,
+                "turn_sign": 0,
+                "turn_s": float("nan"),
+                "is_isolated_corner": False,
+            }
+
+        ds = float(max(float(getattr(self, "lookahead_spacing", 1.0)), EPS))
+        if not math.isfinite(ds) or ds <= 0.0:
+            ds = float(max(total / 50.0, EPS))
+
+        closed = bool(getattr(self, "closed", False))
+        s0 = float(s_now)
+        if closed:
+            s0 = s0 % total
+            max_forward = float(total)
+        else:
+            s0 = float(np.clip(s0, 0.0, total))
+            max_forward = float(max(0.0, total - s0))
+
+        # 阈值必须与 half_eps 关联（P8.0）
+        kappa_cfg = float(getattr(self, "_p8_kappa_th", 0.0))
+        half_eps = float(getattr(self, "half_epsilon", 0.0))
+        kappa_th = float(max(kappa_cfg, 0.25 / (half_eps + EPS)))
+
+        # 在 s 域前向扫描：找第一个 kappa_proxy 超阈值的区间
+        theta_prev = float(self._tangent_angle_at_s(s0))
+        found_s_start = None
+        offset = 0.0
+        while offset + 0.5 * ds <= max_forward + 1e-12:
+            s_next = s0 + min(offset + ds, max_forward)
+            delta_s = float(s_next - (s0 + offset))
+            if delta_s <= 1e-9:
+                break
+            theta_next = float(self._tangent_angle_at_s(s_next))
+            delta = float(self._wrap_angle(theta_next - theta_prev))
+            kappa_proxy = abs(delta) / (delta_s + EPS)
+            if kappa_proxy > kappa_th:
+                found_s_start = float(s0 + offset)
+                break
+            theta_prev = theta_next
+            offset += ds
+
+        if found_s_start is None:
+            return {
+                "dist_to_turn": float("inf"),
+                "turn_angle": 0.0,
+                "turn_sign": 0,
+                "turn_s": float("nan"),
+                "is_isolated_corner": False,
+            }
+
+        # 局部窗口内取最大 kappa_proxy 作为 turn_s
+        refine_steps = int(max(2, int(getattr(self, "_p8_turn_refine_steps", 4))))
+        best_kappa = 0.0
+        best_s = float(found_s_start)
+        for j in range(refine_steps + 1):
+            s_a = float(found_s_start + float(j) * ds)
+            if not closed and s_a >= total - 1e-12:
+                break
+            s_b = float(s_a + ds)
+            if not closed and s_b > total:
+                s_b = float(total)
+            delta_s = float(s_b - s_a)
+            if delta_s <= 1e-9:
+                continue
+            theta_a = float(self._tangent_angle_at_s(s_a))
+            theta_b = float(self._tangent_angle_at_s(s_b))
+            delta = float(self._wrap_angle(theta_b - theta_a))
+            kappa_proxy = abs(delta) / (delta_s + EPS)
+            if kappa_proxy > best_kappa:
+                best_kappa = float(kappa_proxy)
+                best_s = float(s_a + 0.5 * delta_s)
+
+        turn_s_abs = float(best_s)
+        turn_s = float(turn_s_abs % total) if closed else float(np.clip(turn_s_abs, 0.0, total))
+        if closed:
+            dist_to_turn = float((turn_s - s0) % total)
+        else:
+            dist_to_turn = float(max(turn_s - s0, 0.0))
+
+        # turn_angle：窗口前后切向角差估计（抗噪；并避免跨越多个拐角）
+        w_mult = int(max(2, int(getattr(self, "_p8_turn_angle_window_mult", 3))))
+        w_max = float(w_mult) * ds
+        half_ds = 0.5 * ds
+
+        def _kappa_proxy_center(center_s: float) -> Tuple[float, float]:
+            theta_a = float(self._tangent_angle_at_s(float(center_s) - half_ds))
+            theta_b = float(self._tangent_angle_at_s(float(center_s) + half_ds))
+            delta_theta = float(self._wrap_angle(theta_b - theta_a))
+            return float(abs(delta_theta) / (ds + EPS)), float(delta_theta)
+
+        # 从 turn_s 向两侧找到“离开当前事件”的距离，再在余量内搜索下一事件，用于限制 turn_angle 窗口
+        forward_clear = float(w_max)
+        for k in range(1, w_mult + 1):
+            kappa_p, _ = _kappa_proxy_center(turn_s_abs + float(k) * ds)
+            if kappa_p <= kappa_th:
+                forward_clear = float(k) * ds
+                break
+
+        backward_clear = float(w_max)
+        for k in range(1, w_mult + 1):
+            kappa_p, _ = _kappa_proxy_center(turn_s_abs - float(k) * ds)
+            if kappa_p <= kappa_th:
+                backward_clear = float(k) * ds
+                break
+
+        next_event = float("inf")
+        if forward_clear < w_max - 1e-12:
+            start_k = int(max(2, int(math.ceil(forward_clear / ds)) + 1))
+            for k in range(start_k, w_mult + 1):
+                kappa_p, _ = _kappa_proxy_center(turn_s_abs + float(k) * ds)
+                if kappa_p > kappa_th:
+                    next_event = float(k) * ds
+                    break
+
+        prev_event = float("inf")
+        if backward_clear < w_max - 1e-12:
+            start_k = int(max(2, int(math.ceil(backward_clear / ds)) + 1))
+            for k in range(start_k, w_mult + 1):
+                kappa_p, _ = _kappa_proxy_center(turn_s_abs - float(k) * ds)
+                if kappa_p > kappa_th:
+                    prev_event = float(k) * ds
+                    break
+
+        w = float(w_max)
+        if math.isfinite(next_event):
+            w = float(min(w, 0.5 * float(next_event)))
+        if math.isfinite(prev_event):
+            w = float(min(w, 0.5 * float(prev_event)))
+        w = float(max(w, 0.5 * ds))
+
+        theta_before = float(self._tangent_angle_at_s(turn_s_abs - w))
+        theta_after = float(self._tangent_angle_at_s(turn_s_abs + w))
+        turn_angle = float(self._wrap_angle(theta_after - theta_before))
+        if not math.isfinite(turn_angle):
+            turn_angle = 0.0
+        turn_sign = 0
+        if abs(turn_angle) > 1e-6:
+            turn_sign = 1 if turn_angle > 0.0 else -1
+
+        # S 型 vs 孤立拐角：窗口内同时存在显著正/负曲率则视为复合弯
+        pos = False
+        neg = False
+        for k in range(-w_mult, w_mult + 1):
+            kappa_p, delta = _kappa_proxy_center(turn_s_abs + float(k) * ds)
+            if kappa_p <= kappa_th:
+                continue
+            if delta > 0.0:
+                pos = True
+            elif delta < 0.0:
+                neg = True
+            if pos and neg:
+                break
+
+        is_isolated_corner = bool(not (pos and neg))
+        return {
+            "dist_to_turn": float(dist_to_turn),
+            "turn_angle": float(turn_angle),
+            "turn_sign": int(turn_sign),
+            "turn_s": float(turn_s),
+            "is_isolated_corner": bool(is_isolated_corner),
+        }
 
     def _interpolate_progress_point_at_s(self, s_value: float) -> np.ndarray:
         """按 progress cache 的弧长插值路径点（用于 LOS 指标）。"""
@@ -1704,23 +1952,13 @@ class Env:
 
         abs_alpha = abs(alpha)
 
-        # turn_sign / dist_to_turn：使用“下一处真实拐角（angles 非零）”的几何信息
-        # - turn_sign: 下一个拐角的旋向（逆时针为正）
-        # - dist_to_turn: 沿路径弧长到该拐角的距离（用于 corner_phase 的 enter/exit）
-        dist_to_turn = float("inf")
-        turn_sign = 0
-        angles = self.cache.get("angles", []) if isinstance(getattr(self, "cache", None), dict) else []
-        cumulative = getattr(self, "_progress_cumulative_lengths", None)
-        if isinstance(angles, list) and angles and cumulative is not None:
-            angle_thresh = float(math.radians(5.0))
-            start = int(max(0, min(int(seg_idx) + 1, len(angles) - 1)))
-            for j in range(start, len(angles)):
-                ang = float(angles[j])
-                if abs(ang) >= angle_thresh:
-                    if j < len(cumulative):
-                        dist_to_turn = float(cumulative[j] - float(s_now))
-                    turn_sign = 1 if ang > 0.0 else -1
-                    break
+        # P8.0：turn_sign/dist_to_turn 必须来自 s 域扫描（禁止基于索引/点距）
+        scan = self._scan_for_next_turn(float(s_now))
+        dist_to_turn = float(scan.get("dist_to_turn", float("inf")))
+        turn_sign_scan = int(scan.get("turn_sign", 0))
+        is_isolated_corner = bool(scan.get("is_isolated_corner", False))
+        # S 型：关闭内切偏置与方向性偏好，但保留走廊/中线奖励
+        turn_sign_effective = int(turn_sign_scan) if (is_isolated_corner and turn_sign_scan != 0) else 0
 
         corner_before = bool(self.in_corner_phase)
         if not corner_before:
@@ -1756,12 +1994,19 @@ class Env:
         margin_to_edge = float("nan")
 
         corridor_half = max(self.half_epsilon - float(self._corridor_margin), 0.0)
-        if corridor_enabled and self.in_corner_phase and turn_sign != 0 and corridor_half > 0.0:
-            if turn_sign > 0:
-                lower, upper = 0.0, corridor_half
+        if corridor_enabled and self.in_corner_phase and corridor_half > 0.0:
+            if is_isolated_corner and turn_sign_scan != 0:
+                if turn_sign_scan > 0:
+                    lower, upper = 0.0, corridor_half
+                else:
+                    lower, upper = -corridor_half, 0.0
+
+                ramp_den = max(float(getattr(self, "_corridor_dist_enter", 1.0)), 1e-6)
+                ramp = float(np.clip(1.0 - dist_to_turn / ramp_den, 0.0, 1.0)) if math.isfinite(dist_to_turn) else 0.0
+                e_target = float(turn_sign_scan) * float(self.half_epsilon) * float(ramp)
             else:
-                lower, upper = -corridor_half, 0.0
-            e_target = 0.5 * corridor_half * float(turn_sign)
+                lower, upper = -corridor_half, corridor_half
+                e_target = 0.0
 
             in_corridor = bool(lower <= e_n <= upper)
             if e_n < lower:
@@ -1789,7 +2034,8 @@ class Env:
                 "exit_ramp_steps": int(ramp_steps),
                 "exit_ratio": float(exit_ratio),
                 "w_center": float(w_center),
-                "turn_sign": int(turn_sign),
+                "turn_sign": int(turn_sign_effective),
+                "is_isolated_corner": bool(is_isolated_corner),
                 "e_n": float(e_n),
                 "lower": float(lower),
                 "upper": float(upper),
@@ -1841,7 +2087,7 @@ class Env:
         exit_timer = int(corridor_status.get("exit_timer", -1))
         exit_steps = int(corridor_status.get("exit_ramp_steps", 0))
         exit_active = bool(exit_timer >= 0 and exit_steps > 0 and exit_timer <= exit_steps)
-        corridor_active = bool(corridor_status.get("enabled")) and bool((corridor_corner_phase and turn_sign != 0) or exit_active)
+        corridor_active = bool(corridor_status.get("enabled")) and bool(corridor_corner_phase or exit_active)
         corridor_e_n = float(corridor_status.get("e_n", 0.0))
         corridor_target_error = abs(corridor_e_n - float(corridor_status.get("e_target", 0.0)))
         corridor_heading_cos = float(corridor_status.get("heading_cos", 0.0))

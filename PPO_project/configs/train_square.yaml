@@ -95,7 +95,7 @@ training:
 
 path:
   type: square
-  closed: false
+  closed: true
   scale: 10.0
   num_points: 200
   square: {}

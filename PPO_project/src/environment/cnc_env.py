@@ -53,6 +53,7 @@ class Env:
         max_steps,
         reward_weights: Optional[Dict[str, float]] = None,
         lookahead_points: int = 5,
+        return_normalized_obs: bool = True,
     ):
         self.lookahead_points = max(1, int(lookahead_points))
         self.lookahead_feature_size = 3
@@ -96,6 +97,10 @@ class Env:
         )
         self.lookahead_lateral_soft_k = 3.0  # d_i 归一化软因子（越大越不易饱和）
         self.current_step = 0
+        # Step 2：归一化链路二选一
+        # - return_normalized_obs=True：Env 输出 normalized obs（训练端禁用 StateNormalizer）
+        # - return_normalized_obs=False：Env 输出 raw obs（训练端启用 StateNormalizer）
+        self.return_normalized_obs = bool(return_normalized_obs)
         self.trajectory = []
         self.trajectory_states = []
         self.action_space = gym.spaces.Box(
@@ -462,7 +467,7 @@ class Env:
         )
         self.state = np.concatenate([self.state, lookahead_features])
         normalized_state = self.normalize_state(self.state)
-        return normalized_state
+        return normalized_state if self.return_normalized_obs else self.state.copy()
 
     def initialize_starting_conditions(self):
         p1 = self.Pm[0]
@@ -702,8 +707,9 @@ class Env:
             "action_gap_abs": np.abs(np.array([omega_u_exec, v_ratio_exec], dtype=float) - action_policy),
         }
         normalized_state = self.normalize_state(self.state)
-        self._p7_3_assert_finite_array(name="obs", arr=normalized_state, p4_status=p4_status)
-        return normalized_state, reward, done, info
+        obs = normalized_state if self.return_normalized_obs else np.asarray(self.state, dtype=float).copy()
+        self._p7_3_assert_finite_array(name="obs", arr=obs, p4_status=p4_status)
+        return obs, reward, done, info
     
     def normalize_state(self, state):
         normalized = np.zeros_like(state, dtype=float)
@@ -1689,9 +1695,13 @@ class Env:
         """在弧长 s 域扫描下一处显著转向事件（P8.0）。
 
         返回字段：dist_to_turn/turn_angle/turn_sign/turn_s/is_isolated_corner。
-        注意：直线路径可能返回 dist_to_turn=inf。
+        - dist_to_turn 必须是弧长（Arc Length），且在接近拐角时应趋近于 0。
+        - 使用“顶点域（segment 方向差）”检测转向事件，避免窗口中心漂移导致 dist_to_turn 固定为 ds/2。
         """
         EPS = 1e-6
+        if not getattr(self, "_progress_segment_lengths", None):
+            self._rebuild_progress_cache()
+
         total = float(getattr(self, "_progress_total_length", 0.0))
         if not math.isfinite(total) or total <= 1e-9:
             return {
@@ -1702,43 +1712,10 @@ class Env:
                 "is_isolated_corner": False,
             }
 
-        ds = float(max(float(getattr(self, "lookahead_spacing", 1.0)), EPS))
-        if not math.isfinite(ds) or ds <= 0.0:
-            ds = float(max(total / 50.0, EPS))
-
-        closed = bool(getattr(self, "closed", False))
-        s0 = float(s_now)
-        if closed:
-            s0 = s0 % total
-            max_forward = float(total)
-        else:
-            s0 = float(np.clip(s0, 0.0, total))
-            max_forward = float(max(0.0, total - s0))
-
-        # 阈值必须与 half_eps 关联（P8.0）
-        kappa_cfg = float(getattr(self, "_p8_kappa_th", 0.0))
-        half_eps = float(getattr(self, "half_epsilon", 0.0))
-        kappa_th = float(max(kappa_cfg, 0.25 / (half_eps + EPS)))
-
-        # 在 s 域前向扫描：找第一个 kappa_proxy 超阈值的区间
-        theta_prev = float(self._tangent_angle_at_s(s0))
-        found_s_start = None
-        offset = 0.0
-        while offset + 0.5 * ds <= max_forward + 1e-12:
-            s_next = s0 + min(offset + ds, max_forward)
-            delta_s = float(s_next - (s0 + offset))
-            if delta_s <= 1e-9:
-                break
-            theta_next = float(self._tangent_angle_at_s(s_next))
-            delta = float(self._wrap_angle(theta_next - theta_prev))
-            kappa_proxy = abs(delta) / (delta_s + EPS)
-            if kappa_proxy > kappa_th:
-                found_s_start = float(s0 + offset)
-                break
-            theta_prev = theta_next
-            offset += ds
-
-        if found_s_start is None:
+        seg_lengths = list(getattr(self, "_progress_segment_lengths", []) or [])
+        cumulative = list(getattr(self, "_progress_cumulative_lengths", []) or [])
+        seg_count = int(len(seg_lengths))
+        if seg_count < 2 or len(cumulative) != seg_count + 1:
             return {
                 "dist_to_turn": float("inf"),
                 "turn_angle": 0.0,
@@ -1747,108 +1724,155 @@ class Env:
                 "is_isolated_corner": False,
             }
 
-        # 局部窗口内取最大 kappa_proxy 作为 turn_s
-        refine_steps = int(max(2, int(getattr(self, "_p8_turn_refine_steps", 4))))
-        best_kappa = 0.0
-        best_s = float(found_s_start)
-        for j in range(refine_steps + 1):
-            s_a = float(found_s_start + float(j) * ds)
-            if not closed and s_a >= total - 1e-12:
-                break
-            s_b = float(s_a + ds)
-            if not closed and s_b > total:
-                s_b = float(total)
-            delta_s = float(s_b - s_a)
-            if delta_s <= 1e-9:
-                continue
-            theta_a = float(self._tangent_angle_at_s(s_a))
-            theta_b = float(self._tangent_angle_at_s(s_b))
-            delta = float(self._wrap_angle(theta_b - theta_a))
-            kappa_proxy = abs(delta) / (delta_s + EPS)
-            if kappa_proxy > best_kappa:
-                best_kappa = float(kappa_proxy)
-                best_s = float(s_a + 0.5 * delta_s)
+        seg_dirs = self.cache.get("segment_directions", None) if isinstance(getattr(self, "cache", None), dict) else None
+        if not isinstance(seg_dirs, list) or len(seg_dirs) != seg_count:
+            seg_dirs = []
+            for i in range(seg_count):
+                p1 = np.asarray(self.Pm[i], dtype=float)
+                p2 = np.asarray(self.Pm[i + 1], dtype=float)
+                seg_dirs.append(float(math.atan2(float(p2[1] - p1[1]), float(p2[0] - p1[0]))))
 
-        turn_s_abs = float(best_s)
-        turn_s = float(turn_s_abs % total) if closed else float(np.clip(turn_s_abs, 0.0, total))
+        closed = bool(getattr(self, "closed", False))
+        s0 = float(s_now)
         if closed:
-            dist_to_turn = float((turn_s - s0) % total)
+            s0 = s0 % total
         else:
-            dist_to_turn = float(max(turn_s - s0, 0.0))
+            s0 = float(np.clip(s0, 0.0, total))
 
-        # turn_angle：窗口前后切向角差估计（抗噪；并避免跨越多个拐角）
-        w_mult = int(max(2, int(getattr(self, "_p8_turn_angle_window_mult", 3))))
-        w_max = float(w_mult) * ds
-        half_ds = 0.5 * ds
+        # 阈值必须与 half_eps 关联（P8.0）
+        kappa_cfg = float(getattr(self, "_p8_kappa_th", 0.0))
+        half_eps = float(getattr(self, "half_epsilon", 0.0))
+        kappa_th = float(max(kappa_cfg, 0.25 / (half_eps + EPS)))
 
-        def _kappa_proxy_center(center_s: float) -> Tuple[float, float]:
-            theta_a = float(self._tangent_angle_at_s(float(center_s) - half_ds))
-            theta_b = float(self._tangent_angle_at_s(float(center_s) + half_ds))
-            delta_theta = float(self._wrap_angle(theta_b - theta_a))
-            return float(abs(delta_theta) / (ds + EPS)), float(delta_theta)
+        def _vertex_kappa(v_idx: int) -> Tuple[float, float]:
+            """v_idx: 顶点索引（等价于 point index），对应 segment v_idx 的起点；返回(kappa_proxy, delta_theta)。"""
+            if closed:
+                prev_seg = (v_idx - 1) % seg_count
+                next_seg = v_idx % seg_count
+            else:
+                prev_seg = v_idx - 1
+                next_seg = v_idx
+            theta_prev = float(seg_dirs[prev_seg])
+            theta_next = float(seg_dirs[next_seg])
+            delta = float(self._wrap_angle(theta_next - theta_prev))
+            len_prev = float(seg_lengths[prev_seg])
+            len_next = float(seg_lengths[next_seg]) if 0 <= next_seg < seg_count else float(len_prev)
+            ds_local = float(max(0.5 * (len_prev + len_next), EPS))
+            return float(abs(delta) / (ds_local + EPS)), float(delta)
 
-        # 从 turn_s 向两侧找到“离开当前事件”的距离，再在余量内搜索下一事件，用于限制 turn_angle 窗口
-        forward_clear = float(w_max)
-        for k in range(1, w_mult + 1):
-            kappa_p, _ = _kappa_proxy_center(turn_s_abs + float(k) * ds)
-            if kappa_p <= kappa_th:
-                forward_clear = float(k) * ds
-                break
+        # 当前所在 segment（用于确定“下一拐角”从哪开始找）
+        seg_idx0 = int(np.searchsorted(np.asarray(cumulative, dtype=float), s0, side="right") - 1)
+        seg_idx0 = int(np.clip(seg_idx0, 0, seg_count - 1))
 
-        backward_clear = float(w_max)
-        for k in range(1, w_mult + 1):
-            kappa_p, _ = _kappa_proxy_center(turn_s_abs - float(k) * ds)
-            if kappa_p <= kappa_th:
-                backward_clear = float(k) * ds
-                break
-
-        next_event = float("inf")
-        if forward_clear < w_max - 1e-12:
-            start_k = int(max(2, int(math.ceil(forward_clear / ds)) + 1))
-            for k in range(start_k, w_mult + 1):
-                kappa_p, _ = _kappa_proxy_center(turn_s_abs + float(k) * ds)
+        # 在“顶点域”前向扫描：找第一个 kappa_proxy 超阈值的事件段
+        start_vertex = None
+        if closed:
+            for step in range(1, seg_count):
+                v = int((seg_idx0 + step) % seg_count)
+                kappa_p, _ = _vertex_kappa(v)
                 if kappa_p > kappa_th:
-                    next_event = float(k) * ds
+                    start_vertex = int(v)
+                    break
+        else:
+            for v in range(max(1, seg_idx0 + 1), seg_count):
+                kappa_p, _ = _vertex_kappa(int(v))
+                if kappa_p > kappa_th:
+                    start_vertex = int(v)
                     break
 
-        prev_event = float("inf")
-        if backward_clear < w_max - 1e-12:
-            start_k = int(max(2, int(math.ceil(backward_clear / ds)) + 1))
-            for k in range(start_k, w_mult + 1):
-                kappa_p, _ = _kappa_proxy_center(turn_s_abs - float(k) * ds)
-                if kappa_p > kappa_th:
-                    prev_event = float(k) * ds
+        if start_vertex is None:
+            return {
+                "dist_to_turn": float("inf"),
+                "turn_angle": 0.0,
+                "turn_sign": 0,
+                "turn_s": float("nan"),
+                "is_isolated_corner": False,
+            }
+
+        # 收集“第一个事件段”内的连续顶点，并在其中取最大 kappa 作为 turn_s（避免跳到后续拐角）
+        event_vertices: List[int] = []
+        if closed:
+            v = int(start_vertex)
+            for _ in range(seg_count):
+                kappa_p, _ = _vertex_kappa(v)
+                if kappa_p <= kappa_th:
                     break
+                event_vertices.append(int(v))
+                v = int((v + 1) % seg_count)
+        else:
+            for v in range(int(start_vertex), seg_count):
+                kappa_p, _ = _vertex_kappa(int(v))
+                if kappa_p <= kappa_th:
+                    break
+                event_vertices.append(int(v))
 
-        w = float(w_max)
-        if math.isfinite(next_event):
-            w = float(min(w, 0.5 * float(next_event)))
-        if math.isfinite(prev_event):
-            w = float(min(w, 0.5 * float(prev_event)))
-        w = float(max(w, 0.5 * ds))
+        if not event_vertices:
+            return {
+                "dist_to_turn": float("inf"),
+                "turn_angle": 0.0,
+                "turn_sign": 0,
+                "turn_s": float("nan"),
+                "is_isolated_corner": False,
+            }
 
-        theta_before = float(self._tangent_angle_at_s(turn_s_abs - w))
-        theta_after = float(self._tangent_angle_at_s(turn_s_abs + w))
-        turn_angle = float(self._wrap_angle(theta_after - theta_before))
+        best_v = int(event_vertices[0])
+        best_kappa = -1.0
+        turn_angle_sum = 0.0
+        for v in event_vertices:
+            kappa_p, delta = _vertex_kappa(int(v))
+            if kappa_p > best_kappa:
+                best_kappa = float(kappa_p)
+                best_v = int(v)
+            turn_angle_sum += float(delta)
+
+        turn_s = float(cumulative[best_v])
+        dist_to_turn = float((turn_s - s0) % total) if closed else float(max(turn_s - s0, 0.0))
+
+        turn_angle = float(self._wrap_angle(float(turn_angle_sum)))
         if not math.isfinite(turn_angle):
             turn_angle = 0.0
+
         turn_sign = 0
         if abs(turn_angle) > 1e-6:
             turn_sign = 1 if turn_angle > 0.0 else -1
 
         # S 型 vs 孤立拐角：窗口内同时存在显著正/负曲率则视为复合弯
+        ds_nominal = float(max(float(getattr(self, "lookahead_spacing", 1.0)), EPS))
+        w_mult = int(max(2, int(getattr(self, "_p8_turn_angle_window_mult", 3))))
+        w_max = float(w_mult) * ds_nominal
+
         pos = False
         neg = False
-        for k in range(-w_mult, w_mult + 1):
-            kappa_p, delta = _kappa_proxy_center(turn_s_abs + float(k) * ds)
-            if kappa_p <= kappa_th:
-                continue
-            if delta > 0.0:
-                pos = True
-            elif delta < 0.0:
-                neg = True
-            if pos and neg:
-                break
+        if closed:
+            for v in range(seg_count):
+                dv = float((cumulative[v] - turn_s) % total)
+                dv = float(min(dv, total - dv))
+                if dv > w_max + 1e-12:
+                    continue
+                kappa_p, delta = _vertex_kappa(int(v))
+                if kappa_p <= kappa_th:
+                    continue
+                if delta > 0.0:
+                    pos = True
+                elif delta < 0.0:
+                    neg = True
+                if pos and neg:
+                    break
+        else:
+            s_lo = float(max(turn_s - w_max, 0.0))
+            s_hi = float(min(turn_s + w_max, total))
+            v_lo = int(np.searchsorted(np.asarray(cumulative, dtype=float), s_lo, side="left"))
+            v_hi = int(np.searchsorted(np.asarray(cumulative, dtype=float), s_hi, side="right"))
+            for v in range(max(1, v_lo), min(seg_count, v_hi)):
+                kappa_p, delta = _vertex_kappa(int(v))
+                if kappa_p <= kappa_th:
+                    continue
+                if delta > 0.0:
+                    pos = True
+                elif delta < 0.0:
+                    neg = True
+                if pos and neg:
+                    break
 
         is_isolated_corner = bool(not (pos and neg))
         return {
@@ -1942,7 +1966,7 @@ class Env:
         proj, seg_idx, s_now, _t_hat, n_hat = self._project_onto_progress_path(self.current_position)
         e_n = float(np.dot(self.current_position - proj, n_hat))  # 左正右负
         corridor_enabled = bool(getattr(self, "enable_corridor", False))
-        # P5.1: LOS 角误差 alpha（内切敏感）+ 滞回 corner_phase
+        # P5.1: LOS 角误差 alpha（内切敏感）仅用于 debug/reward（不得驱动 corner_phase/v_cap）
         s_lookahead = float(getattr(self, "_p4_speed_cap_s", 0.0))
         los = self._compute_los_metrics(s_now=float(s_now), s_lookahead=float(s_lookahead))
         alpha = float(los.get("alpha", 0.0))
@@ -1950,41 +1974,44 @@ class Env:
         kappa_los = float(los.get("kappa_los", 0.0))
         theta_los = float(los.get("theta_los", float(getattr(self, "_current_direction_angle", 0.0))))
 
-        abs_alpha = abs(alpha)
-
         # P8.0：turn_sign/dist_to_turn 必须来自 s 域扫描（禁止基于索引/点距）
         scan = self._scan_for_next_turn(float(s_now))
         dist_to_turn = float(scan.get("dist_to_turn", float("inf")))
+        turn_angle = float(scan.get("turn_angle", 0.0))
         turn_sign_scan = int(scan.get("turn_sign", 0))
         is_isolated_corner = bool(scan.get("is_isolated_corner", False))
         # S 型：关闭内切偏置与方向性偏好，但保留走廊/中线奖励
         turn_sign_effective = int(turn_sign_scan) if (is_isolated_corner and turn_sign_scan != 0) else 0
 
         corner_before = bool(self.in_corner_phase)
-        if not corner_before:
-            if abs_alpha >= float(getattr(self, "_corridor_theta_enter", 0.0)) and dist_to_turn <= float(
-                getattr(self, "_corridor_dist_enter", float("inf"))
-            ):
-                self.in_corner_phase = True
-        else:
-            if abs_alpha <= float(getattr(self, "_corridor_theta_exit", 0.0)) or dist_to_turn >= float(
-                getattr(self, "_corridor_dist_exit", float("inf"))
-            ):
-                self.in_corner_phase = False
-        corner_after = bool(self.in_corner_phase)
-
-        # P7.1：corner_phase toggle 计数 + exit_timer
-        if corner_after != corner_before:
-            self._p7_1_corner_toggle_count = int(getattr(self, "_p7_1_corner_toggle_count", 0)) + 1
-        if corner_after:
-            self._p7_1_exit_timer = -1
-        else:
-            if corner_before and not corner_after:
-                self._p7_1_exit_timer = 0
+        corner_after = corner_before
+        if corridor_enabled:
+            # Step 3：corner_phase 进入/退出只使用 scan 的 dist_to_turn/turn_angle
+            abs_turn_angle = abs(float(turn_angle))
+            if not corner_before:
+                if abs_turn_angle >= float(getattr(self, "_corridor_theta_enter", 0.0)) and dist_to_turn <= float(
+                    getattr(self, "_corridor_dist_enter", float("inf"))
+                ):
+                    self.in_corner_phase = True
             else:
-                prev_exit_timer = int(getattr(self, "_p7_1_exit_timer", -1))
-                if prev_exit_timer >= 0:
-                    self._p7_1_exit_timer = prev_exit_timer + 1
+                if abs_turn_angle <= float(getattr(self, "_corridor_theta_exit", 0.0)) or dist_to_turn >= float(
+                    getattr(self, "_corridor_dist_exit", float("inf"))
+                ):
+                    self.in_corner_phase = False
+            corner_after = bool(self.in_corner_phase)
+
+            # P7.1：corner_phase toggle 计数 + exit_timer
+            if corner_after != corner_before:
+                self._p7_1_corner_toggle_count = int(getattr(self, "_p7_1_corner_toggle_count", 0)) + 1
+            if corner_after:
+                self._p7_1_exit_timer = -1
+            else:
+                if corner_before and not corner_after:
+                    self._p7_1_exit_timer = 0
+                else:
+                    prev_exit_timer = int(getattr(self, "_p7_1_exit_timer", -1))
+                    if prev_exit_timer >= 0:
+                        self._p7_1_exit_timer = prev_exit_timer + 1
 
         lower = 0.0
         upper = 0.0
@@ -2028,7 +2055,8 @@ class Env:
 
         status.update(
             {
-                "corner_phase": bool(self.in_corner_phase),
+                # Step 3：enable_corridor==False 时强制 corner_phase=False，且不更新 self.in_corner_phase
+                "corner_phase": bool(self.in_corner_phase) if corridor_enabled else False,
                 "toggle_count": int(getattr(self, "_p7_1_corner_toggle_count", 0)),
                 "exit_timer": int(exit_timer),
                 "exit_ramp_steps": int(ramp_steps),
@@ -2053,6 +2081,7 @@ class Env:
                 "dist_to_turn": float(dist_to_turn),
                 "dist_to_turn_enter": float(dist_to_turn),
                 "dist_to_turn_exit": float(dist_to_turn),
+                "turn_angle": float(turn_angle),
             }
         )
 

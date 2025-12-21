@@ -88,6 +88,7 @@ ppo:
   ent_coef: 0.0
 
 training:
+  use_obs_normalizer: false
   num_episodes: 500
   smoothing_factor: 0.9
   save_interval: 100

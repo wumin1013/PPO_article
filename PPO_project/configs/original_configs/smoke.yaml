@@ -61,7 +61,7 @@ path:
     - [0.0, 2.0]
     - [0.0, 0.0]
   closed: true
-  scale: 2.0
+  scale: 8.0
   num_points: 50
   s_shape:
     amplitude: 1.0

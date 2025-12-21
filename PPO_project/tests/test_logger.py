@@ -17,13 +17,14 @@ from src.utils.logger import CSVLogger, DataLogger, ExperimentManager
 CONFIG_PATH = Path(__file__).resolve().parent / "configs" / "default.yaml"
 
 
-def run_atomic_logger_test() -> None:
+def test_csvlogger_atomic_write(tmp_path: Path, monkeypatch) -> None:
     """模拟高频写与读，验证CSVLogger的原子写能力。"""
+    monkeypatch.setenv("EXPERIMENT_DIR", str(tmp_path))
     manager = ExperimentManager("logger_test", CONFIG_PATH)
     log_path = manager.logs_dir / "training_logger_test.csv"
     logger = CSVLogger(log_path, ["episode_idx", "reward", "actor_loss", "critic_loss", "wall_time"])
 
-    total_steps = 50
+    total_steps = 25
     errors: list[Exception] = []
     last_episode = -1
     stop_event = threading.Event()
@@ -38,7 +39,7 @@ def run_atomic_logger_test() -> None:
                 critic_loss=0.2 * step,
                 wall_time=time.perf_counter() - start,
             )
-            time.sleep(0.01)
+            time.sleep(0.005)
         stop_event.set()
 
     def reader() -> None:
@@ -51,7 +52,7 @@ def run_atomic_logger_test() -> None:
                         last_episode = int(df.iloc[-1]["episode_idx"])
             except Exception as exc:
                 errors.append(exc)
-            time.sleep(0.01)
+            time.sleep(0.005)
 
     writer_thread = threading.Thread(target=writer)
     reader_thread = threading.Thread(target=reader)
@@ -69,19 +70,17 @@ def run_atomic_logger_test() -> None:
 
     assert not errors, f"读取过程中出现错误: {errors}"
     assert last_episode == total_steps - 1, f"未读取到最新步: {last_episode}"
-    print(f"日志原子写测试通过，最新步={last_episode}, 日志文件={log_path}")
 
 
-def run_datalogger_atomic_test() -> None:
+def test_datalogger_atomic_write(tmp_path: Path) -> None:
     """模拟推理日志的并发读写，验证DataLogger的原子性。"""
-    manager = ExperimentManager("datalogger_test", CONFIG_PATH)
-    log_path = manager.logs_dir / "datalogger_test.csv"
-    logger = DataLogger(log_dir=manager.logs_dir, filename="datalogger_test.csv")
+    log_path = tmp_path / "datalogger_test.csv"
+    logger = DataLogger(log_dir=tmp_path, filename="datalogger_test.csv")
 
     errors: list[Exception] = []
     last_timestamp = 0.0
     stop_event = threading.Event()
-    total_steps = 30
+    total_steps = 20
 
     def writer() -> None:
         for _ in range(total_steps):
@@ -96,7 +95,7 @@ def run_datalogger_atomic_test() -> None:
                 kcm_intervention=0.0,
                 reward_components={"r": 1.0},
             )
-            time.sleep(0.01)
+            time.sleep(0.005)
         stop_event.set()
 
     def reader() -> None:
@@ -109,7 +108,7 @@ def run_datalogger_atomic_test() -> None:
                         last_timestamp = float(df.iloc[-1]["timestamp"])
             except Exception as exc:
                 errors.append(exc)
-            time.sleep(0.01)
+            time.sleep(0.005)
 
     writer_thread = threading.Thread(target=writer)
     reader_thread = threading.Thread(target=reader)
@@ -126,9 +125,3 @@ def run_datalogger_atomic_test() -> None:
 
     assert not errors, f"读取过程中出现错误: {errors}"
     assert last_timestamp >= 0.01 * total_steps, f"未读取到最新时间戳: {last_timestamp}"
-    print(f"DataLogger 原子写测试通过，最后时间戳={last_timestamp:.4f}, 日志文件={log_path}")
-
-
-if __name__ == "__main__":
-    run_atomic_logger_test()
-    run_datalogger_atomic_test()

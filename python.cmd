@@ -42,8 +42,10 @@ if not defined PYTHON_CANDIDATE (
 REM If using py launcher, let it handle the call; otherwise call resolved path
 if /i "%PYTHON_CANDIDATE%"=="py" (
     py %*
+    set "EXITCODE=!ERRORLEVEL!"
 ) else (
     "%PYTHON_CANDIDATE%" %*
+    set "EXITCODE=!ERRORLEVEL!"
 )
 
-endlocal
+exit /b !EXITCODE!

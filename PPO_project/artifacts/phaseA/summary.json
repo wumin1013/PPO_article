@@ -1,0 +1,16 @@
+{
+  "epsilon": 1.5,
+  "MAX_VEL": 1000.0,
+  "max_abs_e_n": 0.8121841033909316,
+  "rmse_e_n": 0.14222292181141438,
+  "mean_v_ratio_exec": 0.019354201209918678,
+  "v_ratio_exec_nunique": 28,
+  "mean_speed_util_in_band": 0.851963626060304,
+  "mean_v_ratio_exec_straight": 0.02136116526683679,
+  "mean_v_ratio_exec_near_turn": 0.01333330903916432,
+  "corr_v_exec_vs_v_cap": 0.764518570807974,
+  "reached_target": false,
+  "stall_triggered": false,
+  "steps": 56,
+  "outdir": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\phaseA"
+}

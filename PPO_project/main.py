@@ -352,6 +352,13 @@ def train(
     path_config = config["path"]
     reward_weights = config.get("reward_weights", {})
     ppo_config = config.get("ppo", {})
+    training_config = config.setdefault("training", {})
+    if not isinstance(training_config, dict):
+        training_config = {}
+        config["training"] = training_config
+    # Step 2：归一化链路二选一（默认：Env 输出 normalized obs）
+    training_config.setdefault("use_obs_normalizer", False)
+    use_obs_normalizer = bool(training_config.get("use_obs_normalizer", False))
 
     Pm = _build_path(path_config)
     env = Env(
@@ -368,6 +375,7 @@ def train(
         max_steps=env_config["max_steps"],
         lookahead_points=env_config.get("lookahead_points", 5),
         reward_weights=reward_weights,
+        return_normalized_obs=not use_obs_normalizer,
     )
 
     obs_space = getattr(env, "observation_space", None)
@@ -376,7 +384,12 @@ def train(
     _log_run_hyperparams(seed, env, gamma_for_log, experiment_mode)
     print(f"环境创建成功: 状态维度{env.observation_dim}, 动作维度={env.action_space_dim}")
     state_dim = obs_space.shape[0] if obs_space is not None else env.observation_dim
-    normalizer = StateNormalizer(state_dim)
+    if use_obs_normalizer:
+        print("[OBS] 训练端启用 StateNormalizer（Env 返回 raw obs）")
+        normalizer = StateNormalizer(state_dim)
+    else:
+        print("[OBS] Env 返回 normalized obs（训练端禁用 StateNormalizer）")
+        normalizer = lambda x: x
 
     resume_state = None
     resume_experiment_dir: Path | None = None

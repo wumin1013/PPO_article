@@ -410,6 +410,11 @@ class Env:
         self._p4_last_progress_for_stall = 0.0
         self._p4_stall_triggered = False
         self._p4_step_status = {}
+        # P8.x: corner exit hysteresis / cap release state
+        self._p8_corner_mode = False
+        self._p8_corner_exit_hold = 0
+        self._p8_vcap_prev = None
+        self._p8_recovery_active = False
 
         # 重置完成判据相关状态（P3.0）
         self._rebuild_progress_cache()
@@ -1289,6 +1294,76 @@ class Env:
             w_mult = 3
         self._p8_turn_angle_window_mult = int(max(2, min(w_mult, 20)))
 
+        # Corner exit / cap release controls (Phase A patch)
+        self._p8_use_corner_exit_hysteresis = bool(cfg.get("use_corner_exit_hysteresis", True))
+        self._p8_use_vcap_rate_limit = bool(cfg.get("use_vcap_rate_limit", True))
+        self._p8_use_recovery_cap = bool(cfg.get("use_recovery_cap", True))
+
+        corner_on_scale = cfg.get("corner_on_dist_scale", 2.0)
+        corner_off_scale = cfg.get("corner_off_dist_scale", 4.0)
+        try:
+            corner_on_scale = float(corner_on_scale)
+        except Exception:
+            corner_on_scale = 2.0
+        try:
+            corner_off_scale = float(corner_off_scale)
+        except Exception:
+            corner_off_scale = 4.0
+        self._p8_corner_on_dist_scale = float(max(corner_on_scale, 0.0))
+        self._p8_corner_off_dist_scale = float(max(corner_off_scale, self._p8_corner_on_dist_scale + 1e-6))
+
+        hold_steps = cfg.get("corner_exit_hold_steps", 3)
+        try:
+            hold_steps = int(hold_steps)
+        except Exception:
+            hold_steps = 3
+        self._p8_corner_exit_hold_steps = int(max(1, min(hold_steps, 20)))
+
+        e_release_ratio = cfg.get("corner_exit_e_release_ratio", 0.6)
+        psi_release_deg = cfg.get("corner_exit_psi_release_deg", 8.0)
+        try:
+            e_release_ratio = float(e_release_ratio)
+        except Exception:
+            e_release_ratio = 0.6
+        try:
+            psi_release_deg = float(psi_release_deg)
+        except Exception:
+            psi_release_deg = 8.0
+        self._p8_corner_exit_e_release_ratio = float(np.clip(e_release_ratio, 0.0, 1.0))
+        self._p8_corner_exit_psi_release = float(max(math.radians(psi_release_deg), 0.0))
+
+        vcap_rate_up = cfg.get("vcap_rate_up", 0.002)
+        vcap_rate_down = cfg.get("vcap_rate_down", 0.02)
+        try:
+            vcap_rate_up = float(vcap_rate_up)
+        except Exception:
+            vcap_rate_up = 0.002
+        try:
+            vcap_rate_down = float(vcap_rate_down)
+        except Exception:
+            vcap_rate_down = 0.02
+        self._p8_vcap_rate_up = float(max(vcap_rate_up, 0.0))
+        self._p8_vcap_rate_down = float(max(vcap_rate_down, 0.0))
+
+        e_warn_ratio = cfg.get("recovery_e_warn_ratio", 0.85)
+        e_recover_ratio = cfg.get("recovery_e_release_ratio", 0.6)
+        v_recovery = cfg.get("recovery_vcap", 0.015)
+        try:
+            e_warn_ratio = float(e_warn_ratio)
+        except Exception:
+            e_warn_ratio = 0.85
+        try:
+            e_recover_ratio = float(e_recover_ratio)
+        except Exception:
+            e_recover_ratio = 0.6
+        try:
+            v_recovery = float(v_recovery)
+        except Exception:
+            v_recovery = 0.015
+        self._p8_recovery_e_warn_ratio = float(np.clip(e_warn_ratio, 0.0, 1.0))
+        self._p8_recovery_e_release_ratio = float(np.clip(e_recover_ratio, 0.0, 1.0))
+        self._p8_recovery_vcap = float(max(v_recovery, 0.0))
+
     def _p7_3_compute_kappa_exec(self, *, v_exec: float, omega_exec: float) -> float:
         """P7.3：执行曲率（奇异点保护）。"""
         v = float(v_exec) if math.isfinite(float(v_exec)) else 0.0
@@ -1477,9 +1552,11 @@ class Env:
         if not math.isfinite(total) or total <= 1e-9:
             return status
 
-        proj, _seg_idx, s_now, _t_hat, _n_hat = self._project_onto_progress_path(self.current_position)
+        proj, _seg_idx, s_now, _t_hat, n_hat = self._project_onto_progress_path(self.current_position)
         _ = proj  # 保持结构一致
         s_now = float(s_now)
+        e_n = float(np.dot(self.current_position - proj, n_hat))
+        heading_err = float(abs(self.calculate_direction_deviation(self.current_position)))
 
         closed = bool(getattr(self, "closed", False))
         remaining = float(max(0.0, total - s_now)) if not closed else float("inf")
@@ -1599,23 +1676,63 @@ class Env:
 
         v_ratio_brake = float(min(v_brake_turn_ratio, v_brake_end_ratio))
 
-        v_cap_ang = float(self.MAX_VEL)
-        v_ratio_cap_ang = 1.0
-        if math.isfinite(turn_angle) and abs(turn_angle) > 1e-6 and half_eps > EPS:
+        # P8.x: corner exit hysteresis + ang cap gating
+        corner_mode = bool(getattr(self, "_p8_corner_mode", False))
+        corner_exit_hold = int(getattr(self, "_p8_corner_exit_hold", 0))
+        r_allow = float("nan")
+        d_fillet = float("inf")
+        turn_active = bool(math.isfinite(turn_angle) and abs(turn_angle) > 1e-6 and half_eps > EPS)
+        if turn_active:
             sin_min = float(getattr(self, "_p8_ang_cap_sin_min", 0.2))
             sin_min = float(np.clip(sin_min, EPS, 1.0))
             sin_half = float(math.sin(min(abs(turn_angle) * 0.5, 0.5 * math.pi)))
             sin_half = float(max(sin_half, sin_min))
             r_allow = float(half_eps / max(sin_half, EPS))
-            apply_ang_cap = True
-            if not math.isfinite(dist_to_turn):
-                apply_ang_cap = False
+            fillet_scale = float(getattr(self, "_p8_corner_fillet_scale", 1.0))
+            fillet_scale = float(max(fillet_scale, 0.0))
+            d_fillet = float(r_allow * math.tan(abs(turn_angle) * 0.5) * max(fillet_scale, EPS))
+            d_on = float(max(d_fillet, float(getattr(self, "_p8_corner_on_dist_scale", 0.0)) * half_eps))
+            d_off = float(max(d_on + EPS, float(getattr(self, "_p8_corner_off_dist_scale", 0.0)) * half_eps))
+            if bool(getattr(self, "_p8_use_corner_exit_hysteresis", True)):
+                if not corner_mode:
+                    if math.isfinite(dist_to_turn) and dist_to_turn <= d_on:
+                        corner_mode = True
+                        corner_exit_hold = 0
+                else:
+                    e_release = float(getattr(self, "_p8_corner_exit_e_release_ratio", 0.6)) * half_eps
+                    psi_release = float(getattr(self, "_p8_corner_exit_psi_release", 0.0))
+                    exit_ready = bool(
+                        math.isfinite(dist_to_turn)
+                        and dist_to_turn >= d_off
+                        and abs(e_n) <= e_release
+                        and heading_err <= psi_release
+                    )
+                    if exit_ready:
+                        corner_exit_hold += 1
+                    else:
+                        corner_exit_hold = 0
+                    if corner_exit_hold >= int(getattr(self, "_p8_corner_exit_hold_steps", 1)):
+                        corner_mode = False
+                        corner_exit_hold = 0
             else:
-                fillet_scale = float(getattr(self, "_p8_corner_fillet_scale", 1.0))
-                fillet_scale = float(max(fillet_scale, 0.0))
-                d_fillet = float(r_allow * math.tan(abs(turn_angle) * 0.5) * max(fillet_scale, EPS))
-                if dist_to_turn > d_fillet:
-                    apply_ang_cap = False
+                corner_mode = bool(math.isfinite(dist_to_turn) and dist_to_turn <= d_on)
+                corner_exit_hold = 0
+        else:
+            corner_mode = False
+            corner_exit_hold = 0
+
+        self._p8_corner_mode = bool(corner_mode)
+        self._p8_corner_exit_hold = int(corner_exit_hold)
+        status["corner_mode"] = 1.0 if corner_mode else 0.0
+
+        v_cap_ang = float(self.MAX_VEL)
+        v_ratio_cap_ang = 1.0
+        if turn_active and math.isfinite(r_allow):
+            apply_ang_cap = False
+            if bool(getattr(self, "_p8_use_corner_exit_hysteresis", True)):
+                apply_ang_cap = bool(corner_mode)
+            else:
+                apply_ang_cap = bool(math.isfinite(dist_to_turn) and dist_to_turn <= d_fillet)
             if apply_ang_cap:
                 v_cap_ang = float(self.MAX_ANG_VEL) * float(r_allow)
                 v_min_ratio = float(getattr(self, "_p8_ang_cap_min_ratio", 0.01))
@@ -1630,9 +1747,46 @@ class Env:
         v_ratio_cap_ang = float(np.clip(v_cap_ang / max(float(self.MAX_VEL), EPS), 0.0, 1.0))
 
         v_ratio_cap_brake = float(v_ratio_brake)
-        v_ratio_cap = float(min(v_ratio_cap_geom, v_ratio_cap_brake, v_ratio_cap_ang))
+        v_ratio_cap_raw = float(min(v_ratio_cap_geom, v_ratio_cap_brake, v_ratio_cap_ang))
         v_cap_brake = float(v_ratio_cap_brake) * float(self.MAX_VEL)
         v_cap_final = float(min(v_cap_geom, v_cap_brake, v_cap_ang))
+
+        # P8.x: recovery cap near boundary
+        v_ratio_cap = float(v_ratio_cap_raw)
+        recovery_active = bool(getattr(self, "_p8_recovery_active", False))
+        if bool(getattr(self, "_p8_use_recovery_cap", True)) and half_eps > EPS:
+            e_abs = float(abs(e_n))
+            e_warn = float(getattr(self, "_p8_recovery_e_warn_ratio", 0.85)) * half_eps
+            e_release = float(getattr(self, "_p8_recovery_e_release_ratio", 0.6)) * half_eps
+            if recovery_active:
+                if e_abs < e_release:
+                    recovery_active = False
+            else:
+                if e_abs > e_warn:
+                    recovery_active = True
+            if recovery_active:
+                v_ratio_cap = float(min(v_ratio_cap, float(getattr(self, "_p8_recovery_vcap", 0.0))))
+        self._p8_recovery_active = bool(recovery_active)
+        status["recovery_cap_active"] = 1.0 if recovery_active else 0.0
+
+        # P8.x: rate limiter for cap release
+        if bool(getattr(self, "_p8_use_vcap_rate_limit", True)):
+            prev = getattr(self, "_p8_vcap_prev", None)
+            if prev is None or not math.isfinite(float(prev)):
+                prev = float(v_ratio_cap)
+            v_up = float(getattr(self, "_p8_vcap_rate_up", 0.0))
+            v_down = float(getattr(self, "_p8_vcap_rate_down", 0.0))
+            if v_ratio_cap > prev + v_up:
+                v_ratio_cap = float(prev + v_up)
+            elif v_ratio_cap < prev - v_down:
+                v_ratio_cap = float(prev - v_down)
+            self._p8_vcap_prev = float(v_ratio_cap)
+        else:
+            self._p8_vcap_prev = float(v_ratio_cap)
+
+        v_ratio_cap = float(min(v_ratio_cap, v_ratio_cap_raw))
+        v_ratio_cap = float(np.clip(v_ratio_cap, 0.0, 1.0))
+        v_cap_final = float(min(v_cap_final, v_ratio_cap * float(self.MAX_VEL)))
 
         status.update(
             {

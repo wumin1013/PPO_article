@@ -40,6 +40,9 @@ sys.path.insert(0, str(ROOT))
 V_RATIO_CMD_K = 0.9
 V_RATIO_CMD_MIN = 0.02
 V_RATIO_CMD_SMOOTHING = 0.2
+RECENTER_STEPS = 12
+STRAIGHT_OMEGA_MAX = 0.5
+CORNER_OMEGA_SCALE = 0.6
 
 GATE_V_RATIO_EXEC_NUNIQUE_MIN = 10
 GATE_SPEED_UTIL_IN_BAND_MIN = 0.7
@@ -316,9 +319,10 @@ def _assert_state_semantics(env: Env, *, tol: float = 1e-6) -> None:
 def _expert_policy(
     *,
     env: Env,
-    k_pursuit: float = 6.0,
-    k_e: float = 1.5,
+    k_pursuit: float = 3.0,
+    k_e: float = 2.0,
     v_ratio_cmd_prev: Optional[float] = None,
+    recenter_state: Optional[Dict[str, float]] = None,
 ) -> Tuple[np.ndarray, float, float, bool]:
     """专家策略：Pure Pursuit（Phase A 闭环健康验证用）。
 
@@ -350,13 +354,21 @@ def _expert_policy(
     if preturn_dist > 1e-6 and dist_to_turn < preturn_dist:
         blend = float(np.clip(1.0 - dist_to_turn / preturn_dist, 0.0, 1.0))
         heading_err = float(env._wrap_angle(heading_err + 0.6 * turn_angle * blend))
+    if math.isfinite(dist_to_turn) and dist_to_turn > preturn_dist:
+        theta_path = float(env._tangent_angle_at_s(float(s_now)))
+        heading_err = float(env._wrap_angle(theta_path - heading))
     e_n = float(np.dot(pos - proj, n_hat))
     turn_boost = 1.0
     if dist_to_turn < 2.0 * half_eps:
         turn_boost = 1.5
     elif dist_to_turn < 4.0 * half_eps:
         turn_boost = 1.2
-    omega_ratio = float(np.clip(turn_boost * k_pursuit * heading_err - k_e * (e_n / half_eps), -1.0, 1.0))
+    omega_ratio = float(np.clip(turn_boost * k_pursuit * heading_err + k_e * (e_n / half_eps), -1.0, 1.0))
+
+    if recenter_state is None:
+        recenter_state = {}
+    prev_corner_mode = bool(recenter_state.get("prev_corner_mode", False))
+    recenter_left = int(recenter_state.get("recenter_left", 0))
 
     corner_mode = False
     r_allow = float("nan")
@@ -377,7 +389,16 @@ def _expert_policy(
         r_min = float(max(half_eps, 1e-6))
         omega_target = float(np.clip(v_exec / max(r_allow, r_min), 0.0, float(env.MAX_ANG_VEL)))
         omega_target = float(math.copysign(omega_target, turn_angle))
+        omega_target = float(omega_target * CORNER_OMEGA_SCALE)
         omega_ratio = float(np.clip(omega_target / float(env.MAX_ANG_VEL), -1.0, 1.0))
+    elif math.isfinite(dist_to_turn) and dist_to_turn > preturn_dist:
+        omega_ratio = float(np.clip(k_e * (e_n / half_eps), -STRAIGHT_OMEGA_MAX, STRAIGHT_OMEGA_MAX))
+
+    if prev_corner_mode and not corner_mode:
+        recenter_left = int(RECENTER_STEPS)
+    if recenter_left > 0:
+        omega_ratio = 0.0
+        recenter_left -= 1
 
     p4 = env._compute_p4_pre_step_status()
     v_ratio_cap = float(p4.get("v_ratio_cap", float("nan")))
@@ -389,6 +410,10 @@ def _expert_policy(
     v_ratio_cmd = float(np.clip(V_RATIO_CMD_K * v_ratio_cap, V_RATIO_CMD_MIN, 1.0))
     if v_ratio_cmd_prev is not None and math.isfinite(v_ratio_cmd_prev):
         v_ratio_cmd = float((1.0 - V_RATIO_CMD_SMOOTHING) * v_ratio_cmd_prev + V_RATIO_CMD_SMOOTHING * v_ratio_cmd)
+
+    recenter_state["prev_corner_mode"] = bool(corner_mode)
+    recenter_state["recenter_left"] = int(recenter_left)
+    recenter_state["omega_ratio_prev"] = float(omega_ratio)
 
     return np.array([omega_ratio, v_ratio_cmd], dtype=float), float(v_ratio_cmd), float(v_ratio_cap), bool(corner_mode)
 
@@ -423,8 +448,13 @@ def _run_square_expert_episode(env: Env) -> EpisodeResult:
     done = False
     last_dkappa_exec = 0.0
     v_ratio_cmd_prev: Optional[float] = None
+    recenter_state: Dict[str, float] = {}
     while not done:
-        action, v_ratio_cmd, v_ratio_cap_pre, corner_mode = _expert_policy(env=env, v_ratio_cmd_prev=v_ratio_cmd_prev)
+        action, v_ratio_cmd, v_ratio_cap_pre, corner_mode = _expert_policy(
+            env=env,
+            v_ratio_cmd_prev=v_ratio_cmd_prev,
+            recenter_state=recenter_state,
+        )
         v_ratio_cmd_prev = v_ratio_cmd
         obs, _reward, done, info = env.step(action)
 
@@ -502,6 +532,7 @@ def _run_square_expert_episode(env: Env) -> EpisodeResult:
                 "turn_angle": float(turn_angle),
                 "corner_phase": int(1 if corner_phase else 0),
                 "corner_mode": int(1 if corner_mode else 0),
+                "omega_ratio_cmd": float(action[0]) if action is not None and len(action) > 0 else float("nan"),
                 "v_ratio_cmd": float(v_ratio_cmd),
                 "v_ratio_cap_brake": float(v_ratio_cap_brake),
                 "v_ratio_cap_ang": float(v_ratio_cap_ang),

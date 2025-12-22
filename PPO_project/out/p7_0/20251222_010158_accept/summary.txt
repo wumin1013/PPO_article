@@ -1,0 +1,12 @@
+[P7.0 ACCEPT] 动作尺度与航向积分
+outdir: C:\Users\wumin\Nutstore\1\DDPG的轨迹平滑\基于强化学习的轨迹平滑\PPO_project\out\p7_0\20251222_010158_accept
+episodes=20 seed=42 dt=0.1 MAX_ANG_VEL=1.5
+success_rate_line=1.000 (>=0.95)
+mean_v_ratio_exec_last20_line=0.959 (>=0.85)
+stall_rate_line=0.000 (=0.0)
+heading_jump_max=0.060000 (<= 0.180000)
+nan_count=0 (=0)
+cap_violation_count=0 (=0)
+omega_violation_count=0 (=0)
+square: env_closed=False pl_closed=False pr_closed=False pl_self_intersections=0 pr_self_intersections=0
+manual: 请目视检查 path.png（open_square 角点附近应为圆弧/连续转弯，而非折线尖角）。

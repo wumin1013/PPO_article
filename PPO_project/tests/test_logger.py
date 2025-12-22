@@ -17,8 +17,9 @@ from src.utils.logger import CSVLogger, DataLogger, ExperimentManager
 CONFIG_PATH = Path(__file__).resolve().parent / "configs" / "default.yaml"
 
 
-def test_csvlogger_atomic_write(tmp_path: Path, monkeypatch) -> None:
+def test_csvlogger_atomic_write(tmpdir, monkeypatch) -> None:
     """模拟高频写与读，验证CSVLogger的原子写能力。"""
+    tmp_path = Path(str(tmpdir))
     monkeypatch.setenv("EXPERIMENT_DIR", str(tmp_path))
     manager = ExperimentManager("logger_test", CONFIG_PATH)
     log_path = manager.logs_dir / "training_logger_test.csv"
@@ -72,8 +73,9 @@ def test_csvlogger_atomic_write(tmp_path: Path, monkeypatch) -> None:
     assert last_episode == total_steps - 1, f"未读取到最新步: {last_episode}"
 
 
-def test_datalogger_atomic_write(tmp_path: Path) -> None:
+def test_datalogger_atomic_write(tmpdir) -> None:
     """模拟推理日志的并发读写，验证DataLogger的原子性。"""
+    tmp_path = Path(str(tmpdir))
     log_path = tmp_path / "datalogger_test.csv"
     logger = DataLogger(log_dir=tmp_path, filename="datalogger_test.csv")
 

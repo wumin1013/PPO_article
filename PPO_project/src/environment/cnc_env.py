@@ -1443,6 +1443,8 @@ class Env:
             "kappa_max_ahead": 0.0,
             "v_ratio_cap": 1.0,
             "v_ratio_cap_geom": 1.0,
+            "v_ratio_cap_brake": 1.0,
+            "v_ratio_cap_ang": 1.0,
             "v_ratio_brake": 1.0,
             "v_ratio_policy": 0.0,
             "v_ratio_exec": 0.0,
@@ -1596,12 +1598,46 @@ class Env:
             v_brake_end_ratio = float(np.clip(v_brake_end / max(float(self.MAX_VEL), EPS), 0.0, 1.0))
 
         v_ratio_brake = float(min(v_brake_turn_ratio, v_brake_end_ratio))
-        v_ratio_cap = float(min(v_ratio_cap_geom, v_ratio_brake))
+
+        v_cap_ang = float(self.MAX_VEL)
+        v_ratio_cap_ang = 1.0
+        if math.isfinite(turn_angle) and abs(turn_angle) > 1e-6 and half_eps > EPS:
+            sin_min = float(getattr(self, "_p8_ang_cap_sin_min", 0.2))
+            sin_min = float(np.clip(sin_min, EPS, 1.0))
+            sin_half = float(math.sin(min(abs(turn_angle) * 0.5, 0.5 * math.pi)))
+            sin_half = float(max(sin_half, sin_min))
+            r_allow = float(half_eps / max(sin_half, EPS))
+            apply_ang_cap = True
+            if not math.isfinite(dist_to_turn):
+                apply_ang_cap = False
+            else:
+                fillet_scale = float(getattr(self, "_p8_corner_fillet_scale", 1.0))
+                fillet_scale = float(max(fillet_scale, 0.0))
+                d_fillet = float(r_allow * math.tan(abs(turn_angle) * 0.5) * max(fillet_scale, EPS))
+                if dist_to_turn > d_fillet:
+                    apply_ang_cap = False
+            if apply_ang_cap:
+                v_cap_ang = float(self.MAX_ANG_VEL) * float(r_allow)
+                v_min_ratio = float(getattr(self, "_p8_ang_cap_min_ratio", 0.01))
+                v_min_ratio = float(max(v_min_ratio, 0.0))
+                v_min = float(v_min_ratio) * float(self.MAX_VEL)
+                if math.isfinite(v_cap_ang):
+                    v_cap_ang = float(max(v_cap_ang, v_min))
+                else:
+                    v_cap_ang = float(self.MAX_VEL)
+        if not math.isfinite(v_cap_ang):
+            v_cap_ang = float(self.MAX_VEL)
+        v_ratio_cap_ang = float(np.clip(v_cap_ang / max(float(self.MAX_VEL), EPS), 0.0, 1.0))
+
+        v_ratio_cap_brake = float(v_ratio_brake)
+        v_ratio_cap = float(min(v_ratio_cap_geom, v_ratio_cap_brake, v_ratio_cap_ang))
+        v_cap_brake = float(v_ratio_cap_brake) * float(self.MAX_VEL)
+        v_cap_final = float(min(v_cap_geom, v_cap_brake, v_cap_ang))
 
         status.update(
             {
                 "kappa": float(kappa_chosen),
-                "v_cap_final": float(v_cap_geom),
+                "v_cap_final": float(v_cap_final),
                 "v_cap_w_min": float(v_cap_w_min),
                 "v_cap_wdot_min": float(v_cap_wdot_min),
                 "v_cap_wddot_min": float(v_cap_wddot_min),
@@ -1612,6 +1648,8 @@ class Env:
                 "v_brake_turn_ratio": float(v_brake_turn_ratio),
                 "v_brake_end_ratio": float(v_brake_end_ratio),
                 "v_ratio_brake": float(v_ratio_brake),
+                "v_ratio_cap_brake": float(v_ratio_cap_brake),
+                "v_ratio_cap_ang": float(v_ratio_cap_ang),
                 "v_ratio_cap": float(v_ratio_cap),
                 "v_cap": float(v_ratio_cap) * float(self.MAX_VEL),
             }

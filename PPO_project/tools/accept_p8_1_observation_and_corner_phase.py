@@ -9,6 +9,7 @@
 默认产出目录（符合 Runbook DoD）：
 - artifacts/phaseA/square_v_ratio_exec.png
 - artifacts/phaseA/square_v_ratio_cap.png
+- artifacts/phaseA/square_v_cap_breakdown.png
 - artifacts/phaseA/square_speed_util.png
 - artifacts/phaseA/square_e_n.png
 - artifacts/phaseA/summary.json
@@ -36,18 +37,21 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]  # PPO_project
 sys.path.insert(0, str(ROOT))
 
-V_RATIO_CMD_K = 0.7
+V_RATIO_CMD_K = 0.9
 V_RATIO_CMD_MIN = 0.02
 V_RATIO_CMD_SMOOTHING = 0.2
 
 GATE_V_RATIO_EXEC_NUNIQUE_MIN = 10
-GATE_SPEED_UTIL_IN_BAND_MIN = 0.5
+GATE_SPEED_UTIL_IN_BAND_MIN = 0.7
 GATE_V_RATIO_CAP_STD_MIN = 0.01
 GATE_CORR_V_EXEC_V_CAP_MIN = 0.3
+GATE_MAX_ABS_E_N_RATIO = 0.98
+GATE_CAP_ANG_ACTIVE_RATIO_MIN = 0.05
 DIST_STRAIGHT_THRESHOLD = 2.0
 DIST_TURN_THRESHOLD = 0.5
 NUNIQUE_DECIMALS = 4
 SPEED_UTIL_EPS = 1e-9
+TURN_ANGLE_EPS = 1e-6
 
 try:
     import matplotlib.pyplot as plt  # noqa: E402
@@ -312,27 +316,68 @@ def _assert_state_semantics(env: Env, *, tol: float = 1e-6) -> None:
 def _expert_policy(
     *,
     env: Env,
-    k_pursuit: float = 3.2,
+    k_pursuit: float = 6.0,
+    k_e: float = 1.5,
     v_ratio_cmd_prev: Optional[float] = None,
-) -> Tuple[np.ndarray, float, float]:
+) -> Tuple[np.ndarray, float, float, bool]:
     """专家策略：Pure Pursuit（Phase A 闭环健康验证用）。
 
     关键点：
     - 目标点取弧长 `s_now + L` 的中心线点，提前进入转弯
+    - 横向误差项用于回中，避免出弯外飘
     - 速度跟随 v_ratio_cap，确保速度剖面被真实激活
+    - 进入 Corner Mode 时改用可行圆弧角速度
     """
     proj, _seg_idx, s_now, _t_hat, n_hat = env._project_onto_progress_path(env.current_position)
     pos = np.asarray(env.current_position, dtype=float)
 
     half_eps = float(max(float(getattr(env, "half_epsilon", 1.0)), 1e-6))
     heading = float(getattr(env, "heading", getattr(env, "_current_direction_angle", 0.0)))
+    scan = env._scan_for_next_turn(float(s_now))
+    dist_to_turn = float(scan.get("dist_to_turn", float("inf")))
+    if not math.isfinite(dist_to_turn):
+        dist_to_turn = float(getattr(env, "_progress_total_length", 0.0))
 
-    # 预瞄距离：与走廊半宽同量级，略大一点可提前进入转弯
-    L = float(max(2.5 * half_eps, 1.5))
+    # 预瞄距离：直线段更远，近拐角更短以避免切角
+    L_min = float(max(1.5 * half_eps, 0.8))
+    L_max = float(max(4.0 * half_eps, 2.5))
+    L = float(np.clip(dist_to_turn + L_min, L_min, L_max))
     p_target = np.asarray(env._interpolate_progress_point_at_s(float(s_now) + L), dtype=float)
     theta_des = float(math.atan2(float(p_target[1] - pos[1]), float(p_target[0] - pos[0])))
     heading_err = float(env._wrap_angle(theta_des - heading))
-    omega_ratio = float(np.clip(k_pursuit * heading_err, -1.0, 1.0))
+    turn_angle = float(scan.get("turn_angle", 0.0))
+    preturn_dist = float(3.0 * half_eps)
+    if preturn_dist > 1e-6 and dist_to_turn < preturn_dist:
+        blend = float(np.clip(1.0 - dist_to_turn / preturn_dist, 0.0, 1.0))
+        heading_err = float(env._wrap_angle(heading_err + 0.6 * turn_angle * blend))
+    e_n = float(np.dot(pos - proj, n_hat))
+    turn_boost = 1.0
+    if dist_to_turn < 2.0 * half_eps:
+        turn_boost = 1.5
+    elif dist_to_turn < 4.0 * half_eps:
+        turn_boost = 1.2
+    omega_ratio = float(np.clip(turn_boost * k_pursuit * heading_err - k_e * (e_n / half_eps), -1.0, 1.0))
+
+    corner_mode = False
+    r_allow = float("nan")
+    if math.isfinite(turn_angle) and abs(turn_angle) > TURN_ANGLE_EPS and half_eps > 1e-9:
+        sin_min = float(getattr(env, "_p8_ang_cap_sin_min", 0.2))
+        sin_min = float(np.clip(sin_min, 1e-6, 1.0))
+        sin_half = float(math.sin(min(abs(turn_angle) * 0.5, 0.5 * math.pi)))
+        sin_half = float(max(sin_half, sin_min))
+        r_allow = float(half_eps / max(sin_half, 1e-9))
+        fillet_scale = float(getattr(env, "_p8_corner_fillet_scale", 1.0))
+        fillet_scale = float(max(fillet_scale, 0.0))
+        d_fillet = float(r_allow * math.tan(abs(turn_angle) * 0.5) * max(fillet_scale, 1e-6))
+        if math.isfinite(dist_to_turn) and math.isfinite(d_fillet) and dist_to_turn <= d_fillet:
+            corner_mode = True
+
+    if corner_mode and math.isfinite(r_allow) and r_allow > 0.0:
+        v_exec = float(getattr(env, "velocity", 0.0))
+        r_min = float(max(half_eps, 1e-6))
+        omega_target = float(np.clip(v_exec / max(r_allow, r_min), 0.0, float(env.MAX_ANG_VEL)))
+        omega_target = float(math.copysign(omega_target, turn_angle))
+        omega_ratio = float(np.clip(omega_target / float(env.MAX_ANG_VEL), -1.0, 1.0))
 
     p4 = env._compute_p4_pre_step_status()
     v_ratio_cap = float(p4.get("v_ratio_cap", float("nan")))
@@ -345,7 +390,7 @@ def _expert_policy(
     if v_ratio_cmd_prev is not None and math.isfinite(v_ratio_cmd_prev):
         v_ratio_cmd = float((1.0 - V_RATIO_CMD_SMOOTHING) * v_ratio_cmd_prev + V_RATIO_CMD_SMOOTHING * v_ratio_cmd)
 
-    return np.array([omega_ratio, v_ratio_cmd], dtype=float), float(v_ratio_cmd), float(v_ratio_cap)
+    return np.array([omega_ratio, v_ratio_cmd], dtype=float), float(v_ratio_cmd), float(v_ratio_cap), bool(corner_mode)
 
 
 @dataclass
@@ -379,7 +424,7 @@ def _run_square_expert_episode(env: Env) -> EpisodeResult:
     last_dkappa_exec = 0.0
     v_ratio_cmd_prev: Optional[float] = None
     while not done:
-        action, v_ratio_cmd, v_ratio_cap_pre = _expert_policy(env=env, v_ratio_cmd_prev=v_ratio_cmd_prev)
+        action, v_ratio_cmd, v_ratio_cap_pre, corner_mode = _expert_policy(env=env, v_ratio_cmd_prev=v_ratio_cmd_prev)
         v_ratio_cmd_prev = v_ratio_cmd
         obs, _reward, done, info = env.step(action)
 
@@ -402,6 +447,8 @@ def _run_square_expert_episode(env: Env) -> EpisodeResult:
         if not isinstance(p4, dict):
             p4 = {}
         v_ratio_cap = float(p4.get("v_ratio_cap", float("nan")))
+        v_ratio_cap_brake = float(p4.get("v_ratio_cap_brake", float("nan")))
+        v_ratio_cap_ang = float(p4.get("v_ratio_cap_ang", float("nan")))
         v_ratio_exec = float(p4.get("v_ratio_exec", float("nan")))
         omega_exec = float(p4.get("omega_exec", float(getattr(env, "angular_vel", 0.0))))
         dkappa_exec = float(p4.get("dkappa_exec", float("nan")))
@@ -454,7 +501,10 @@ def _run_square_expert_episode(env: Env) -> EpisodeResult:
                 "dist_to_turn": float(dist_to_turn),
                 "turn_angle": float(turn_angle),
                 "corner_phase": int(1 if corner_phase else 0),
+                "corner_mode": int(1 if corner_mode else 0),
                 "v_ratio_cmd": float(v_ratio_cmd),
+                "v_ratio_cap_brake": float(v_ratio_cap_brake),
+                "v_ratio_cap_ang": float(v_ratio_cap_ang),
                 "v_ratio_cap": float(v_ratio_cap),
                 "v_ratio_exec": float(v_ratio_exec),
                 "speed_util": float(speed_util),
@@ -636,16 +686,24 @@ def main() -> int:
     xs = [float(r.get("step", i)) for i, r in enumerate(result.trace_rows)]
     v_ratio_exec = [float(r.get("v_ratio_exec", float("nan"))) for r in result.trace_rows]
     v_ratio_cap = [float(r.get("v_ratio_cap", float("nan"))) for r in result.trace_rows]
+    v_ratio_cap_brake = [float(r.get("v_ratio_cap_brake", float("nan"))) for r in result.trace_rows]
+    v_ratio_cap_ang = [float(r.get("v_ratio_cap_ang", float("nan"))) for r in result.trace_rows]
     speed_util = [float(r.get("speed_util", float("nan"))) for r in result.trace_rows]
     dist_to_turn = [float(r.get("dist_to_turn", float("nan"))) for r in result.trace_rows]
     e_n = [float(r.get("e_n", float("nan"))) for r in result.trace_rows]
+    turn_angle = [float(r.get("turn_angle", float("nan"))) for r in result.trace_rows]
+    corner_mode = [int(r.get("corner_mode", 0)) for r in result.trace_rows]
 
     half_eps = float(getattr(env, "half_epsilon", 0.0))
     v_exec_arr = np.asarray(v_ratio_exec, dtype=float)
     v_cap_arr = np.asarray(v_ratio_cap, dtype=float)
+    v_cap_brake_arr = np.asarray(v_ratio_cap_brake, dtype=float)
+    v_cap_ang_arr = np.asarray(v_ratio_cap_ang, dtype=float)
     e_arr = np.asarray(e_n, dtype=float)
     speed_util_arr = np.asarray(speed_util, dtype=float)
     dist_arr = np.asarray(dist_to_turn, dtype=float)
+    turn_angle_arr = np.asarray(turn_angle, dtype=float)
+    corner_mode_arr = np.asarray(corner_mode, dtype=float)
 
     v_exec_clean = v_exec_arr[np.isfinite(v_exec_arr)]
     if v_exec_clean.size > 0:
@@ -672,6 +730,15 @@ def main() -> int:
         if float(np.std(v_exec_corr)) > 1e-9 and float(np.std(v_cap_corr)) > 1e-9:
             corr_v_exec_vs_v_cap = float(np.corrcoef(v_exec_corr, v_cap_corr)[0, 1])
 
+    cap_ang_active_ratio = float("nan")
+    cap_ang_mask = np.isfinite(v_cap_brake_arr) & np.isfinite(v_cap_ang_arr)
+    if np.any(cap_ang_mask):
+        cap_ang_active_ratio = float(np.mean(v_cap_ang_arr[cap_ang_mask] < v_cap_brake_arr[cap_ang_mask]))
+
+    corner_mode_ratio = float("nan")
+    if corner_mode_arr.size > 0:
+        corner_mode_ratio = float(np.mean(corner_mode_arr > 0.5))
+
     _plot_series(
         xs=xs,
         series=[("v_ratio_exec", v_ratio_exec)],
@@ -684,6 +751,17 @@ def main() -> int:
         series=[("v_ratio_cap", v_ratio_cap)],
         out_path=outdir / "square_v_ratio_cap.png",
         title="square v_ratio_cap(t)",
+        ylabel="ratio",
+    )
+    _plot_series(
+        xs=xs,
+        series=[
+            ("v_ratio_cap_brake", v_ratio_cap_brake),
+            ("v_ratio_cap_ang", v_ratio_cap_ang),
+            ("v_ratio_cap_final", v_ratio_cap),
+        ],
+        out_path=outdir / "square_v_cap_breakdown.png",
+        title="square v_ratio_cap breakdown",
         ylabel="ratio",
     )
     _plot_series(
@@ -714,6 +792,11 @@ def main() -> int:
         "mean_v_ratio_exec_straight": float(mean_v_ratio_exec_straight),
         "mean_v_ratio_exec_near_turn": float(mean_v_ratio_exec_near_turn),
         "corr_v_exec_vs_v_cap": float(corr_v_exec_vs_v_cap),
+        "cap_ang_active_ratio": float(cap_ang_active_ratio),
+        "corner_mode_ratio": float(corner_mode_ratio),
+        "mean_v_ratio_cap_brake": float(np.nanmean(v_cap_brake_arr)) if v_cap_brake_arr.size > 0 else float("nan"),
+        "mean_v_ratio_cap_ang": float(np.nanmean(v_cap_ang_arr)) if v_cap_ang_arr.size > 0 else float("nan"),
+        "mean_v_ratio_cap_final": float(np.nanmean(v_cap_arr)) if v_cap_arr.size > 0 else float("nan"),
         "reached_target": bool(result.reached_target),
         "stall_triggered": bool(result.stall_triggered),
         "steps": int(len(result.trace_rows)),
@@ -721,29 +804,69 @@ def main() -> int:
     }
     _write_json(outdir / "summary.json", summary)
 
+    def _cap_stats(arr: np.ndarray) -> Tuple[float, float, float]:
+        finite = arr[np.isfinite(arr)]
+        if finite.size == 0:
+            return float("nan"), float("nan"), float("nan")
+        return float(np.min(finite)), float(np.mean(finite)), float(np.max(finite))
+
+    def _gate_debug() -> str:
+        abs_turn = np.abs(turn_angle_arr[np.isfinite(turn_angle_arr)])
+        if abs_turn.size == 0:
+            turn_mean = float("nan")
+            turn_max = float("nan")
+            turn_nonzero = float("nan")
+        else:
+            turn_mean = float(np.mean(abs_turn))
+            turn_max = float(np.max(abs_turn))
+            turn_nonzero = float(np.mean(abs_turn > TURN_ANGLE_EPS))
+        cap_brake_stats = _cap_stats(v_cap_brake_arr)
+        cap_ang_stats = _cap_stats(v_cap_ang_arr)
+        cap_final_stats = _cap_stats(v_cap_arr)
+        return (
+            "gate_debug:"
+            f" turn_angle_abs_mean={turn_mean:.6f}"
+            f" turn_angle_abs_max={turn_max:.6f}"
+            f" turn_angle_nonzero_ratio={turn_nonzero:.3f}"
+            f" v_ratio_cap_brake(min/mean/max)={cap_brake_stats[0]:.4f}/{cap_brake_stats[1]:.4f}/{cap_brake_stats[2]:.4f}"
+            f" v_ratio_cap_ang(min/mean/max)={cap_ang_stats[0]:.4f}/{cap_ang_stats[1]:.4f}/{cap_ang_stats[2]:.4f}"
+            f" v_ratio_cap_final(min/mean/max)={cap_final_stats[0]:.4f}/{cap_final_stats[1]:.4f}/{cap_final_stats[2]:.4f}"
+            f" corner_mode_ratio={corner_mode_ratio:.3f}"
+        )
+
     if not is_stress:
+        if not summary["reached_target"]:
+            raise AssertionError(f"reached_target=False. {_gate_debug()}")
+        if summary["stall_triggered"]:
+            raise AssertionError(f"stall_triggered=True. {_gate_debug()}")
+        if not (math.isfinite(result.max_abs_e_n) and result.max_abs_e_n <= GATE_MAX_ABS_E_N_RATIO * half_eps):
+            raise AssertionError(
+                f"max_abs_e_n too large: max_abs_e_n={result.max_abs_e_n:.6f} half_eps={half_eps:.6f}. {_gate_debug()}"
+            )
         if v_ratio_exec_nunique < GATE_V_RATIO_EXEC_NUNIQUE_MIN:
             raise AssertionError(
-                "Degenerate speed: v_ratio_exec is (almost) constant. Check expert speed command or action mapping."
+                f"Degenerate speed: v_ratio_exec is (almost) constant. Check expert speed command or action mapping. {_gate_debug()}"
             )
         if not (math.isfinite(mean_speed_util_in_band) and mean_speed_util_in_band >= GATE_SPEED_UTIL_IN_BAND_MIN):
             raise AssertionError(
-                "Speed not utilized: expert not tracking v_cap/speed_target, or v_cap is too small everywhere."
+                f"Speed not utilized: expert not tracking v_cap/speed_target, or v_cap is too small everywhere. {_gate_debug()}"
             )
         if not (math.isfinite(v_ratio_cap_std) and v_ratio_cap_std >= GATE_V_RATIO_CAP_STD_MIN):
             raise AssertionError(
-                "v_ratio_cap not varying; braking envelope may be broken or dist_to_turn/turn_angle not wired."
+                f"v_ratio_cap not varying; braking envelope may be broken or dist_to_turn/turn_angle not wired. {_gate_debug()}"
             )
         if not (math.isfinite(corr_v_exec_vs_v_cap) and corr_v_exec_vs_v_cap >= GATE_CORR_V_EXEC_V_CAP_MIN):
             raise AssertionError(
-                "v_exec does not track v_cap: check expert v_ratio_cmd computation or execution-layer filtering/clipping."
+                f"v_exec does not track v_cap: check expert v_ratio_cmd computation or execution-layer filtering/clipping. {_gate_debug()}"
+            )
+        if not (math.isfinite(cap_ang_active_ratio) and cap_ang_active_ratio >= GATE_CAP_ANG_ACTIVE_RATIO_MIN):
+            raise AssertionError(
+                f"cap_ang_active_ratio too low: {cap_ang_active_ratio:.4f}. Check v_ratio_cap_ang wiring/sin_min. {_gate_debug()}"
             )
 
     # ===== 通过标准：常规/应力二选一 =====
     ok = True
     if not is_stress:
-        if not summary["reached_target"]:
-            ok = False
         if summary["stall_triggered"]:
             ok = False
     else:

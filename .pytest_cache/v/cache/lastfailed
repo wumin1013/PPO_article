@@ -1,4 +1,1 @@
-{
-  "PPO_project/tests/test_logger.py::test_csvlogger_atomic_write": true,
-  "PPO_project/tests/test_logger.py::test_datalogger_atomic_write": true
-}
+{}

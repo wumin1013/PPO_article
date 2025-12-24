@@ -1,0 +1,143 @@
+# P9 SoftCap + Deadzone 尺度匹配训练配置
+# 基于 train_square.yaml，调整以下关键参数：
+# 1. MAX_VEL 降低到 20.0（尺度匹配）
+# 2. cap_mode: soft（SoftCap 模式）
+# 3. 新增 deadzone/cap_violation 参数
+
+seed: 42
+
+environment:
+  epsilon: 1.5
+  interpolation_period: 0.01
+  max_steps: 4000
+  lookahead_points: 8
+
+kinematic_constraints:
+  # P9 尺度匹配：降低 MAX_VEL 避免学习难度爆炸
+  MAX_VEL: 20.0
+  MAX_ACC: 200.0
+  MAX_JERK: 2000.0
+  MAX_ANG_VEL: 6.283185307179586
+  MAX_ANG_ACC: 100.0
+  MAX_ANG_JERK: 1000.0
+
+reward_weights:
+  corridor:
+    enabled: true
+    theta_enter_deg: 12.0
+    theta_exit_deg: 6.0
+    dist_enter: 6.0
+    dist_exit: 8.0
+    margin_ratio: 0.10
+    heading_weight: 2.0
+    outside_penalty_weight: 20.0
+    safe_margin_ratio: 0.20
+    barrier_scale_ratio: 0.05
+    barrier_weight: 2.0
+    exit_center_ramp_steps: 60
+    center_weight: 1.2
+    center_power: 1.0
+    dir_pref_weight: 1.0
+    dir_pref_beta: 2.0
+  p4:
+    time_penalty: -0.01
+    v_max: 1.0
+    v_min: 0.35
+    theta_max_deg: 90.0
+    d_scale: null
+    speed_weight: 6.0
+    exit_boost_enabled: true
+    exit_window_sec: 0.25
+    exit_progress_mult: 1.35
+    exit_speed_target_min: 0.95
+    stall_enabled: true
+    stall_steps: 300
+    stall_progress_eps: 1e-4
+    stall_v_eps: 0.05
+    stall_penalty: -8.0
+    speed_cap_enabled: true
+    speed_cap_eps: 1e-12
+    speed_cap_k: 4
+    speed_cap_s_min: 1.0
+    speed_cap_s_max: 30.0
+    p7_2_k: 0.01
+    speed_cap_preview_points: 8
+    speed_cap_use_wdot: true
+    speed_cap_use_wddot: true
+    debug: false
+    # P9 SoftCap 模式配置
+    cap_mode: soft
+    # P9 Deadzone 配置
+    deadzone_ratio: 0.8
+    deadzone_center_weight: 0.1
+    deadzone_speed_weight: 1.0
+    # P9 SoftCap 惩罚配置
+    cap_violation_weight: 8.0
+    cap_violation_power: 2.0
+    # P9 KCM 权重
+    kcm_weight: 6.0
+  p6_1:
+    du_enabled: true
+    w_du: 0.01
+    du_mode: l1
+    v_target_smoother_enabled: true
+    v_target_mode: accel
+    v_target_tau: 0.10
+    a_ref_max_ratio: 0.5
+    j_ref_enabled: true
+    j_ref_max_ratio: 0.5
+  p7_3:
+    stall_cap_low: 0.25
+    kappa_smoothing_enabled: true
+    kappa_smoothing_beta: 0.25
+    kappa_dkappa_limit: null
+    trace_ring_size: 200
+  p8:
+    use_corner_exit_hysteresis: true
+    corner_on_dist_scale: 2.0
+    corner_off_dist_scale: 4.0
+    corner_exit_hold_steps: 3
+    corner_exit_e_release_ratio: 0.5
+    corner_exit_psi_release_deg: 30.0
+    ang_cap_min_ratio: 0.10
+    corner_mode_ignore_geom_cap: false
+    straight_mode_ignore_geom_cap: false
+    use_vcap_rate_limit: true
+    vcap_rate_up: 0.10
+    vcap_rate_down: 0.05
+    use_recovery_cap: true
+    recovery_e_warn_ratio: 0.75
+    recovery_e_release_ratio: 0.5
+    recovery_vcap: 0.10
+
+ppo:
+  actor_lr: 2.0e-05
+  critic_lr: 0.0001
+  hidden_dim: 256
+  gamma: 0.99
+  lmbda: 0.95
+  epochs: 10
+  eps: 0.1
+  batch_size: null
+  ent_coef: 0.01
+
+training:
+  use_obs_normalizer: false
+  num_episodes: 1000
+  smoothing_factor: 0.9
+  save_interval: 100
+  log_interval: 50
+  checkpoint_interval_steps: 2048
+
+path:
+  type: square
+  closed: true
+  scale: 10.0
+  num_points: 200
+  square: {}
+
+experiment:
+  mode: train
+  baseline_type: null
+  enable_kcm: true
+  model_path: null

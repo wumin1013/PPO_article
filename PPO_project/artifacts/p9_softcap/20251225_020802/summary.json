@@ -1,0 +1,18 @@
+{
+  "passed": false,
+  "soft_mode_verified": true,
+  "cap_violation_seen": false,
+  "cap_violation_penalty_negative": true,
+  "deadzone_tracking_valid": true,
+  "violation_count": 0,
+  "violation_mean": 0.0,
+  "cap_mode": "hard",
+  "deadzone_ratio": 0.8,
+  "deadzone_center_weight": 0.1,
+  "messages": [
+    "[WARN] cap_mode=hard，非 soft 模式，部分验收项跳过",
+    "[FAIL] cap_violation 从未出现（cap 无法\"看见弯\"）",
+    "[PASS] Deadzone tracking：57 步在死区内（非corridor），reward 均非负且 <= 0.1",
+    "[INFO] trace.csv 已保存：C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\p9_softcap\\20251225_020802\\trace.csv"
+  ]
+}

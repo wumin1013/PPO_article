@@ -520,20 +520,41 @@ class Env:
         p4_status["exit_boost_remaining"] = float(exit_boost_before)
 
         v_ratio_cap = float(p4_status.get("v_ratio_cap", 1.0))
+        v_ratio_brake = float(p4_status.get("v_ratio_brake", 1.0))
         if not bool(getattr(self, "_p4_speed_cap_enabled", True)):
             # P8.0：即便关闭 turning-feasible cap，也必须保留刹车包络（终点停下/进弯可刹住）
-            v_ratio_cap = float(p4_status.get("v_ratio_brake", 1.0))
+            v_ratio_cap = float(v_ratio_brake)
             p4_status["v_ratio_cap"] = float(v_ratio_cap)
 
-        # === P5.0：比率层裁剪（仍是 ratio）===
-        v_u_exec = float(min(v_u_policy, v_ratio_cap))
+        # P9：SoftCap 模式处理（Hard 维持旧行为；Soft 不对 policy 做 turning-feasible 截断）
+        cap_mode = str(getattr(self, "_p4_cap_mode", "hard")).lower()
+        cap_violation_ratio = 0.0
+
+        if cap_mode == "soft":
+            # Soft：v_u_exec 直接使用 policy 输出
+            v_u_exec = float(v_u_policy)
+
+            # Hard safety：只保留刹车包络与 MAX_VEL（KCM 仍然会进一步约束）
+            v_ratio_cap_hard = float(np.clip(v_ratio_brake, 0.0, 1.0))
+            max_vel_cap_phys = float(min(float(self.MAX_VEL), v_ratio_cap_hard * float(self.MAX_VEL)))
+
+            # 记录"超出 turning-feasible cap 的程度"，用于 reward 软惩罚
+            cap_violation_ratio = float(max(0.0, v_u_policy - v_ratio_cap))
+        else:
+            # Hard：传统行为，policy 被 turning-feasible cap 截断
+            v_u_exec = float(min(v_u_policy, v_ratio_cap))
+            max_vel_cap_phys = float(min(float(self.MAX_VEL), float(v_ratio_cap) * float(self.MAX_VEL)))
+            v_ratio_cap_hard = float(v_ratio_cap)
+
+        p4_status["cap_violation_ratio"] = float(cap_violation_ratio)
+        p4_status["v_ratio_cap_hard"] = float(v_ratio_cap_hard if cap_mode == "soft" else v_ratio_cap)
+        p4_status["max_vel_cap_phys"] = float(max_vel_cap_phys)
+        p4_status["cap_mode_soft"] = 1.0 if cap_mode == "soft" else 0.0
 
         # === P5.0：比率→物理量映射（KCM 输入必须是物理量）===
         omega_intent = float(omega_u_policy) * float(self.MAX_ANG_VEL)
         v_intent = float(v_u_exec) * float(self.MAX_VEL)
 
-        # turning-feasible cap 在物理量上的等价 max_vel
-        max_vel_cap_phys = float(min(float(self.MAX_VEL), float(v_ratio_cap) * float(self.MAX_VEL)))
         p4_status["omega_u_policy"] = float(omega_u_policy)
         p4_status["omega_intent"] = float(omega_intent)
         p4_status["v_u_policy"] = float(v_u_policy)
@@ -1170,12 +1191,41 @@ class Env:
         # 6) P6.0：多预瞄 minimax + ω/ω̇/ω̈ 可达性 → 速度上限
         preview_points = int(cfg.get("speed_cap_preview_points", int(getattr(self, "lookahead_points", 5))))
         self._p6_speed_cap_points = int(np.clip(preview_points, 1, 16))
+        
+        # P9 修复：preview_spacing 语义应为"采样间距 ds"，而非总窗口
         preview_spacing = cfg.get("speed_cap_preview_spacing", None)
+        s_lookahead = float(getattr(self, "_p4_speed_cap_s", 0.0))
+        pts = int(getattr(self, "_p6_speed_cap_points", 8))
+        pts = max(1, pts)
+
         if preview_spacing is None:
-            preview_spacing = float(getattr(self, "_p4_speed_cap_s", 0.0))
-        self._p6_speed_cap_spacing = float(max(float(preview_spacing), 1e-6))
+            # 默认: ds = s_lookahead / preview_points
+            preview_spacing = s_lookahead / pts
+        else:
+            preview_spacing = float(preview_spacing)
+
+        # 防御性钳制: ds <= s_lookahead / pts（避免用户误填巨大 ds）
+        ds_max = s_lookahead / pts if s_lookahead > 0 else preview_spacing
+        preview_spacing = float(min(preview_spacing, max(ds_max, 1e-6)))
+
+        self._p6_speed_cap_spacing = float(max(preview_spacing, 1e-6))
         self._p6_speed_cap_use_wdot = bool(cfg.get("speed_cap_use_wdot", True))
         self._p6_speed_cap_use_wddot = bool(cfg.get("speed_cap_use_wddot", True))
+
+        # P9：SoftCap 模式配置（hard|soft，默认 hard 保证向后兼容）
+        self._p4_cap_mode = str(cfg.get("cap_mode", "hard")).lower()  # hard|soft
+
+        # P9：Deadzone 配置（tracking reward 的允差带）
+        self._p4_deadzone_ratio = float(cfg.get("deadzone_ratio", 0.8))
+        self._p4_deadzone_center_weight = float(cfg.get("deadzone_center_weight", 0.1))
+        self._p4_deadzone_speed_weight = float(cfg.get("deadzone_speed_weight", 0.0))
+
+        # P9：SoftCap 惩罚配置（超过 turning-feasible cap 的软惩罚）
+        self._p4_cap_violation_weight = float(cfg.get("cap_violation_weight", 0.0))
+        self._p4_cap_violation_power = float(cfg.get("cap_violation_power", 2.0))
+
+        # P9：KCM 约束惩罚权重（可配，默认保持原有行为）
+        self._p4_kcm_weight = float(cfg.get("kcm_weight", 2.0))
 
         # 诊断输出开关（默认关闭）
         self.enable_p4_diagnostics = bool(cfg.get("debug", False))
@@ -1610,7 +1660,9 @@ class Env:
 
         # P8.0：turning-feasible v_cap 只能由路径几何 + 动力学决定
         preview_points = int(max(1, int(getattr(self, "_p6_speed_cap_points", getattr(self, "lookahead_points", 5)))))
-        preview_spacing = float(max(float(getattr(self, "lookahead_spacing", 1.0)), EPS))
+        # P9 修复：使用局部采样间距 _p6_speed_cap_spacing，而非全局 lookahead_spacing
+        preview_spacing = float(max(float(getattr(self, "_p6_speed_cap_spacing", 0.0)), EPS))
+        s_remain = float(remaining) if not closed else float("inf")
 
         use_wdot = bool(getattr(self, "_p6_speed_cap_use_wdot", True))
         use_wddot = bool(getattr(self, "_p6_speed_cap_use_wddot", True))
@@ -1626,10 +1678,15 @@ class Env:
         kappa_max = 0.0
         delta_at_kappa_max = 0.0
 
+        # P9 调试字段
+        status["preview_spacing"] = float(preview_spacing)
+        status["preview_points"] = float(preview_points)
+
         d_chosen = 0.0
         kappa_chosen = 0.0
         for i in range(int(preview_points)):
-            s_i = float(preview_spacing) * float(i + 1)
+            # P9 修复：确保采样距离不超过窗口
+            s_i = float(min(preview_spacing * float(i + 1), s_lookahead, s_remain))
             if not closed:
                 s_i = float(min(s_i, remaining))
             if s_i <= 1e-9:
@@ -1853,11 +1910,19 @@ class Env:
 
         speed_target_raw = float(np.clip(speed_target_raw, 0.0, v_max))
         speed_target_brake = float(min(speed_target_raw, float(status["v_brake_turn_ratio"]), float(status["v_brake_end_ratio"])))
-        speed_target = float(min(speed_target_brake, float(status["v_ratio_cap"])))
+        
+        # P9：SoftCap 模式下，speed_target 只受刹车包络约束，不被 turning-feasible cap 压死
+        cap_mode = str(getattr(self, "_p4_cap_mode", "hard")).lower()
+        if cap_mode == "soft":
+            speed_target = float(speed_target_brake)
+        else:
+            speed_target = float(min(speed_target_brake, float(status["v_ratio_cap"])))
+        
         status["speed_target_raw"] = float(speed_target_raw)
         status["speed_target_brake"] = float(speed_target_brake)
         status["speed_target"] = float(speed_target)
         status["speed_target_phys"] = float(speed_target) * float(self.MAX_VEL)
+        status["cap_mode_soft"] = 1.0 if cap_mode == "soft" else 0.0
 
         return status
 
@@ -2396,6 +2461,14 @@ class Env:
             corridor_turn_sign=int(turn_sign),
             corridor_dir_pref_weight=float(getattr(self, "_corridor_dir_pref_weight", 0.0)),
             corridor_dir_pref_beta=float(getattr(self, "_corridor_dir_pref_beta", 2.0)),
+            # P9：Deadzone + SoftCap 参数透传
+            deadzone_ratio=float(getattr(self, "_p4_deadzone_ratio", 0.8)),
+            deadzone_center_weight=float(getattr(self, "_p4_deadzone_center_weight", 0.1)),
+            deadzone_speed_weight=float(getattr(self, "_p4_deadzone_speed_weight", 0.0)),
+            cap_violation_ratio=float(p4_status.get("cap_violation_ratio", 0.0)),
+            cap_violation_weight=float(getattr(self, "_p4_cap_violation_weight", 0.0)),
+            cap_violation_power=float(getattr(self, "_p4_cap_violation_power", 2.0)),
+            kcm_weight=float(getattr(self, "_p4_kcm_weight", 2.0)),
         )
 
         if isinstance(corridor_status, dict):

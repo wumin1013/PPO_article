@@ -26,6 +26,7 @@ import argparse
 import csv
 import json
 import math
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,8 +42,22 @@ V_RATIO_CMD_K = 0.9
 V_RATIO_CMD_MIN = 0.02
 V_RATIO_CMD_SMOOTHING = 0.2
 RECENTER_STEPS = 12
-STRAIGHT_OMEGA_MAX = 0.5
-CORNER_OMEGA_SCALE = 0.6
+STRAIGHT_OMEGA_MAX = 0.6  # 恢复到合理值
+CORNER_OMEGA_SCALE = 0.55  # Patch P8.1 v2: 直接作为 omega_ratio，~0.55 可在 ~30 步完成 90° 转弯
+RECOVERY_E_ON_RATIO = 0.40  # 适中的阈值
+RECOVERY_E_OFF_RATIO = 0.20
+RECOVERY_OMEGA_RATIO_BOOST = 1.5
+RECOVERY_OMEGA_RATIO_MAX = 0.85
+V_RECOVERY = 0.06
+V_RECOVERY_CAP_RATIO = 0.9
+
+# Patch P8.1 (ExitDriftFix): 低速时限制 omega，防止漂移
+LOW_VCAP_OMEGA_LIMIT_ENABLE = True  # 启用低速 omega 限制
+LOW_VCAP_THRESHOLD = 0.10           # v_cap < 10% 时触发限制
+LOW_VCAP_OMEGA_MAX = 0.45           # 低速时最大 omega ratio
+
+STRAIGHT_K_PSI = 0.9
+STRAIGHT_K_I = 0.0
 
 GATE_V_RATIO_EXEC_NUNIQUE_MIN = 10
 GATE_SPEED_UTIL_IN_BAND_MIN = 0.7
@@ -50,11 +65,34 @@ GATE_V_RATIO_CAP_STD_MIN = 0.01
 GATE_CORR_V_EXEC_V_CAP_MIN = 0.3
 GATE_MAX_ABS_E_N_RATIO = 0.98
 GATE_CAP_ANG_ACTIVE_RATIO_MIN = 0.05
+# Patch-3: ang cap 在直线段的允许偏差（相对于 corner_mode_ratio）
+GATE_CAP_ANG_EXCESS_OVER_CORNER_MAX = 0.2
 DIST_STRAIGHT_THRESHOLD = 2.0
 DIST_TURN_THRESHOLD = 0.5
 NUNIQUE_DECIMALS = 4
 SPEED_UTIL_EPS = 1e-9
 TURN_ANGLE_EPS = 1e-6
+
+
+def _parse_env_bool(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return bool(default)
+    v = raw.strip().lower()
+    if v in {"1", "true", "yes", "on"}:
+        return True
+    if v in {"0", "false", "no", "off"}:
+        return False
+    return bool(default)
+
+
+# Feature flags（便于快速回滚对比）
+EXPERT_STRAIGHT_PD_ENABLE = _parse_env_bool("EXPERT_STRAIGHT_PD_ENABLE", True)
+EXPERT_RECOVERY_MODE_ENABLE = _parse_env_bool("EXPERT_RECOVERY_MODE_ENABLE", True)
+# Patch-2: turn completion 按 turn_angle 截断
+TURN_COMPLETION_CLAMP_ENABLE = _parse_env_bool("TURN_COMPLETION_CLAMP_ENABLE", True)
+# Patch-3: 诊断 ang cap 在直线段的滞留（默认开启检测）
+CAP_ANG_STUCK_CHECK_ENABLE = _parse_env_bool("CAP_ANG_STUCK_CHECK_ENABLE", True)
 
 try:
     import matplotlib.pyplot as plt  # noqa: E402
@@ -319,10 +357,12 @@ def _assert_state_semantics(env: Env, *, tol: float = 1e-6) -> None:
 def _expert_policy(
     *,
     env: Env,
-    k_pursuit: float = 3.0,
-    k_e: float = 2.0,
+    k_pursuit: float = 3.5,  # 提高pure pursuit增益
+    k_e: float = 3.0,  # 进一步提高k_e增益
+    k_psi: float = STRAIGHT_K_PSI,
+    k_i: float = STRAIGHT_K_I,
     v_ratio_cmd_prev: Optional[float] = None,
-    recenter_state: Optional[Dict[str, float]] = None,
+    recenter_state: Optional[MutableMapping[str, object]] = None,
 ) -> Tuple[np.ndarray, float, float, bool]:
     """专家策略：Pure Pursuit（Phase A 闭环健康验证用）。
 
@@ -363,12 +403,18 @@ def _expert_policy(
         turn_boost = 1.5
     elif dist_to_turn < 4.0 * half_eps:
         turn_boost = 1.2
-    omega_ratio = float(np.clip(turn_boost * k_pursuit * heading_err + k_e * (e_n / half_eps), -1.0, 1.0))
+    # e_n: left + / right -；omega_ratio: CCW(左转) +
+    # 横向误差纠偏符号必须是 (-e_n)，否则直线段会“慢漂移 -> 末端越界”。
+    omega_ratio = float(np.clip(turn_boost * k_pursuit * heading_err + k_e * (0.0 - e_n) / half_eps, -1.0, 1.0))
 
     if recenter_state is None:
         recenter_state = {}
-    prev_corner_mode = bool(recenter_state.get("prev_corner_mode", False))
-    recenter_left = int(recenter_state.get("recenter_left", 0))
+
+    # Patch-2: turn completion 追踪（防止 theta_prog 跑到 2π）
+    theta_prog = float(recenter_state.get("theta_prog", 0.0))
+    turn_done = bool(recenter_state.get("turn_done", False))
+    prev_turn_angle_abs = float(recenter_state.get("prev_turn_angle_abs", 0.0))
+    dt = float(max(float(getattr(env, "interpolation_period", 0.01)), 1e-6))
 
     corner_mode = False
     r_allow = float("nan")
@@ -382,23 +428,115 @@ def _expert_policy(
         fillet_scale = float(max(fillet_scale, 0.0))
         d_fillet = float(r_allow * math.tan(abs(turn_angle) * 0.5) * max(fillet_scale, 1e-6))
         if math.isfinite(dist_to_turn) and math.isfinite(d_fillet) and dist_to_turn <= d_fillet:
-            corner_mode = True
+            # Patch-2: 若 turn_done 且仍在同一个弯，强制退出 corner_mode
+            if TURN_COMPLETION_CLAMP_ENABLE and turn_done and abs(abs(turn_angle) - prev_turn_angle_abs) < 0.1:
+                corner_mode = False
+            else:
+                corner_mode = True
+                # 进入新的转弯时复位 turn progress
+                if abs(abs(turn_angle) - prev_turn_angle_abs) >= 0.1:
+                    theta_prog = 0.0
+                    turn_done = False
+                    prev_turn_angle_abs = float(abs(turn_angle))
 
+    in_recovery_now = False
+    integ_e = 0.0
     if corner_mode and math.isfinite(r_allow) and r_allow > 0.0:
-        v_exec = float(getattr(env, "velocity", 0.0))
+        # Patch P8.1 (ExitDriftFix v2): 使用基于 r_allow 的目标 omega
+        # 核心问题：v_cap_geom 被预瞄曲率压得很低（0.01-0.04），导致 omega 太小无法完成转弯
+        # 解决方案：使用能在 r_allow 半径下安全转弯的目标速度（而非被压低的 v_cap）
+        
+        # 计算在 r_allow 半径下能达到的最大角速度
+        # omega_max_at_r = MAX_ANG_VEL（直接使用最大角速度）
+        # 对应的线速度 v = omega * r_allow
         r_min = float(max(half_eps, 1e-6))
-        omega_target = float(np.clip(v_exec / max(r_allow, r_min), 0.0, float(env.MAX_ANG_VEL)))
+        r_eff = float(max(r_allow, r_min))
+        
+        # 目标角速度：基于转弯半径，使用适中的 omega_ratio（不要太大导致漂移）
+        # CORNER_OMEGA_SCALE 控制转弯强度
+        omega_target_ratio = float(CORNER_OMEGA_SCALE)  # 直接使用 scale 作为 omega_ratio
+        omega_target = float(omega_target_ratio * float(env.MAX_ANG_VEL))
         omega_target = float(math.copysign(omega_target, turn_angle))
-        omega_target = float(omega_target * CORNER_OMEGA_SCALE)
         omega_ratio = float(np.clip(omega_target / float(env.MAX_ANG_VEL), -1.0, 1.0))
-    elif math.isfinite(dist_to_turn) and dist_to_turn > preturn_dist:
-        omega_ratio = float(np.clip(k_e * (e_n / half_eps), -STRAIGHT_OMEGA_MAX, STRAIGHT_OMEGA_MAX))
+        
+        # Patch P8.1 (ExitDriftFix): 低速时限制 omega 上限
+        # 不在 corner_mode 内限制，因为转弯需要大 omega
 
-    if prev_corner_mode and not corner_mode:
-        recenter_left = int(RECENTER_STEPS)
-    if recenter_left > 0:
-        omega_ratio = 0.0
-        recenter_left -= 1
+        # Patch-2: 累计转弯进度，按 turn_angle 截断
+        if TURN_COMPLETION_CLAMP_ENABLE:
+            omega_exec = float(getattr(env, "angular_vel", 0.0))
+            theta_prog += float(abs(omega_exec) * dt)
+            theta_prog = float(np.clip(theta_prog, 0.0, abs(turn_angle)))
+            if theta_prog >= abs(turn_angle) - 1e-6:
+                turn_done = True
+                # 转弯完成后强制进入直线段闭环（下一步生效）
+    else:
+        # Patch-2: 离开 corner_mode 时复位 turn progress
+        if TURN_COMPLETION_CLAMP_ENABLE and turn_done:
+            theta_prog = 0.0
+            # turn_done 保持 True 直到进入新的弯
+
+        straight_mode = bool(math.isfinite(dist_to_turn) and dist_to_turn > preturn_dist)
+        if (not EXPERT_STRAIGHT_PD_ENABLE) and straight_mode:
+            # 回滚：保留旧版直线段逻辑
+            omega_ratio = float(np.clip(k_e * (e_n / half_eps), -STRAIGHT_OMEGA_MAX, STRAIGHT_OMEGA_MAX))
+        elif EXPERT_STRAIGHT_PD_ENABLE and straight_mode:
+            # Patch-1：直线段稳定闭环（去死区 + 软限幅）
+            e_n_norm = float(e_n / half_eps)
+            psi_err = float(heading_err)  # dist_to_turn>preturn_dist 时已绑定为切向误差
+
+            in_recovery = bool(recenter_state.get("in_recovery", False))
+            if EXPERT_RECOVERY_MODE_ENABLE:
+                aen = abs(e_n_norm)
+                if in_recovery:
+                    if aen <= float(RECOVERY_E_OFF_RATIO):
+                        in_recovery = False
+                else:
+                    if aen >= float(RECOVERY_E_ON_RATIO):
+                        in_recovery = True
+            else:
+                in_recovery = False
+
+            omega_ratio_max = float(STRAIGHT_OMEGA_MAX)
+            if in_recovery:
+                omega_ratio_max = float(
+                    min(float(RECOVERY_OMEGA_RATIO_MAX), float(STRAIGHT_OMEGA_MAX) * float(RECOVERY_OMEGA_RATIO_BOOST))
+                )
+
+            # Patch P8.1 (ExitDriftFix): 低速时限制 omega，防止漂移
+            # 使用上一步的 v_ratio_cmd 作为当前 v_cap 的近似
+            if LOW_VCAP_OMEGA_LIMIT_ENABLE and v_ratio_cmd_prev is not None:
+                v_cap_approx = float(v_ratio_cmd_prev)
+                if v_cap_approx < float(LOW_VCAP_THRESHOLD):
+                    omega_ratio_max = float(min(omega_ratio_max, float(LOW_VCAP_OMEGA_MAX)))
+
+            if float(k_i) != 0.0:
+                integ_e = float(recenter_state.get("integ_e", 0.0))
+                dt = float(max(float(getattr(env, "interpolation_period", 0.0)), 0.0))
+                integ_e = float(np.clip(integ_e + e_n_norm * dt, -5.0, 5.0))
+
+            omega_raw = float((0.0 - float(k_e)) * e_n_norm + float(k_psi) * psi_err + float(k_i) * integ_e)
+            omega_ratio = float(np.clip(omega_raw, -omega_ratio_max, omega_ratio_max))
+            in_recovery_now = bool(in_recovery)
+
+    if not EXPERT_STRAIGHT_PD_ENABLE:
+        # 旧版：出弯“硬归零窗口”（仅回滚时保留，默认不启用）
+        prev_corner_mode = bool(recenter_state.get("prev_corner_mode", False))
+        recenter_left = int(recenter_state.get("recenter_left", 0))
+        if prev_corner_mode and not corner_mode:
+            recenter_left = int(RECENTER_STEPS)
+        if recenter_left > 0:
+            omega_ratio = 0.0
+            recenter_left -= 1
+        recenter_state["prev_corner_mode"] = bool(corner_mode)
+        recenter_state["recenter_left"] = int(recenter_left)
+
+    recenter_state["in_recovery"] = bool(in_recovery_now)
+    recenter_state["integ_e"] = float(integ_e)
+    # Patch-2: 保存 turn progress 状态
+    recenter_state["theta_prog"] = float(theta_prog)
+    recenter_state["turn_done"] = bool(turn_done)
+    recenter_state["prev_turn_angle_abs"] = float(prev_turn_angle_abs)
 
     p4 = env._compute_p4_pre_step_status()
     v_ratio_cap = float(p4.get("v_ratio_cap", float("nan")))
@@ -411,9 +549,12 @@ def _expert_policy(
     if v_ratio_cmd_prev is not None and math.isfinite(v_ratio_cmd_prev):
         v_ratio_cmd = float((1.0 - V_RATIO_CMD_SMOOTHING) * v_ratio_cmd_prev + V_RATIO_CMD_SMOOTHING * v_ratio_cmd)
 
-    recenter_state["prev_corner_mode"] = bool(corner_mode)
-    recenter_state["recenter_left"] = int(recenter_left)
     recenter_state["omega_ratio_prev"] = float(omega_ratio)
+
+    if EXPERT_STRAIGHT_PD_ENABLE and EXPERT_RECOVERY_MODE_ENABLE and in_recovery_now:
+        v_ratio_cmd = float(min(float(v_ratio_cmd), float(V_RECOVERY)))
+        if math.isfinite(v_ratio_cap):
+            v_ratio_cmd = float(min(float(v_ratio_cmd), float(V_RECOVERY_CAP_RATIO) * float(v_ratio_cap)))
 
     return np.array([omega_ratio, v_ratio_cmd], dtype=float), float(v_ratio_cmd), float(v_ratio_cap), bool(corner_mode)
 
@@ -448,7 +589,7 @@ def _run_square_expert_episode(env: Env) -> EpisodeResult:
     done = False
     last_dkappa_exec = 0.0
     v_ratio_cmd_prev: Optional[float] = None
-    recenter_state: Dict[str, float] = {}
+    recenter_state: Dict[str, object] = {}
     while not done:
         action, v_ratio_cmd, v_ratio_cap_pre, corner_mode = _expert_policy(
             env=env,
@@ -894,6 +1035,18 @@ def main() -> int:
             raise AssertionError(
                 f"cap_ang_active_ratio too low: {cap_ang_active_ratio:.4f}. Check v_ratio_cap_ang wiring/sin_min. {_gate_debug()}"
             )
+        # Patch-3: ang cap 滞留检测（直线段 ang cap 占比不应远大于 corner_mode 占比）
+        if CAP_ANG_STUCK_CHECK_ENABLE:
+            if math.isfinite(cap_ang_active_ratio) and math.isfinite(corner_mode_ratio):
+                excess = float(cap_ang_active_ratio - corner_mode_ratio)
+                if excess > GATE_CAP_ANG_EXCESS_OVER_CORNER_MAX:
+                    # 计算直线段 ang cap 的均值供诊断
+                    straight_ang_mask = np.isfinite(dist_arr) & (dist_arr > DIST_STRAIGHT_THRESHOLD) & np.isfinite(v_cap_ang_arr)
+                    mean_ang_on_straight = float(np.mean(v_cap_ang_arr[straight_ang_mask])) if np.any(straight_ang_mask) else float("nan")
+                    raise AssertionError(
+                        f"ang cap likely stuck on straight: cap_ang_active_ratio={cap_ang_active_ratio:.4f} - corner_mode_ratio={corner_mode_ratio:.4f} = {excess:.4f} > {GATE_CAP_ANG_EXCESS_OVER_CORNER_MAX}. "
+                        f"mean(v_ratio_cap_ang on straight)={mean_ang_on_straight:.4f}. {_gate_debug()}"
+                    )
 
     # ===== 通过标准：常规/应力二选一 =====
     ok = True

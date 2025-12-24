@@ -1,8 +1,8 @@
-# 默认训练配置（P7 推荐）：Square（open）
+# Default training config (P7 recommended): Square (open)
 seed: 42
 
 environment:
-  epsilon: 1.5
+  epsilon: 2.5  # Patch v3.28: epsilon 1.5->2.5, half_epsilon 0.75->1.25
   interpolation_period: 0.01
   max_steps: 4000
   lookahead_points: 8

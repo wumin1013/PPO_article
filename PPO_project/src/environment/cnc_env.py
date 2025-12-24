@@ -1374,6 +1374,8 @@ class Env:
 
         # Patch P8.1: corner_mode_ignore_geom_cap - ignore v_cap_geom in corner_mode
         self._p8_corner_mode_ignore_geom_cap = bool(cfg.get("corner_mode_ignore_geom_cap", False))
+        # Patch v3.6: straight_mode_ignore_geom_cap - ignore v_cap_geom in straight_mode
+        self._p8_straight_mode_ignore_geom_cap = bool(cfg.get("straight_mode_ignore_geom_cap", False))
 
     def _p7_3_compute_kappa_exec(self, *, v_exec: float, omega_exec: float) -> float:
         """P7.3：执行曲率（奇异点保护）。"""
@@ -1761,8 +1763,11 @@ class Env:
         v_cap_brake = float(v_ratio_cap_brake) * float(self.MAX_VEL)
         
         # Patch P8.1 (ExitDriftFix): 在 corner_mode 时可选忽略 v_cap_geom
+        # Patch v3.6: 新增 straight_mode_ignore_geom_cap 支持
         use_geom_cap = True
         if corner_mode and bool(getattr(self, "_p8_corner_mode_ignore_geom_cap", False)):
+            use_geom_cap = False
+        if (not corner_mode) and bool(getattr(self, "_p8_straight_mode_ignore_geom_cap", False)):
             use_geom_cap = False
         
         if use_geom_cap:
@@ -2808,7 +2813,9 @@ class Env:
 
         t = float(np.dot(pt - p1, seg_vec) / denom)  # do NOT clip upper bound
         dist_to_finish_line = float(point_to_line_distance(pt, p1, p2))
-        return t >= 1.0 and dist_to_finish_line <= self.half_epsilon
+        # Patch v3.31: 使用放宽的 OOB 边界作为终点判定容差
+        finish_tol = float(getattr(self, "_oob_half_epsilon", self.half_epsilon))
+        return t >= 1.0 and dist_to_finish_line <= finish_tol
 
     def _maybe_print_episode_summary(self, *, contour_error: float) -> None:
         if not getattr(self, "enable_episode_diagnostics", False):
@@ -2857,7 +2864,10 @@ class Env:
         
         # 1) OOB：误差超限立即终止
         # 修正：使用 half_epsilon，因为边界在 ±epsilon/2
-        if contour_error > self.half_epsilon:
+        # Patch v3.28: 允许通过 _disable_oob_check 禁用 OOB 检查
+        # Patch v3.29: 支持通过 _oob_half_epsilon 设置独立的 OOB 边界
+        oob_boundary = float(getattr(self, "_oob_half_epsilon", self.half_epsilon))
+        if not bool(getattr(self, "_disable_oob_check", False)) and contour_error > oob_boundary:
             self._maybe_print_episode_summary(contour_error=contour_error)
             return True
 

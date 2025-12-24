@@ -1,7 +1,7 @@
 seed: 42
 
 environment:
-  epsilon: 1.5
+  epsilon: 1.5  # 恢复原始值，OOB 放宽在代码中处理
   interpolation_period: 0.01
   max_steps: 4000
   lookahead_points: 8
@@ -30,7 +30,7 @@ reward_weights:
     exit_center_ramp_steps: 60
     center_weight: 1.2
     center_power: 1.0
-    dir_pref_weight: 0.6
+    dir_pref_weight: 1.0  # 增强内切偏好（从0.6提升）
     dir_pref_beta: 2.0
   p4:
     time_penalty: -0.01
@@ -82,19 +82,20 @@ reward_weights:
     corner_exit_hold_steps: 3
     corner_exit_e_release_ratio: 0.5  # 更严格的退出条件
     corner_exit_psi_release_deg: 30.0  # 航向误差 < 30° 才允许退出 corner_mode
-    # Ang cap minimum ratio (prevent extremely slow speeds in corner)
+    # Ang cap minimum ratio (prevent extremely low speeds in corner)
     ang_cap_min_ratio: 0.10  # 从 0.05 提高到 0.10
     # Patch P8.1: corner_mode 时忽略 v_cap_geom 限制（只用 v_cap_ang）
-    corner_mode_ignore_geom_cap: false  # 禁用 - 会导致更快漂移
+    corner_mode_ignore_geom_cap: false  # 禁用
+    straight_mode_ignore_geom_cap: false  # 禁用
     # Rate limiter for cap release
     use_vcap_rate_limit: true
-    vcap_rate_up: 0.10  # 从 0.03 提高到 0.10，加快速度恢复
+    vcap_rate_up: 0.10
     vcap_rate_down: 0.05
     # Recovery cap near boundary
     use_recovery_cap: true
-    recovery_e_warn_ratio: 0.75  # 更早触发recovery（从0.85降到0.75）
-    recovery_e_release_ratio: 0.5  # 更早释放（从0.6降到0.5）
-    recovery_vcap: 0.10  # 提高到 0.10（从0.06）
+    recovery_e_warn_ratio: 0.75
+    recovery_e_release_ratio: 0.5
+    recovery_vcap: 0.10
 
 ppo:
   actor_lr: 2.0e-05
@@ -105,11 +106,11 @@ ppo:
   epochs: 10
   eps: 0.1
   batch_size: null
-  ent_coef: 0.0
+  ent_coef: 0.01  # 增加探索熵，帮助发现内切策略
 
 training:
   use_obs_normalizer: false
-  num_episodes: 500
+  num_episodes: 1000  # 增加训练回合数
   smoothing_factor: 0.9
   save_interval: 100
   log_interval: 50

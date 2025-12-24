@@ -896,7 +896,7 @@ if __name__ == "__main__":
         "--mode",
         type=str,
         default="train",
-        choices=["train", "test", "ablation_no_kcm", "ablation_no_reward", "baseline_nnc", "baseline_s_curve"],
+        choices=["train", "test", "ablation_no_kcm", "ablation_no_reward", "ablation_min_lookahead", "baseline_nnc", "baseline_s_curve"],
         help="运行模式",
     )
     parser.add_argument("--model", type=str, default=None, help="测试模式下的模型路径")

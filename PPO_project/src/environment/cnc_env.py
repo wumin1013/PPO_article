@@ -1364,6 +1364,17 @@ class Env:
         self._p8_recovery_e_release_ratio = float(np.clip(e_recover_ratio, 0.0, 1.0))
         self._p8_recovery_vcap = float(max(v_recovery, 0.0))
 
+        # Patch P8.1: ang_cap_min_ratio - minimum v_ratio during corner_mode (prevent stall)
+        ang_cap_min = cfg.get("ang_cap_min_ratio", 0.01)
+        try:
+            ang_cap_min = float(ang_cap_min)
+        except Exception:
+            ang_cap_min = 0.01
+        self._p8_ang_cap_min_ratio = float(np.clip(ang_cap_min, 0.01, 0.5))
+
+        # Patch P8.1: corner_mode_ignore_geom_cap - ignore v_cap_geom in corner_mode
+        self._p8_corner_mode_ignore_geom_cap = bool(cfg.get("corner_mode_ignore_geom_cap", False))
+
     def _p7_3_compute_kappa_exec(self, *, v_exec: float, omega_exec: float) -> float:
         """P7.3：执行曲率（奇异点保护）。"""
         v = float(v_exec) if math.isfinite(float(v_exec)) else 0.0
@@ -1747,9 +1758,19 @@ class Env:
         v_ratio_cap_ang = float(np.clip(v_cap_ang / max(float(self.MAX_VEL), EPS), 0.0, 1.0))
 
         v_ratio_cap_brake = float(v_ratio_brake)
-        v_ratio_cap_raw = float(min(v_ratio_cap_geom, v_ratio_cap_brake, v_ratio_cap_ang))
         v_cap_brake = float(v_ratio_cap_brake) * float(self.MAX_VEL)
-        v_cap_final = float(min(v_cap_geom, v_cap_brake, v_cap_ang))
+        
+        # Patch P8.1 (ExitDriftFix): 在 corner_mode 时可选忽略 v_cap_geom
+        use_geom_cap = True
+        if corner_mode and bool(getattr(self, "_p8_corner_mode_ignore_geom_cap", False)):
+            use_geom_cap = False
+        
+        if use_geom_cap:
+            v_ratio_cap_raw = float(min(v_ratio_cap_geom, v_ratio_cap_brake, v_ratio_cap_ang))
+            v_cap_final = float(min(v_cap_geom, v_cap_brake, v_cap_ang))
+        else:
+            v_ratio_cap_raw = float(min(v_ratio_cap_brake, v_ratio_cap_ang))
+            v_cap_final = float(min(v_cap_brake, v_cap_ang))
 
         # P8.x: recovery cap near boundary
         v_ratio_cap = float(v_ratio_cap_raw)

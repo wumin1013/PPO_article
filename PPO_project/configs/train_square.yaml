@@ -74,6 +74,27 @@ reward_weights:
     kappa_smoothing_beta: 0.25
     kappa_dkappa_limit: null
     trace_ring_size: 200
+  p8:
+    # Corner exit hysteresis (Phase A patch)
+    use_corner_exit_hysteresis: true
+    corner_on_dist_scale: 2.0
+    corner_off_dist_scale: 4.0
+    corner_exit_hold_steps: 3
+    corner_exit_e_release_ratio: 0.5  # 更严格的退出条件
+    corner_exit_psi_release_deg: 30.0  # 航向误差 < 30° 才允许退出 corner_mode
+    # Ang cap minimum ratio (prevent extremely slow speeds in corner)
+    ang_cap_min_ratio: 0.10  # 从 0.05 提高到 0.10
+    # Patch P8.1: corner_mode 时忽略 v_cap_geom 限制（只用 v_cap_ang）
+    corner_mode_ignore_geom_cap: false  # 禁用 - 会导致更快漂移
+    # Rate limiter for cap release
+    use_vcap_rate_limit: true
+    vcap_rate_up: 0.10  # 从 0.03 提高到 0.10，加快速度恢复
+    vcap_rate_down: 0.05
+    # Recovery cap near boundary
+    use_recovery_cap: true
+    recovery_e_warn_ratio: 0.75  # 更早触发recovery（从0.85降到0.75）
+    recovery_e_release_ratio: 0.5  # 更早释放（从0.6降到0.5）
+    recovery_vcap: 0.10  # 提高到 0.10（从0.06）
 
 ppo:
   actor_lr: 2.0e-05

@@ -1,0 +1,19 @@
+{
+  "task": "s_shape",
+  "num_episodes": 5,
+  "seed": 42,
+  "half_epsilon": 1.25,
+  "success_rate": 0.0,
+  "mean_speed_util_in_band": 0.7835572553387888,
+  "mean_progress_per_step": 0.0,
+  "max_abs_e_n": 1.5821126065301487,
+  "rmse_e_n": 0.7405501107560105,
+  "p95_abs_e_n": 1.3567092286296105,
+  "p95_abs_dkappa_exec": 175.92918860103984,
+  "mean_steps": 49.0,
+  "cap_ang_active_ratio": 0.2653061224489796,
+  "mean_v_ratio_cap_ang": 0.7373469387755102,
+  "mean_v_ratio_cap_brake": 0.34221256849673126,
+  "mean_v_ratio_cap_final": 0.021874744749499252,
+  "stall_rate": 0.0
+}

@@ -1,0 +1,74 @@
+{
+  "timestamp": "2025-12-24T17:30:52.299991",
+  "config": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\configs\\default.yaml",
+  "seed": 42,
+  "num_episodes": 5,
+  "tasks": {
+    "line": {
+      "task": "line",
+      "num_episodes": 5,
+      "seed": 42,
+      "half_epsilon": 1.25,
+      "success_rate": 1.0,
+      "mean_speed_util_in_band": 0.4732853710889053,
+      "mean_progress_per_step": 0.0,
+      "max_abs_e_n": 0.0,
+      "rmse_e_n": 0.0,
+      "p95_abs_e_n": 0.0,
+      "p95_abs_dkappa_exec": 0.0,
+      "mean_steps": 11.0,
+      "cap_ang_active_ratio": 0.0,
+      "mean_v_ratio_cap_ang": 1.0,
+      "mean_v_ratio_cap_brake": 0.25157094662382806,
+      "mean_v_ratio_cap_final": 0.25157094662382806,
+      "stall_rate": 0.0
+    },
+    "square": {
+      "task": "square",
+      "num_episodes": 5,
+      "seed": 42,
+      "half_epsilon": 1.25,
+      "success_rate": 0.0,
+      "mean_speed_util_in_band": 0.953342231131224,
+      "mean_progress_per_step": 0.0,
+      "max_abs_e_n": 1.2976868276470608,
+      "rmse_e_n": 0.34341876070499733,
+      "p95_abs_e_n": 0.9542305797737983,
+      "p95_abs_dkappa_exec": 2.23445742854949,
+      "mean_steps": 63.0,
+      "cap_ang_active_ratio": 0.5079365079365079,
+      "mean_v_ratio_cap_ang": 0.4820085371809218,
+      "mean_v_ratio_cap_brake": 0.20308777138726025,
+      "mean_v_ratio_cap_final": 0.01946878557392652,
+      "stall_rate": 0.0
+    },
+    "s_shape": {
+      "task": "s_shape",
+      "num_episodes": 5,
+      "seed": 42,
+      "half_epsilon": 1.25,
+      "success_rate": 0.0,
+      "mean_speed_util_in_band": 0.7835572553387888,
+      "mean_progress_per_step": 0.0,
+      "max_abs_e_n": 1.5821126065301487,
+      "rmse_e_n": 0.7405501107560105,
+      "p95_abs_e_n": 1.3567092286296105,
+      "p95_abs_dkappa_exec": 175.92918860103984,
+      "mean_steps": 49.0,
+      "cap_ang_active_ratio": 0.2653061224489796,
+      "mean_v_ratio_cap_ang": 0.7373469387755102,
+      "mean_v_ratio_cap_brake": 0.34221256849673126,
+      "mean_v_ratio_cap_final": 0.021874744749499252,
+      "stall_rate": 0.0
+    }
+  },
+  "entry_validation": {
+    "passed": false,
+    "checks": [
+      "FAIL: success_rate=0.00% < 50%（专家策略应接近 100%）",
+      "PASS: stall_rate=0.00%",
+      "FAIL: max_abs_e_n=1.2977 > 1.2250 (0.98*half_eps)",
+      "PASS: mean_speed_util_in_band=0.9533"
+    ]
+  }
+}

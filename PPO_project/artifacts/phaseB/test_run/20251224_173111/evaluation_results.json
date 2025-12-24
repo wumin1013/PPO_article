@@ -1,0 +1,50 @@
+{
+  "timestamp": "2025-12-24T17:31:11.699290",
+  "stage": "test_run",
+  "config": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\configs\\default.yaml",
+  "seed": 42,
+  "tasks": {
+    "line": {
+      "task": "line",
+      "num_episodes": 3,
+      "seed": 42,
+      "half_epsilon": 1.25,
+      "success_rate": 1.0,
+      "mean_speed_util_in_band": 0.4732853710889053,
+      "mean_progress_per_step": 0.3992201232949964,
+      "max_abs_e_n": 0.0,
+      "rmse_e_n": 0.0,
+      "p95_abs_e_n": 0.0,
+      "p95_abs_dkappa_exec": 0.0,
+      "mean_episode_steps": 11.0,
+      "mean_total_reward": 151.0021799302927,
+      "cap_ang_active_ratio": 0.0,
+      "mean_v_ratio_cap_ang": 1.0,
+      "mean_v_ratio_cap_brake": 0.25157094662382806,
+      "mean_v_ratio_cap_final": 0.25157094662382806,
+      "stall_rate": 0.0,
+      "delta_mean_speed_util_vs_baseline": 0.0,
+      "delta_mean_progress_per_step_vs_baseline": 0.3992201232949964,
+      "baseline_mean_speed_util_in_band": 0.4732853710889053,
+      "baseline_p95_abs_dkappa_exec": 0.0,
+      "gate_results": [
+        {
+          "name": "success_rate",
+          "value": 1.0,
+          "threshold": 0.95,
+          "passed": true,
+          "source": "stage1_line.success_rate_min"
+        },
+        {
+          "name": "mean_speed_util_in_band",
+          "value": 0.4732853710889053,
+          "threshold": 0.7,
+          "passed": false,
+          "source": "stage1_line.mean_speed_util_in_band_min"
+        }
+      ],
+      "gates_passed": false
+    }
+  },
+  "all_gates_passed": false
+}

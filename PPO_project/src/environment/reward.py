@@ -74,17 +74,50 @@ class RewardCalculator:
         corridor_turn_sign: int = 0,
         corridor_dir_pref_weight: float = 0.0,
         corridor_dir_pref_beta: float = 2.0,
+        # P9：Deadzone + SoftCap 惩罚参数
+        deadzone_ratio: float = 0.8,
+        deadzone_center_weight: float = 0.1,
+        deadzone_speed_weight: float = 0.0,
+        cap_violation_ratio: float = 0.0,
+        cap_violation_weight: float = 0.0,
+        cap_violation_power: float = 2.0,
+        kcm_weight: float = 2.0,
         **_: object,
     ) -> Tuple[float, Dict[str, float]]:
-        """精确复现单文件脚本中的奖励逻辑。"""
+        """精确复现单文件脚本中的奖励逻辑。P9：新增 Deadzone + 弱向心力。"""
         use_corridor = bool(corridor_enabled and corridor_active)
 
         tracking_reward = 0.0
         distance_ratio = 0.0
         if not use_corridor:
-            tracking_error = float(contour_error)
-            distance_ratio = float(np.clip(tracking_error / self.half_epsilon, 0.0, 2.0))
-            tracking_reward = 10.0 * np.exp(-3.0 * distance_ratio) - 5.0
+            # P9：Deadzone tracking reward 改造
+            e = float(contour_error)
+            e_abs = float(abs(e))
+            dz = float(np.clip(deadzone_ratio, 0.0, 0.999)) * float(self.half_epsilon)
+            dz = float(max(dz, 1e-6))
+
+            if e_abs <= dz:
+                # Deadzone 内：弱向心力（防止直线段漂移/蛇形）
+                ratio_in_dz = float(e_abs / dz)
+                w_center = abs(float(deadzone_center_weight))
+                tracking_reward = w_center * (1.0 - ratio_in_dz ** 2)
+            else:
+                # Deadzone 外：softplus 势垒，越接近边界越陡
+                m = float(self.half_epsilon - e_abs)            # 到边界剩余 margin
+                m_safe = float(self.half_epsilon - dz)          # deadzone 边界处 margin
+                s = float(max(0.05 * self.half_epsilon, 1e-6))  # 势垒陡峭度
+                x = float((m_safe - m) / s)
+
+                if x > 50.0:
+                    softplus = x
+                elif x < -50.0:
+                    softplus = math.exp(x)
+                else:
+                    softplus = float(math.log1p(math.exp(x)))
+
+                tracking_reward = -2.0 * float(softplus)
+            
+            distance_ratio = float(np.clip(e_abs / self.half_epsilon, 0.0, 2.0))
 
         progress_diff = max(0.0, progress - self.last_progress)
         progress_reward = float(progress_multiplier) * (20.0 * progress_diff)
@@ -141,7 +174,17 @@ class RewardCalculator:
         ang_jerk_penalty = -4.0 * np.clip(abs(angular_jerk) / max(self.max_ang_jerk, 1e-6), 0.0, 1.0)
         smoothness_reward = jerk_penalty + ang_jerk_penalty
 
-        constraint_penalty = -2.0 * kcm_intervention
+        # P9：KCM penalty 可配权重
+        constraint_penalty = -abs(float(kcm_weight)) * float(kcm_intervention)
+
+        # P9：SoftCap turning-feasible 超限惩罚
+        cap_violation_penalty = 0.0
+        w_cap = abs(float(cap_violation_weight))
+        if w_cap > 0.0 and float(cap_violation_ratio) > 0.0:
+            p = float(cap_violation_power)
+            if not math.isfinite(p) or p <= 0.5:
+                p = 2.0
+            cap_violation_penalty = -w_cap * float(float(cap_violation_ratio) ** p)
 
         du_penalty = 0.0
         if bool(du_enabled) and float(du_weight) > 0.0:
@@ -179,6 +222,7 @@ class RewardCalculator:
             + speed_target_reward
             + smoothness_reward
             + constraint_penalty
+            + cap_violation_penalty  # P9：SoftCap 惩罚
             + du_penalty
             + corridor_barrier_penalty
             + corridor_center_penalty
@@ -205,19 +249,11 @@ class RewardCalculator:
             "speed_target_reward": float(speed_target_reward),
             "smoothness_reward": float(smoothness_reward),
             "constraint_penalty": float(constraint_penalty),
-            "du_theta_u": float(du_theta_u),
-            "du_v_u": float(du_v_u),
-            "du_penalty": float(du_penalty),
-            "corridor_active": float(1.0 if use_corridor else 0.0),
-            "corridor_in_corridor": float(1.0 if (use_corridor and corridor_in_corridor) else 0.0),
-            "corridor_margin_to_edge": float(corridor_margin_to_edge) if math.isfinite(float(corridor_margin_to_edge)) else float("nan"),
-            "corridor_barrier_penalty": float(corridor_barrier_penalty),
-            "corridor_center_penalty": float(corridor_center_penalty),
-            "corridor_outside_penalty": float(corridor_outside_penalty),
-            "corridor_heading_reward": float(corridor_heading_reward),
-            "corridor_dir_reward": float(corridor_dir_reward),
-            "completion_reward": float(completion_reward),
-            "survival_reward": float(survival_reward),
+            # P9：新增字段
+            "cap_violation_ratio": float(cap_violation_ratio),
+            "cap_violation_penalty": float(cap_violation_penalty),
+            "deadzone_center_weight": float(deadzone_center_weight),
+            "kcm_weight": float(kcm_weight),
             "time_penalty": float(step_time_penalty),
             "stall_penalty": float(stall_term_penalty),
             "total": float(total),

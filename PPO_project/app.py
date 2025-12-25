@@ -58,81 +58,6 @@ KCM_FIELDS: List[Tuple[str, str]] = [
     ("MAX_ANG_JERK", "最大角跃度 MAX_ANG_JERK"),
 ]
 
-# --------------------------------------------------------------------------------------
-# 智能预设配置
-# --------------------------------------------------------------------------------------
-SMART_PRESETS: Dict[str, Dict] = {
-    "default": {
-        "name": "📋 使用配置文件默认值",
-        "description": "直接使用 YAML 配置文件中的参数",
-        "overrides": {},  # 不覆盖任何参数
-    },
-    "fast_straight": {
-        "name": "⚡ 快速直线 (高速精准)",
-        "description": "直线段高速进给，严格跟踪原始轨迹",
-        "overrides": {
-            "env": {"epsilon": 1.0, "max_steps": 3000},
-            "kcm": {"MAX_VEL": 25.0, "MAX_ACC": 80.0, "MAX_JERK": 800.0},
-            "corridor": {"enabled": False},
-        },
-    },
-    "smooth_corner": {
-        "name": "🔄 平滑过弯 (智能内切)",
-        "description": "拐角处自动选择相切轨迹，降速最小化",
-        "overrides": {
-            "env": {"epsilon": 1.5, "max_steps": 4000},
-            "kcm": {"MAX_VEL": 15.0, "MAX_ACC": 60.0, "MAX_JERK": 600.0},
-            "corridor": {
-                "enabled": True,
-                "theta_enter_deg": 15.0,
-                "theta_exit_deg": 8.0,
-                "margin_ratio": 0.1,
-                "heading_weight": 2.0,
-                "outside_penalty_weight": 20.0,
-                "safe_margin_ratio": 0.2,
-                "barrier_weight": 2.0,
-            },
-        },
-    },
-    "balanced": {
-        "name": "⚖️ 均衡模式 (速度+精度)",
-        "description": "速度与精度兼顾，适合复杂轨迹",
-        "overrides": {
-            "env": {"epsilon": 1.2, "max_steps": 5000},
-            "kcm": {"MAX_VEL": 20.0, "MAX_ACC": 70.0, "MAX_JERK": 700.0},
-            "corridor": {
-                "enabled": True,
-                "theta_enter_deg": 12.0,
-                "theta_exit_deg": 6.0,
-                "margin_ratio": 0.15,
-                "heading_weight": 1.5,
-            },
-        },
-    },
-    "high_precision": {
-        "name": "🎯 高精度 (低速稳定)",
-        "description": "严格轨迹跟踪，适合精密加工",
-        "overrides": {
-            "env": {"epsilon": 0.8, "max_steps": 6000},
-            "kcm": {"MAX_VEL": 10.0, "MAX_ACC": 40.0, "MAX_JERK": 400.0},
-            "corridor": {"enabled": False},
-        },
-    },
-    "aggressive": {
-        "name": "🚀 激进高速 (最大效率)",
-        "description": "最大速度，允许较大偏差，追求效率",
-        "overrides": {
-            "env": {"epsilon": 2.0, "max_steps": 2500},
-            "kcm": {"MAX_VEL": 30.0, "MAX_ACC": 100.0, "MAX_JERK": 1000.0},
-            "corridor": {
-                "enabled": True,
-                "theta_enter_deg": 20.0,
-                "margin_ratio": 0.05,
-            },
-        },
-    },
-}
-
 st.set_page_config(page_title="Trajectory Industrial Dashboard", layout="wide")
 
 
@@ -314,8 +239,7 @@ def _terminate_process(pid: int) -> None:
 def _resolve_config_for_mode(scenario_key: str, mode: str) -> Path:
     """根据场景和模式选取合适的配置文件；若未找到则回落到训练配置。"""
     suffix = SCENARIO_SUFFIX.get(scenario_key, "line")
-    # 支持所有实验模式的配置文件解析
-    if mode in {"baseline_nnc", "baseline_s_curve", "ablation_no_kcm", "ablation_no_reward", "ablation_min_lookahead", "train"}:
+    if mode in {"baseline_nnc", "baseline_s_curve", "ablation_no_kcm", "ablation_no_reward", "train"}:
         candidate = CONFIG_DIR / f"{mode}_{suffix}.yaml"
         if candidate.exists():
             return candidate
@@ -745,34 +669,14 @@ def render_saved_models_view() -> None:
 
 
 def render_training_sidebar() -> Dict[str, object]:
-    """简化版训练侧边栏 - 智能预设 + 核心参数 + 可选高级设置"""
-    st.sidebar.markdown("### 🚀 训练控制")
+    st.sidebar.markdown("### 训练监控 · Training Ops")
 
-    # ========== 核心设置 ==========
-    scenario = st.sidebar.selectbox(
-        "📍 场景",
-        list(SCENARIOS.keys()),
-        help="选择轨迹类型：直线/正方形/S形"
-    )
-
-    # 运行模式 - 包含完整的消融实验选项
-    MODE_OPTIONS = {
-        "train": "🎯 完整训练 (PPO+KCM)",
-        "ablation_no_kcm": "🔬 消融: 无KCM约束",
-        "ablation_no_reward": "🔬 消融: 无平滑奖励",
-        "ablation_min_lookahead": "🔬 消融: 最小前瞻",
-        "baseline_nnc": "📊 基线: NNC",
-        "baseline_s_curve": "📊 基线: S-curve",
-        "test": "🧪 测试模式",
-    }
+    scenario = st.sidebar.selectbox("场景选择", list(SCENARIOS.keys()))
     mode_choice = st.sidebar.selectbox(
-        "🔧 运行模式",
-        list(MODE_OPTIONS.keys()),
-        format_func=lambda x: MODE_OPTIONS[x],
+        "运行模式",
+        ["train", "ablation_no_kcm", "ablation_no_reward", "baseline_nnc", "baseline_s_curve", "test"],
         index=0,
-        help="train=完整训练, ablation=消融实验, baseline=基线对比"
     )
-
     config_path = _resolve_config_for_mode(scenario, mode_choice)
     path_type_map = {
         "Line (直线)": "line",
@@ -782,193 +686,232 @@ def render_training_sidebar() -> Dict[str, object]:
     selected_path_type = path_type_map.get(scenario, "line")
 
     config, _ = load_config(str(config_path))
-
-    # ========== 智能预设 ==========
-    st.sidebar.markdown("---")
-    preset_keys = list(SMART_PRESETS.keys())
-    preset_choice = st.sidebar.selectbox(
-        "💡 智能预设",
-        preset_keys,
-        format_func=lambda x: SMART_PRESETS[x]["name"],
-        index=0,
-        help="根据应用场景选择预设参数组合"
-    )
-    
-    # 显示预设描述
-    preset_info = SMART_PRESETS[preset_choice]
-    st.sidebar.caption(f"_{preset_info['description']}_")
-
-    # 实验名称
     default_name = st.session_state.get("experiment_name") or _latest_experiment_name(config_path)
-    experiment_name = st.sidebar.text_input("📝 实验名称", value=default_name)
+    experiment_name = st.sidebar.text_input("实验名称", value=default_name)
     if not experiment_name.strip():
         experiment_name = _latest_experiment_name(config_path)
     st.session_state["experiment_name"] = experiment_name
 
-    # 显示当前配置文件
-    st.sidebar.caption(f"配置: `{config_path.name}`")
+    disable_kcm = st.sidebar.checkbox("Disable KCM", value=False)
+    disable_smooth = st.sidebar.checkbox("Disable Smoothness", value=False)
 
-    # ========== 应用预设参数 ==========
-    preset_overrides = preset_info.get("overrides", {})
-    
-    # 默认值
-    disable_kcm = False
-    disable_smooth = False
     kcm_overrides: Dict[str, float] = {}
+    with st.sidebar.expander("KCM 参数微调", expanded=False):
+        kcm_cfg = config.get("kinematic_constraints", {})
+        for cfg_key, label in KCM_FIELDS:
+            base_value = float(kcm_cfg.get(cfg_key, 0.0))
+            val = st.number_input(label, value=base_value, step=0.1, format="%.4f", key=f"kcm_{cfg_key}")
+            kcm_overrides[cfg_key] = float(val)
+
     env_override: Dict[str, float] = {}
-    path_override: Optional[dict] = None
+    with st.sidebar.expander("Environment 参数", expanded=False):
+        env_cfg = config.get("environment", {})
+        base_dt = float(env_cfg.get("interpolation_period", 0.01))
+        base_eps = float(env_cfg.get("epsilon", 1.5))
+        base_steps = int(env_cfg.get("max_steps", 4000))
+        base_lookahead = int(env_cfg.get("lookahead_points", 5))
+        env_override["interpolation_period"] = st.number_input("插值周期 dt", value=base_dt, step=0.001, format="%.4f")
+        env_override["epsilon"] = st.number_input("容差带宽 epsilon", value=base_eps, step=0.1, format="%.3f")
+        env_override["max_steps"] = int(st.number_input("最大步数 max_steps", value=base_steps, step=50))
+        env_override["lookahead_points"] = int(
+            st.number_input("前瞻点数 lookahead_points", min_value=1, max_value=64, value=base_lookahead, step=1)
+        )
+
+    path_override = _render_path_override_form(config, selected_path_type)
+
     corridor_override: Optional[dict] = None
+    with st.sidebar.expander("P3.1 VirtualCorridor 走廊奖励", expanded=False):
+        reward_weights = config.get("reward_weights", {}) or {}
+        corridor_cfg = reward_weights.get("corridor", {}) if isinstance(reward_weights, dict) else {}
+        if not isinstance(corridor_cfg, dict):
+            corridor_cfg = {}
 
-    # 应用预设的环境参数
-    if "env" in preset_overrides:
-        env_override.update(preset_overrides["env"])
-    
-    # 应用预设的运动学参数
-    if "kcm" in preset_overrides:
-        kcm_overrides.update(preset_overrides["kcm"])
-    
-    # 应用预设的走廊参数
-    if "corridor" in preset_overrides:
-        corridor_preset = preset_overrides["corridor"]
-        if corridor_preset.get("enabled", False):
-            # 合并配置文件中的走廊参数和预设参数
-            reward_weights = config.get("reward_weights", {}) or {}
-            corridor_cfg = reward_weights.get("corridor", {}) if isinstance(reward_weights, dict) else {}
-            if not isinstance(corridor_cfg, dict):
-                corridor_cfg = {}
-            
-            corridor_override = {
-                "enabled": True,
-                "theta_enter_deg": corridor_preset.get("theta_enter_deg", corridor_cfg.get("theta_enter_deg", 15.0)),
-                "theta_exit_deg": corridor_preset.get("theta_exit_deg", corridor_cfg.get("theta_exit_deg", 8.0)),
-                "dist_enter": None,
-                "dist_exit": None,
-                "margin_ratio": corridor_preset.get("margin_ratio", corridor_cfg.get("margin_ratio", 0.1)),
-                "heading_weight": corridor_preset.get("heading_weight", corridor_cfg.get("heading_weight", 2.0)),
-                "outside_penalty_weight": corridor_preset.get("outside_penalty_weight", corridor_cfg.get("outside_penalty_weight", 20.0)),
-                "safe_margin_ratio": corridor_preset.get("safe_margin_ratio", corridor_cfg.get("safe_margin_ratio", 0.2)),
-                "barrier_scale_ratio": corridor_preset.get("barrier_scale_ratio", corridor_cfg.get("barrier_scale_ratio", 0.05)),
-                "barrier_weight": corridor_preset.get("barrier_weight", corridor_cfg.get("barrier_weight", 2.0)),
-                "exit_center_ramp_steps": None,
-                "center_weight": corridor_preset.get("center_weight", corridor_cfg.get("center_weight", 0.0)),
-                "center_power": corridor_preset.get("center_power", corridor_cfg.get("center_power", 2.0)),
-                "dir_pref_weight": corridor_preset.get("dir_pref_weight", corridor_cfg.get("dir_pref_weight", 0.0)),
-                "dir_pref_beta": corridor_preset.get("dir_pref_beta", corridor_cfg.get("dir_pref_beta", 2.0)),
-            }
-        else:
-            corridor_override = {"enabled": False}
+        def _safe_float(value: object, default: float) -> float:
+            if value is None:
+                return float(default)
+            try:
+                return float(value)
+            except (TypeError, ValueError):
+                return float(default)
 
-    # ========== 启动/停止按钮 ==========
+        def _safe_int(value: object, default: int) -> int:
+            if value is None:
+                return int(default)
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                return int(default)
+
+        enabled_default = bool(corridor_cfg.get("enabled", False))
+        corridor_enabled = st.checkbox("启用 VirtualCorridor (enabled)", value=enabled_default)
+
+        theta_enter_deg = st.number_input(
+            "theta_enter_deg (进入阈值, °)",
+            value=_safe_float(corridor_cfg.get("theta_enter_deg", 15.0), 15.0),
+            step=1.0,
+            format="%.1f",
+        )
+        theta_exit_deg = st.number_input(
+            "theta_exit_deg (退出阈值, °)",
+            value=_safe_float(corridor_cfg.get("theta_exit_deg", 8.0), 8.0),
+            step=1.0,
+            format="%.1f",
+        )
+
+        dist_enter_cfg = corridor_cfg.get("dist_enter", None)
+        dist_exit_cfg = corridor_cfg.get("dist_exit", None)
+        dist_enter_auto = st.checkbox("dist_enter 自动 (null，使用 env 默认)", value=(dist_enter_cfg is None))
+        dist_enter_default = _safe_float(dist_enter_cfg, 3.0)
+        dist_enter = st.number_input(
+            "dist_enter (进入距离阈值)",
+            value=float(dist_enter_default),
+            step=0.1,
+            format="%.3f",
+            disabled=bool(dist_enter_auto),
+        )
+
+        dist_exit_default_fallback = 1.5 * float(dist_enter_default)
+        dist_exit_auto = st.checkbox("dist_exit 自动 (null，使用 env 默认)", value=(dist_exit_cfg is None))
+        dist_exit_default = _safe_float(dist_exit_cfg, dist_exit_default_fallback)
+        dist_exit = st.number_input(
+            "dist_exit (退出距离阈值)",
+            value=float(dist_exit_default),
+            step=0.1,
+            format="%.3f",
+            disabled=bool(dist_exit_auto),
+        )
+        margin_ratio = st.number_input(
+            "margin_ratio (边界留白比例)",
+            value=_safe_float(corridor_cfg.get("margin_ratio", 0.1), 0.1),
+            step=0.01,
+            format="%.3f",
+        )
+        heading_weight = st.number_input(
+            "heading_weight (朝向一致性权重)",
+            value=_safe_float(corridor_cfg.get("heading_weight", 2.0), 2.0),
+            step=0.1,
+            format="%.3f",
+        )
+        outside_penalty_weight = st.number_input(
+            "outside_penalty_weight (走廊外惩罚权重)",
+            value=_safe_float(corridor_cfg.get("outside_penalty_weight", 20.0), 20.0),
+            step=1.0,
+            format="%.1f",
+        )
+
+        st.sidebar.markdown("##### P7.1 走廊细节（内切/回中）")
+        safe_margin_ratio = st.number_input(
+            "safe_margin_ratio (安全边界比例)",
+            value=_safe_float(corridor_cfg.get("safe_margin_ratio", 0.2), 0.2),
+            step=0.01,
+            format="%.3f",
+        )
+        barrier_scale_ratio = st.number_input(
+            "barrier_scale_ratio (势垒尺度比例)",
+            value=_safe_float(corridor_cfg.get("barrier_scale_ratio", 0.05), 0.05),
+            step=0.01,
+            format="%.3f",
+        )
+        barrier_weight = st.number_input(
+            "barrier_weight (势垒权重)",
+            value=_safe_float(corridor_cfg.get("barrier_weight", 2.0), 2.0),
+            step=0.1,
+            format="%.3f",
+        )
+
+        dt_effective = float(env_override.get("interpolation_period", base_dt))
+        exit_steps_default_fallback = int(max(10, int(1.0 / max(dt_effective, 1e-6))))
+        exit_steps_cfg = corridor_cfg.get("exit_center_ramp_steps", None)
+        exit_steps_auto = st.checkbox("exit_center_ramp_steps 自动 (null，使用 dt 推导)", value=(exit_steps_cfg is None))
+        exit_steps_default = _safe_int(exit_steps_cfg, exit_steps_default_fallback)
+        exit_center_ramp_steps = st.number_input(
+            "exit_center_ramp_steps (出弯回中 ramp 步数)",
+            min_value=1,
+            max_value=20000,
+            value=int(exit_steps_default),
+            step=10,
+            disabled=bool(exit_steps_auto),
+        )
+
+        center_weight = st.number_input(
+            "center_weight (回中权重上限)",
+            value=_safe_float(corridor_cfg.get("center_weight", 0.0), 0.0),
+            step=0.1,
+            format="%.3f",
+        )
+        center_power = st.number_input(
+            "center_power (回中惩罚幂次)",
+            value=_safe_float(corridor_cfg.get("center_power", 2.0), 2.0),
+            step=0.1,
+            format="%.3f",
+        )
+        dir_pref_weight = st.number_input(
+            "dir_pref_weight (内切方向偏好权重)",
+            value=_safe_float(corridor_cfg.get("dir_pref_weight", 0.0), 0.0),
+            step=0.1,
+            format="%.3f",
+        )
+        dir_pref_beta = st.number_input(
+            "dir_pref_beta (方向偏好 tanh 强度)",
+            value=_safe_float(corridor_cfg.get("dir_pref_beta", 2.0), 2.0),
+            step=0.1,
+            format="%.3f",
+        )
+
+        corridor_override = {
+            "enabled": bool(corridor_enabled),
+            "theta_enter_deg": float(theta_enter_deg),
+            "theta_exit_deg": float(theta_exit_deg),
+            "dist_enter": None if bool(dist_enter_auto) else float(dist_enter),
+            "dist_exit": None if bool(dist_exit_auto) else float(dist_exit),
+            "margin_ratio": float(margin_ratio),
+            "heading_weight": float(heading_weight),
+            "outside_penalty_weight": float(outside_penalty_weight),
+            "safe_margin_ratio": float(safe_margin_ratio),
+            "barrier_scale_ratio": float(barrier_scale_ratio),
+            "barrier_weight": float(barrier_weight),
+            "exit_center_ramp_steps": None if bool(exit_steps_auto) else int(exit_center_ramp_steps),
+            "center_weight": float(center_weight),
+            "center_power": float(center_power),
+            "dir_pref_weight": float(dir_pref_weight),
+            "dir_pref_beta": float(dir_pref_beta),
+        }
+
+        col_save_runtime, col_save_yaml = st.columns(2)
+        with col_save_runtime:
+            if st.button("写入本次训练 runtime yaml", width="stretch"):
+                try:
+                    merged = _apply_runtime_overrides(
+                        config,
+                        path_override=path_override,
+                        env_override=env_override,
+                        kcm_overrides=kcm_overrides,
+                        corridor_override=corridor_override,
+                    )
+                    preview_path = CONFIG_DIR / "_runtime_preview.yaml"
+                    with preview_path.open("w", encoding="utf-8") as f:
+                        yaml.safe_dump(merged, f, allow_unicode=True, sort_keys=False)
+                    st.success(f"已写入: {preview_path}")
+                except Exception as exc:
+                    st.warning(f"写入失败: {exc}")
+        with col_save_yaml:
+            if st.button("写回当前 YAML (危险)", width="stretch"):
+                try:
+                    merged = _apply_runtime_overrides(
+                        config,
+                        path_override=path_override,
+                        env_override=env_override,
+                        kcm_overrides=kcm_overrides,
+                        corridor_override=corridor_override,
+                    )
+                    with config_path.open("w", encoding="utf-8") as f:
+                        yaml.safe_dump(merged, f, allow_unicode=True, sort_keys=False)
+                    st.success(f"已写回: {config_path}")
+                except Exception as exc:
+                    st.warning(f"写回失败: {exc}")
+
     col_start, col_stop = st.sidebar.columns(2)
-
-    # ========== 高级设置（可选展开）==========
-    show_advanced = st.sidebar.checkbox("⚙️ 显示高级参数 (覆盖预设)", value=False)
-    
-    if show_advanced:
-        st.sidebar.markdown("---")
-        st.sidebar.markdown("##### 🎛️ 参数微调 (覆盖预设值)")
-        
-        # 快捷开关
-        col_kcm, col_smooth = st.sidebar.columns(2)
-        with col_kcm:
-            disable_kcm = st.checkbox("禁用 KCM", value=False)
-        with col_smooth:
-            disable_smooth = st.checkbox("禁用平滑", value=False)
-
-        # 环境核心参数
-        with st.sidebar.expander("环境参数", expanded=False):
-            env_cfg = config.get("environment", {})
-            # 使用预设值作为默认，或配置文件值
-            base_eps = float(env_override.get("epsilon", env_cfg.get("epsilon", 1.5)))
-            base_steps = int(env_override.get("max_steps", env_cfg.get("max_steps", 4000)))
-            env_override["epsilon"] = st.number_input(
-                "容差带宽 ε", value=base_eps, step=0.1, format="%.2f",
-                help="轨迹允许偏离的最大距离"
-            )
-            env_override["max_steps"] = int(st.number_input(
-                "最大步数", value=base_steps, step=100,
-                help="单回合最大仿真步数"
-            ))
-
-        # 运动学约束
-        with st.sidebar.expander("运动学约束", expanded=False):
-            kcm_cfg = config.get("kinematic_constraints", {})
-            # 使用预设值作为默认
-            base_vel = float(kcm_overrides.get("MAX_VEL", kcm_cfg.get("MAX_VEL", 10.0)))
-            base_acc = float(kcm_overrides.get("MAX_ACC", kcm_cfg.get("MAX_ACC", 50.0)))
-            base_jerk = float(kcm_overrides.get("MAX_JERK", kcm_cfg.get("MAX_JERK", 500.0)))
-            kcm_overrides["MAX_VEL"] = st.number_input(
-                "最大速度", value=base_vel, step=1.0,
-                help="线速度上限 (mm/s 或 m/s)"
-            )
-            kcm_overrides["MAX_ACC"] = st.number_input(
-                "最大加速度", value=base_acc, step=5.0
-            )
-            kcm_overrides["MAX_JERK"] = st.number_input(
-                "最大跃度", value=base_jerk, step=50.0
-            )
-
-        # 轨迹参数
-        with st.sidebar.expander("轨迹参数", expanded=False):
-            path_cfg = config.get("path", {})
-            scale = st.number_input(
-                "路径尺度", value=float(path_cfg.get("scale", 10.0)), step=1.0,
-                help="轨迹整体大小"
-            )
-            num_points = int(st.number_input(
-                "采样点数", value=int(path_cfg.get("num_points", 200)), step=50
-            ))
-            path_override = {"path": {"type": selected_path_type, "scale": float(scale), "num_points": num_points}}
-            
-            if selected_path_type == "s_shape":
-                s_cfg = path_cfg.get("s_shape", {})
-                amp = st.number_input("S形振幅", value=float(s_cfg.get("amplitude", scale / 2)), step=0.5)
-                path_override["path"]["s_shape"] = {"amplitude": amp}
-
-        # 走廊模式（简化版）
-        with st.sidebar.expander("弯道走廊", expanded=False):
-            reward_weights = config.get("reward_weights", {}) or {}
-            corridor_cfg = reward_weights.get("corridor", {}) if isinstance(reward_weights, dict) else {}
-            if not isinstance(corridor_cfg, dict):
-                corridor_cfg = {}
-
-            # 从预设或配置中获取默认值
-            corridor_enabled_default = bool(corridor_override.get("enabled", False)) if corridor_override else bool(corridor_cfg.get("enabled", False))
-            corridor_enabled = st.checkbox(
-                "启用走廊模式", 
-                value=corridor_enabled_default,
-                help="拐角处启用虚拟走廊引导过弯"
-            )
-            
-            if corridor_enabled:
-                theta_enter_default = float(corridor_override.get("theta_enter_deg", 15.0)) if corridor_override else float(corridor_cfg.get("theta_enter_deg", 15.0))
-                theta_enter = st.slider(
-                    "进入角度阈值 (°)", 5.0, 45.0, theta_enter_default,
-                    help="检测为拐角的最小角度变化"
-                )
-                corridor_override = {
-                    "enabled": True,
-                    "theta_enter_deg": theta_enter,
-                    "theta_exit_deg": float(corridor_cfg.get("theta_exit_deg", 8.0)),
-                    "dist_enter": None,
-                    "dist_exit": None,
-                    "margin_ratio": float(corridor_cfg.get("margin_ratio", 0.1)),
-                    "heading_weight": float(corridor_cfg.get("heading_weight", 2.0)),
-                    "outside_penalty_weight": float(corridor_cfg.get("outside_penalty_weight", 20.0)),
-                    "safe_margin_ratio": float(corridor_cfg.get("safe_margin_ratio", 0.2)),
-                    "barrier_scale_ratio": float(corridor_cfg.get("barrier_scale_ratio", 0.05)),
-                    "barrier_weight": float(corridor_cfg.get("barrier_weight", 2.0)),
-                    "exit_center_ramp_steps": None,
-                    "center_weight": float(corridor_cfg.get("center_weight", 0.0)),
-                    "center_power": float(corridor_cfg.get("center_power", 2.0)),
-                    "dir_pref_weight": float(corridor_cfg.get("dir_pref_weight", 0.0)),
-                    "dir_pref_beta": float(corridor_cfg.get("dir_pref_beta", 2.0)),
-                }
-            else:
-                corridor_override = {"enabled": False}
-
-    # ========== 启动/停止按钮 ==========
-    if col_start.button("🚀 启动", use_container_width=True):
+    if col_start.button("🚀 启动训练 (Start)", width='stretch'):
         start_training(
             config_path,
             experiment_name,
@@ -980,18 +923,15 @@ def render_training_sidebar() -> Dict[str, object]:
             env_override,
             corridor_override,
         )
-    if col_stop.button("🛑 停止", use_container_width=True):
+    if col_stop.button("🛑 停止训练 (Stop)", width='stretch'):
         stop_training()
 
-    # 状态显示
     active_log_dir = _safe_log_dir(st.session_state.get("log_dir"))
     if active_log_dir is None:
         active_log_dir = _find_latest_log_dir()
-    
+    st.sidebar.caption(f"日志目录: {active_log_dir}" if active_log_dir else "日志目录: 未找到")
     if st.session_state.get("train_pid"):
-        st.sidebar.success(f"✅ 运行中 PID: {st.session_state['train_pid']}")
-    
-    st.sidebar.caption(f"日志: {active_log_dir.name if active_log_dir else '无'}")
+        st.sidebar.success(f"运行中 PID: {st.session_state['train_pid']}")
 
     return {"config_path": config_path, "log_dir": active_log_dir, "path_override": path_override}
 

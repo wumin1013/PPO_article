@@ -34,7 +34,6 @@ ROOT_DIR = BASE_DIR.parent
 CONFIG_DIR = BASE_DIR / "configs"
 SAVED_MODELS_DIR = BASE_DIR / "saved_models"
 MAIN_SCRIPT = BASE_DIR / "main.py"
-PYTHON_CMD = ROOT_DIR / "python.cmd"
 
 SCENARIOS: Dict[str, Path] = {
     "Line (直线)": CONFIG_DIR / "train_line.yaml",
@@ -80,8 +79,7 @@ def ensure_state_defaults() -> None:
 
 
 def resolve_python() -> str:
-    if PYTHON_CMD.exists():
-        return str(PYTHON_CMD)
+    """使用当前解释器（推荐在 PPO 虚拟环境下运行）。"""
     return sys.executable or "python"
 
 

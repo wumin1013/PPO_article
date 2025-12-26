@@ -1,5 +1,1 @@
-[
-  "PPO_project/tests/test_logger.py::test_csvlogger_atomic_write",
-  "PPO_project/tests/test_logger.py::test_datalogger_atomic_write",
-  "PPO_project/tests/test_perception.py::test_lookahead_features_left_turn"
-]
+[]

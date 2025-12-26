@@ -749,7 +749,7 @@ class Env:
     
     def apply_action(self, action):
         theta_prime, length_prime = action
-        # 路径切向基准 + 相对偏移（旧版语义）
+        # Path tangent + residual steering.
         new_pos = self.calculate_new_position(theta_prime, length_prime)
         self.current_position = new_pos
         self.trajectory.append(self.current_position.copy())
@@ -864,20 +864,21 @@ class Env:
         return float(np.clip(progress, 0.0, 0.99))
     
     def calculate_new_position(self, theta_prime_action, length_prime_action):
-        # P7.0：航向积分（heading += omega_exec*dt）+ 位移积分（pos += v_exec*dt*[cos,sin]）
+        # Residual control: follow path tangent with a small angular residual.
         dt = float(self.interpolation_period)
-        if not hasattr(self, "heading"):
-            self.heading = float(getattr(self, "_current_direction_angle", 0.0))
+        theta_ref = float(self._get_path_direction(self.current_position))
 
         omega_exec = float(theta_prime_action)
         v_exec = float(length_prime_action)
 
-        self.heading = float(self.heading + omega_exec * dt)
-        self._current_direction_angle = float(self.heading)
+        effective = float(self._wrap_angle(theta_ref + omega_exec * dt))
+        # Keep heading for diagnostics; dynamics follow path tangent + residual.
+        self.heading = float(effective)
+        self._current_direction_angle = float(effective)
 
         displacement = v_exec * dt
-        x_next = float(self.current_position[0]) + displacement * float(np.cos(self.heading))
-        y_next = float(self.current_position[1]) + displacement * float(np.sin(self.heading))
+        x_next = float(self.current_position[0]) + displacement * float(np.cos(effective))
+        y_next = float(self.current_position[1]) + displacement * float(np.sin(effective))
 
         return np.array([x_next, y_next], dtype=float)
 
@@ -2307,11 +2308,34 @@ class Env:
         return status
 
     def _get_path_direction(self, pt):
-        """Use cached heading array"""
-        segment_index = self._find_containing_segment(pt)
-        if segment_index >= 0 and segment_index < len(self.cache['segment_directions']):
-            return self.cache['segment_directions'][segment_index]
-        return self._current_direction_angle
+        """Use cached segment tangent; allow a small lookahead near segment end for sharp corners."""
+        seg_dirs = self.cache.get("segment_directions") if isinstance(getattr(self, "cache", None), dict) else None
+        if not isinstance(seg_dirs, list) or not seg_dirs:
+            return self._current_direction_angle
+
+        segment_index = int(self._find_containing_segment(pt))
+        if segment_index < 0 or segment_index >= len(seg_dirs):
+            return self._current_direction_angle
+
+        # If the point is very close to the end of the current segment, switch to the next segment's tangent.
+        # This mitigates sharp-corner overshoot under "path tangent + residual" dynamics (P0).
+        try:
+            p1 = np.array(self.Pm[segment_index], dtype=float)
+            p2 = np.array(self.Pm[segment_index + 1], dtype=float)
+            seg_vec = p2 - p1
+            denom = float(np.dot(seg_vec, seg_vec))
+            if denom > 1e-12:
+                t = float(np.dot(np.asarray(pt, dtype=float) - p1, seg_vec) / denom)
+                if t > 0.98:
+                    next_idx = segment_index + 1
+                    if next_idx >= len(seg_dirs):
+                        next_idx = 0 if self.closed else segment_index
+                    if 0 <= next_idx < len(seg_dirs):
+                        return float(seg_dirs[next_idx])
+        except Exception:
+            pass
+
+        return float(seg_dirs[segment_index])
     
     def calculate_direction_deviation(self, pt):
         path_direction = self._get_path_direction(pt)

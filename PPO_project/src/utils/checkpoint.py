@@ -52,6 +52,7 @@ class CheckpointManager:
         experiment_dir: Optional[Path] = None,
     ) -> Path:
         """Persist full training state for resume."""
+        self.latest_path.parent.mkdir(parents=True, exist_ok=True)
         payload: Dict[str, Any] = {
             "actor": _safe_state_dict(getattr(agent, "actor", None)),
             "critic": _safe_state_dict(getattr(agent, "critic", None)),
@@ -67,7 +68,9 @@ class CheckpointManager:
             "config": config,
             "experiment_dir": str(experiment_dir) if experiment_dir else None,
         }
-        torch.save(payload, self.latest_path)
+        # Work around PyTorch Windows path issues with non-ASCII absolute paths by using a file object.
+        with self.latest_path.open("wb") as f:
+            torch.save(payload, f)
         return self.latest_path
 
     def save_best(
@@ -79,6 +82,7 @@ class CheckpointManager:
         config: Dict[str, Any],
     ) -> Path:
         """Persist lightweight best model weights for paper/inference."""
+        self.best_path.parent.mkdir(parents=True, exist_ok=True)
         payload: Dict[str, Any] = {
             "actor": _safe_state_dict(getattr(agent, "actor", None)),
             "critic": _safe_state_dict(getattr(agent, "critic", None)),
@@ -87,7 +91,9 @@ class CheckpointManager:
             "episode": int(episode_idx),
             "global_step": int(global_step),
         }
-        torch.save(payload, self.best_path)
+        # Work around PyTorch Windows path issues with non-ASCII absolute paths by using a file object.
+        with self.best_path.open("wb") as f:
+            torch.save(payload, f)
         return self.best_path
 
 

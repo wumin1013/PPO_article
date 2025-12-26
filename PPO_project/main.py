@@ -190,7 +190,7 @@ def _init_loggers(manager: ExperimentManager, log_tag: str) -> tuple[CSVLogger, 
     """构建所需的原子化CSV日志记录器。"""
     step_logger = manager.create_logger(
         f"step_metrics_{log_tag}.csv",
-        ["episode_idx", "env_step", "reward", "contour_error", "jerk", "kcm_intervention"],
+        ["episode_idx", "env_step", "reward", "contour_error", "velocity", "acceleration", "jerk", "kcm_intervention"],
     )
     episode_logger = manager.create_logger(
         f"episode_metrics_{log_tag}.csv",
@@ -455,6 +455,11 @@ def train(
     log_interval = training_config["log_interval"]
     checkpoint_interval_steps = training_config.get("checkpoint_interval_steps", 2048)
 
+    traj_write_interval_steps = int(getattr(cli_overrides, "traj_write_interval_steps", 50) or 50)
+    traj_write_max_points = int(getattr(cli_overrides, "traj_write_max_points", 2000) or 2000)
+    traj_write_interval_steps = max(1, traj_write_interval_steps)
+    traj_write_max_points = max(10, traj_write_max_points)
+
     smoothed_rewards: list[float] = []
     wall_time_start = time.perf_counter()
     start_episode = 0
@@ -512,6 +517,8 @@ def train(
             start_pos = getattr(env, "current_position", None)
             if start_pos is not None and len(start_pos) >= 2:
                 current_episode_trace.append((float(start_pos[0]), float(start_pos[1])))
+            # 提前覆盖写入，避免面板沿用上一回合轨迹（写入失败时静默跳过）。
+            _write_latest_trajectory(manager.logs_dir, current_episode_trace[-traj_write_max_points:])
 
             transition_dict = {
                 "states": [],
@@ -560,9 +567,19 @@ def train(
                     env_step=info["step"],
                     reward=reward,
                     contour_error=info["contour_error"],
+                    velocity=float(getattr(env, "velocity", 0.0)),
+                    acceleration=float(getattr(env, "acceleration", 0.0)),
                     jerk=info["jerk"],
                     kcm_intervention=info["kcm_intervention"],
                 )
+
+                # 每隔 N 步覆盖写入 latest_trajectory.csv，供 Streamlit 面板近实时显示。
+                try:
+                    step_in_episode = int(info.get("step", 0))
+                except Exception:
+                    step_in_episode = 0
+                if step_in_episode > 0 and step_in_episode % traj_write_interval_steps == 0:
+                    _write_latest_trajectory(manager.logs_dir, current_episode_trace[-traj_write_max_points:])
 
                 if hasattr(agent, "actor") and global_step - last_checkpoint_step >= checkpoint_interval_steps:
                     checkpoint_manager.save_latest(
@@ -623,8 +640,8 @@ def train(
                 wall_time=time.perf_counter() - wall_time_start,
             )
 
-            # 每回合都更新latest_trajectory.csv以实现实时显示（覆盖写入，不占额外空间）
-            _write_latest_trajectory(manager.logs_dir, current_episode_trace)
+            # 回合结束时也覆盖写入 latest_trajectory.csv（面板仅用于展示，保留末尾片段以降低 IO）。
+            _write_latest_trajectory(manager.logs_dir, current_episode_trace[-traj_write_max_points:])
 
             eval_reward = smoothed_rewards[-1] if smoothed_rewards else episode_reward
             if hasattr(agent, "actor") and eval_reward > best_eval_reward:
@@ -659,14 +676,17 @@ def train(
             if (episode + 1) % save_interval == 0 and hasattr(agent, "actor"):
                 mode_suffix = f"_{experiment_mode}" if experiment_mode != "train" else ""
                 model_path = manager.models_dir / f"tracking_model{mode_suffix}_ep{episode+1}.pth"
-                torch.save(
-                    {
-                        "actor": agent.actor.state_dict(),
-                        "critic": agent.critic.state_dict(),
-                        "config": config,
-                    },
-                    model_path,
-                )
+                model_path.parent.mkdir(parents=True, exist_ok=True)
+                # Work around PyTorch Windows path issues with non-ASCII absolute paths by using a file object.
+                with model_path.open("wb") as f:
+                    torch.save(
+                        {
+                            "actor": agent.actor.state_dict(),
+                            "critic": agent.critic.state_dict(),
+                            "config": config,
+                        },
+                        f,
+                    )
 
             pbar.set_postfix(
                 {
@@ -686,14 +706,17 @@ def train(
     if hasattr(agent, "actor"):
         mode_suffix = f"_{experiment_mode}" if experiment_mode != "train" else ""
         final_model_path = manager.models_dir / f"tracking_model{mode_suffix}_final.pth"
-        torch.save(
-            {
-                "actor": agent.actor.state_dict(),
-                "critic": agent.critic.state_dict(),
-                "config": config,
-            },
-            final_model_path,
-        )
+        final_model_path.parent.mkdir(parents=True, exist_ok=True)
+        # Work around PyTorch Windows path issues with non-ASCII absolute paths by using a file object.
+        with final_model_path.open("wb") as f:
+            torch.save(
+                {
+                    "actor": agent.actor.state_dict(),
+                    "critic": agent.critic.state_dict(),
+                    "config": config,
+                },
+                f,
+            )
         checkpoint_manager.save_latest(
             agent=agent,
             episode_idx=num_episodes - 1,
@@ -921,6 +944,8 @@ if __name__ == "__main__":
     parser.add_argument("--max_ang_vel", type=float, default=None, help="覆盖最大角速度 (MAX_ANG_VEL)")
     parser.add_argument("--max_ang_acc", type=float, default=None, help="覆盖最大角加速度 (MAX_ANG_ACC)")
     parser.add_argument("--max_ang_jerk", type=float, default=None, help="覆盖最大角跃度 (MAX_ANG_JERK)")
+    parser.add_argument("--traj_write_interval_steps", type=int, default=50, help="latest_trajectory.csv 覆盖写入间隔 (steps)")
+    parser.add_argument("--traj_write_max_points", type=int, default=2000, help="latest_trajectory.csv 最多写入点数 (保留末尾)")
 
     args = parser.parse_args()
 

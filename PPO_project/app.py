@@ -73,6 +73,10 @@ def ensure_state_defaults() -> None:
     st.session_state.setdefault("paper_results", None)
     st.session_state.setdefault("saved_exp_dir", None)
     st.session_state.setdefault("saved_run_dir", None)
+    st.session_state.setdefault("viz_traj_write_interval_steps", 50)
+    st.session_state.setdefault("viz_traj_write_max_points", 2000)
+    st.session_state.setdefault("viz_plot_stride_steps", 10)
+    st.session_state.setdefault("viz_plot_max_points", 1500)
 
 
 def resolve_python() -> str:
@@ -88,6 +92,57 @@ def read_live_csv(path: Path) -> pd.DataFrame:
     try:
         return pd.read_csv(path, engine="python", on_bad_lines="skip")
     except (pd.errors.EmptyDataError, pd.errors.ParserError, PermissionError, OSError):
+        return pd.DataFrame()
+
+
+def _read_tail_lines(path: Path, max_lines: int, chunk_size: int = 64 * 1024) -> List[str]:
+    """读取文件末尾最多 max_lines 行（不含换行符），用于降低大 CSV 的读取开销。"""
+    if not path or not path.exists() or max_lines <= 0:
+        return []
+
+    try:
+        with path.open("rb") as f:
+            f.seek(0, io.SEEK_END)
+            pos = f.tell()
+            if pos <= 0:
+                return []
+
+            buffer = b""
+            while pos > 0:
+                read_size = min(chunk_size, pos)
+                pos -= read_size
+                f.seek(pos)
+                buffer = f.read(read_size) + buffer
+                if buffer.count(b"\n") >= max_lines + 1:
+                    break
+
+        lines = buffer.splitlines()[-max_lines:]
+        return [line.decode("utf-8", errors="replace") for line in lines]
+    except (PermissionError, OSError):
+        return []
+
+
+def read_live_csv_tail(path: Path, max_rows: int = 20000) -> pd.DataFrame:
+    """读取 CSV 末尾最多 max_rows 行数据（带表头），用于 step_metrics 等持续增长的文件。"""
+    if not path or not path.exists():
+        return pd.DataFrame()
+
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            header = f.readline().strip()
+    except (PermissionError, OSError):
+        return pd.DataFrame()
+
+    if not header:
+        return pd.DataFrame()
+
+    tail_lines = _read_tail_lines(path, max_rows + 1)
+    tail_lines = [line for line in tail_lines if line.strip() and line.strip() != header]
+    text = header + "\n" + "\n".join(tail_lines) + "\n"
+
+    try:
+        return pd.read_csv(io.StringIO(text), engine="python", on_bad_lines="skip")
+    except (pd.errors.EmptyDataError, pd.errors.ParserError):
         return pd.DataFrame()
 
 
@@ -353,6 +408,8 @@ def start_training(
     mode: str = "train",
     env_override: Optional[Dict[str, float]] = None,
     corridor_override: Optional[dict] = None,
+    traj_write_interval_steps: int = 50,
+    traj_write_max_points: int = 2000,
 ) -> None:
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     experiment_dir = SAVED_MODELS_DIR / experiment_name / timestamp
@@ -391,6 +448,10 @@ def start_training(
         experiment_name,
         "--experiment_dir",
         str(experiment_dir),
+        "--traj_write_interval_steps",
+        str(int(traj_write_interval_steps)),
+        "--traj_write_max_points",
+        str(int(traj_write_max_points)),
     ]
     if mode == "train":
         if disable_kcm:
@@ -532,12 +593,94 @@ def _build_trajectory_fig(traj_df: pd.DataFrame, geom: Dict[str, object]) -> go.
     return fig
 
 
+def _build_kinematics_fig(
+    step_df: pd.DataFrame,
+    kcm_cfg: Dict[str, object],
+    stride_steps: int = 10,
+    max_points: int = 1500,
+) -> go.Figure:
+    """构建实时运动学监控图表（velocity/acceleration/jerk + 约束限制线）。
+
+    只显示最新一回合的数据，避免多回合叠加。
+    """
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
+        subplot_titles=("Velocity", "Acceleration", "Jerk"),
+    )
+
+    if step_df.empty or "env_step" not in step_df.columns:
+        fig.update_layout(height=560, margin=dict(l=10, r=10, t=30, b=10), showlegend=False)
+        return fig
+
+    if "episode_idx" in step_df.columns and not step_df.empty:
+        episode_numeric = pd.to_numeric(step_df["episode_idx"], errors="coerce")
+        if episode_numeric.notna().any():
+            latest_episode = float(episode_numeric.max())
+            step_df = step_df.loc[episode_numeric == latest_episode].copy()
+
+    stride_steps = max(1, int(stride_steps))
+    max_points = max(10, int(max_points))
+    window = max_points * stride_steps
+    if len(step_df) > window:
+        step_df = step_df.tail(window)
+    if stride_steps > 1 and not step_df.empty:
+        step_df = step_df.iloc[::stride_steps].copy()
+
+    def _as_float(val: object, default: float) -> float:
+        try:
+            return float(val)
+        except Exception:
+            return default
+
+    x = step_df["env_step"]
+
+    # Row 1: Velocity
+    if "velocity" in step_df.columns:
+        fig.add_trace(
+            go.Scatter(x=x, y=step_df["velocity"], name="Velocity", line=dict(color="#1f77b4")),
+            row=1,
+            col=1,
+        )
+    max_vel = _as_float(kcm_cfg.get("MAX_VEL", 1.0), 1.0)
+    fig.add_hline(y=max_vel, line_dash="dash", line_color="#e03131", row=1, col=1)
+
+    # Row 2: Acceleration
+    if "acceleration" in step_df.columns:
+        fig.add_trace(
+            go.Scatter(x=x, y=step_df["acceleration"], name="Acceleration", line=dict(color="#2ca02c")),
+            row=2,
+            col=1,
+        )
+    max_acc = _as_float(kcm_cfg.get("MAX_ACC", 1.0), 1.0)
+    fig.add_hline(y=max_acc, line_dash="dash", line_color="#e03131", row=2, col=1)
+    fig.add_hline(y=-max_acc, line_dash="dot", line_color="#e03131", row=2, col=1)
+
+    # Row 3: Jerk
+    if "jerk" in step_df.columns:
+        fig.add_trace(
+            go.Scatter(x=x, y=step_df["jerk"], name="Jerk", line=dict(color="#d62728")),
+            row=3,
+            col=1,
+        )
+    max_jerk = _as_float(kcm_cfg.get("MAX_JERK", 1.0), 1.0)
+    fig.add_hline(y=max_jerk, line_dash="dash", line_color="#e03131", row=3, col=1)
+    fig.add_hline(y=-max_jerk, line_dash="dot", line_color="#e03131", row=3, col=1)
+
+    fig.update_layout(height=560, margin=dict(l=10, r=10, t=30, b=10), showlegend=False)
+    fig.update_xaxes(title_text="Step", row=3, col=1)
+    return fig
+
+
 def load_live_data(log_dir: Optional[Path], config_path: Path, path_override: Optional[dict] = None) -> Dict[str, object]:
     if log_dir is None:
         return {
             "training": pd.DataFrame(),
             "paper": pd.DataFrame(),
             "trajectory": pd.DataFrame(),
+            "step": pd.DataFrame(),
             "geom": load_reference_geometry(config_path, path_override),
         }
 
@@ -548,11 +691,24 @@ def load_live_data(log_dir: Optional[Path], config_path: Path, path_override: Op
 
     traj_df = read_live_csv(log_dir / "latest_trajectory.csv")
 
+    step_path: Optional[Path] = None
+    best_mtime: Optional[float] = None
+    if log_dir.exists():
+        for candidate in log_dir.glob("step_metrics_*.csv"):
+            try:
+                mtime = float(candidate.stat().st_mtime)
+            except OSError:
+                continue
+            if best_mtime is None or mtime > best_mtime:
+                best_mtime = mtime
+                step_path = candidate
+    step_df = read_live_csv_tail(step_path, max_rows=20000) if step_path else pd.DataFrame()
+
     config_copy = log_dir.parent / "config.yaml"
     geom_path = config_copy if config_copy.exists() else config_path
     geom = load_reference_geometry(geom_path, None if config_copy.exists() else path_override)
 
-    return {"training": training_df, "paper": paper_df, "trajectory": traj_df, "geom": geom}
+    return {"training": training_df, "paper": paper_df, "trajectory": traj_df, "step": step_df, "geom": geom}
 
 
 def render_saved_models_sidebar() -> Dict[str, object]:
@@ -910,18 +1066,66 @@ def render_training_sidebar() -> Dict[str, object]:
                 except Exception as exc:
                     st.warning(f"写回失败: {exc}")
 
+    with st.sidebar.expander("可视化性能", expanded=False):
+        traj_write_interval_steps = int(
+            st.number_input(
+                "轨迹写入间隔 (steps)",
+                min_value=1,
+                max_value=10000,
+                value=int(st.session_state.get("viz_traj_write_interval_steps", 50)),
+                step=10,
+                key="viz_traj_write_interval_steps",
+                help="训练进程每隔 N 个 step 覆盖写入 logs/latest_trajectory.csv（更小更实时，但会增加 IO）。",
+            )
+        )
+        traj_write_max_points = int(
+            st.number_input(
+                "轨迹写入最大点数",
+                min_value=50,
+                max_value=50000,
+                value=int(st.session_state.get("viz_traj_write_max_points", 2000)),
+                step=100,
+                key="viz_traj_write_max_points",
+                help="写入 latest_trajectory.csv 时仅保留末尾点数，避免文件过大拖慢训练/面板。",
+            )
+        )
+        plot_stride_steps = int(
+            st.number_input(
+                "图表采样步长 (steps)",
+                min_value=1,
+                max_value=200,
+                value=int(st.session_state.get("viz_plot_stride_steps", 10)),
+                step=1,
+                key="viz_plot_stride_steps",
+                help="面板绘图时每隔 N 个 step 采样一次点，降低渲染/重绘开销。",
+            )
+        )
+        plot_max_points = int(
+            st.number_input(
+                "图表最多点数",
+                min_value=100,
+                max_value=20000,
+                value=int(st.session_state.get("viz_plot_max_points", 1500)),
+                step=100,
+                key="viz_plot_max_points",
+                help="面板绘图仅保留末尾点数，降低重绘开销。",
+            )
+        )
+
     col_start, col_stop = st.sidebar.columns(2)
     if col_start.button("🚀 启动训练 (Start)", width='stretch'):
         start_training(
-            config_path,
-            experiment_name,
-            disable_kcm,
-            disable_smooth,
-            kcm_overrides,
-            path_override,
-            mode_choice,
-            env_override,
-            corridor_override,
+            config_path=config_path,
+            experiment_name=experiment_name,
+            disable_kcm=disable_kcm,
+            disable_smooth=disable_smooth,
+            kcm_overrides=kcm_overrides,
+            path_override=path_override,
+            mode=mode_choice,
+            env_override=env_override,
+            corridor_override=corridor_override,
+            traj_write_interval_steps=traj_write_interval_steps,
+            traj_write_max_points=traj_write_max_points,
         )
     if col_stop.button("🛑 停止训练 (Stop)", width='stretch'):
         stop_training()
@@ -933,7 +1137,13 @@ def render_training_sidebar() -> Dict[str, object]:
     if st.session_state.get("train_pid"):
         st.sidebar.success(f"运行中 PID: {st.session_state['train_pid']}")
 
-    return {"config_path": config_path, "log_dir": active_log_dir, "path_override": path_override}
+    return {
+        "config_path": config_path,
+        "log_dir": active_log_dir,
+        "path_override": path_override,
+        "plot_stride_steps": plot_stride_steps,
+        "plot_max_points": plot_max_points,
+    }
 
 
 def render_training_view() -> None:
@@ -941,6 +1151,8 @@ def render_training_view() -> None:
     config_path: Path = sidebar_state["config_path"]
     log_dir: Optional[Path] = sidebar_state["log_dir"]
     path_override = sidebar_state.get("path_override")
+    plot_stride_steps = int(sidebar_state.get("plot_stride_steps", st.session_state.get("viz_plot_stride_steps", 10)))
+    plot_max_points = int(sidebar_state.get("plot_max_points", st.session_state.get("viz_plot_max_points", 1500)))
 
     # 训练中使用运行时配置，预览时使用当前选择+覆盖
     effective_config_path = Path(st.session_state.get("config_path") or config_path)
@@ -952,7 +1164,14 @@ def render_training_view() -> None:
     training_df: pd.DataFrame = data["training"]
     paper_df: pd.DataFrame = data["paper"]
     traj_df: pd.DataFrame = data["trajectory"]
+    step_df: pd.DataFrame = data.get("step", pd.DataFrame())
     geom = data["geom"]
+
+    try:
+        config, _ = load_config(str(effective_config_path))
+        kcm_cfg = config.get("kinematic_constraints", {})
+    except Exception:
+        kcm_cfg = {}
 
     current_episode = "-"
     if not training_df.empty and "episode_idx" in training_df.columns:
@@ -982,9 +1201,18 @@ def render_training_view() -> None:
                 st.warning(f"未找到训练曲线 CSV: {training_csv}")
             elif training_df.empty:
                 st.info("训练曲线暂无数据，等待首回合输出...")
+
     with col_right:
         st.markdown("#### Real-time Trajectory")
-        traj_fig = _build_trajectory_fig(traj_df, geom)
+        if not traj_df.empty and {"x", "y"}.issubset(traj_df.columns):
+            stride = max(1, int(plot_stride_steps))
+            max_points = max(100, int(plot_max_points))
+            window = max_points * stride
+            traj_plot = traj_df.tail(window) if len(traj_df) > window else traj_df
+            traj_plot = traj_plot.iloc[::stride] if stride > 1 else traj_plot
+        else:
+            traj_plot = traj_df
+        traj_fig = _build_trajectory_fig(traj_plot, geom)
         st.plotly_chart(traj_fig, width='stretch')
         if log_dir:
             traj_csv = log_dir / "latest_trajectory.csv"
@@ -992,6 +1220,16 @@ def render_training_view() -> None:
                 st.warning(f"未找到轨迹 CSV: {traj_csv}")
             elif traj_df.empty:
                 st.info("轨迹暂无数据，等待首回合输出...")
+
+    st.markdown("#### Kinematics Monitor")
+    kinematics_fig = _build_kinematics_fig(step_df, kcm_cfg, stride_steps=plot_stride_steps, max_points=plot_max_points)
+    st.plotly_chart(kinematics_fig, width='stretch')
+    if log_dir:
+        step_candidates = list(log_dir.glob("step_metrics_*.csv")) if log_dir.exists() else []
+        if not step_candidates:
+            st.warning("未找到 step_metrics_*.csv，等待训练输出...")
+        elif step_df.empty:
+            st.info("运动学监控暂无数据，等待 step_metrics 输出...")
 
     if st.session_state.get("is_training"):
         time.sleep(1)

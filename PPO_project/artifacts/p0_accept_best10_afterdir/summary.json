@@ -1,0 +1,105 @@
+{
+  "summary": {
+    "phase": "p0_eval",
+    "passed": true,
+    "episodes": 10,
+    "model_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\saved_models\\train\\20251226_194251\\checkpoints\\best_model.pth",
+    "deterministic": true,
+    "success_rate": 1.0,
+    "stall_rate": 0.0,
+    "mean_progress_final": 1.0,
+    "max_abs_contour_error": 0.7113056031435292,
+    "has_non_finite": false,
+    "thresholds": {
+      "success_rate_ge": 0.8,
+      "stall_rate_le": 0.05,
+      "mean_progress_final_ge": 0.95,
+      "max_abs_contour_error_le": 0.75
+    },
+    "half_epsilon": 0.75,
+    "timestamp": "2025-12-26 20:54:39",
+    "config_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\configs\\train_square_p0.yaml"
+  },
+  "episodes": [
+    {
+      "episode": 0,
+      "return": -2216.2003096737094,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.7113056031435292,
+      "steps": 927
+    },
+    {
+      "episode": 1,
+      "return": -2216.2003096737094,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.7113056031435292,
+      "steps": 927
+    },
+    {
+      "episode": 2,
+      "return": -2216.2003096737094,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.7113056031435292,
+      "steps": 927
+    },
+    {
+      "episode": 3,
+      "return": -2216.2003096737094,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.7113056031435292,
+      "steps": 927
+    },
+    {
+      "episode": 4,
+      "return": -2216.2003096737094,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.7113056031435292,
+      "steps": 927
+    },
+    {
+      "episode": 5,
+      "return": -2216.2003096737094,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.7113056031435292,
+      "steps": 927
+    },
+    {
+      "episode": 6,
+      "return": -2216.2003096737094,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.7113056031435292,
+      "steps": 927
+    },
+    {
+      "episode": 7,
+      "return": -2216.2003096737094,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.7113056031435292,
+      "steps": 927
+    },
+    {
+      "episode": 8,
+      "return": -2216.2003096737094,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.7113056031435292,
+      "steps": 927
+    },
+    {
+      "episode": 9,
+      "return": -2216.2003096737094,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.7113056031435292,
+      "steps": 927
+    }
+  ]
+}

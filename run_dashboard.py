@@ -9,13 +9,10 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = ROOT_DIR / "PPO_project"
-PYTHON_CMD = ROOT_DIR / "python.cmd"
 
 
 def resolve_python() -> str:
-    """Prefer the repo-provided python.cmd on Windows, otherwise fall back to the current interpreter."""
-    if PYTHON_CMD.exists():
-        return str(PYTHON_CMD)
+    """使用当前解释器（推荐在 PPO 虚拟环境下运行）。"""
     return sys.executable or "python"
 
 

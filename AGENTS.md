@@ -187,5 +187,6 @@ When modifying or adding any code files, the following coding requirements must 
 - Encoding should be unified to UTF-8 (without BOM). It is strictly prohibited to use other local encodings such as GBK/ANSI, and it is strictly prohibited to submit content containing unreadable characters.
 - When modifying or adding files, be sure to save them in UTF-8 format; if you find any files that are not in UTF-8 format before submitting, please convert them to UTF-8 before submitting.
 
-## python.cmd 使用说明
-- Windows 环境下默认使用仓库根目录的 `python.cmd` 启动 Python/Streamlit/测试任务（例如 `python.cmd -m streamlit run PPO_project/app.py` 或 `python.cmd PPO_project\\main.py --mode train`），脚本会自动规避 WindowsApps 的假解释器，便于自动化执行。
+## Python 环境说明
+- 运行前请先激活 conda 虚拟环境：`conda activate PPO`
+- 然后使用 `python` 命令运行脚本（例如 `python -m streamlit run PPO_project/app.py` 或 `python PPO_project/main.py --mode train`）

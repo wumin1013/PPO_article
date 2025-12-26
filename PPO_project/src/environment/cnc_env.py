@@ -114,6 +114,7 @@ class Env:
             max_vel=self.MAX_VEL,
             half_epsilon=self.half_epsilon,
             max_jerk=self.MAX_JERK,
+            max_ang_acc=self.MAX_ANG_ACC,
             max_ang_jerk=self.MAX_ANG_JERK,
         )
         self._log_effective_params()
@@ -234,6 +235,8 @@ class Env:
 
         # 初始化走廊配置（允许通过 reward_weights.corridor 覆盖）
         self._init_corridor_config()
+        # 初始化 P1 配置（LOS 前瞻 / deadzone / corner phase）
+        self._init_p1_config()
         # 初始化 P4.0 配置（turn-aware speed target / exit boost / stall / speed cap）
         self._init_p4_config()
         # 初始化 P6.1 配置（抑制抖动：Δu 惩罚 + 目标速度平滑器）
@@ -394,6 +397,10 @@ class Env:
         self._current_direction_angle, self._current_step_length = self.initialize_starting_conditions()
         # P7.0：显式维护航向积分（禁止每步用 path_direction 重置航向）
         self.heading = float(self._current_direction_angle)
+        self._theta_ref_prev = None
+        self._theta_ref_last = float(self._current_direction_angle)
+        self._theta_ref_delta = 0.0
+        self._p1_los_last = {}
         self.trajectory = [self.current_position.copy()]
         self._episode_summary_printed = False
         self.in_corner_phase = False
@@ -866,10 +873,9 @@ class Env:
     def calculate_new_position(self, theta_prime_action, length_prime_action):
         # Residual control: follow path tangent with a small angular residual.
         dt = float(self.interpolation_period)
-        theta_ref = float(self._get_path_direction(self.current_position))
-
         omega_exec = float(theta_prime_action)
         v_exec = float(length_prime_action)
+        theta_ref = float(self._get_path_direction(self.current_position, v_exec=v_exec, record=True))
 
         effective = float(self._wrap_angle(theta_ref + omega_exec * dt))
         # Keep heading for diagnostics; dynamics follow path tangent + residual.
@@ -1104,6 +1110,48 @@ class Env:
             dt = float(max(float(getattr(self, "interpolation_period", 0.1)), 1e-6))
             exit_steps = max(10, int(1.0 / dt))
         self._corridor_exit_center_ramp_steps = int(max(1, int(exit_steps)))
+
+    def _init_p1_config(self) -> None:
+        """Initialize P1 config: LOS reference and corner-phase helpers."""
+        cfg = {}
+        if isinstance(self.reward_weights, dict):
+            cfg = self.reward_weights.get("p1", {}) or {}
+        if not isinstance(cfg, dict):
+            cfg = {}
+
+        self._p1_use_los = bool(cfg.get("use_los", False))
+
+        base = float(getattr(self, "lookahead_spacing", 1.0))
+        L0 = cfg.get("L0", None)
+        Lmin = cfg.get("Lmin", None)
+        Lmax = cfg.get("Lmax", None)
+        kL = float(cfg.get("kL", 0.0))
+
+        L0 = float(base if L0 is None else L0)
+        Lmin = float(0.5 * base if Lmin is None else Lmin)
+        Lmax = float(3.0 * base if Lmax is None else Lmax)
+
+        if not math.isfinite(L0) or L0 <= 0.0:
+            L0 = float(max(base, 1e-6))
+        if not math.isfinite(Lmin) or Lmin <= 0.0:
+            Lmin = float(max(0.5 * base, 1e-6))
+        if not math.isfinite(Lmax) or Lmax <= 0.0:
+            Lmax = float(max(3.0 * base, Lmin))
+        if Lmax < Lmin:
+            Lmax = float(Lmin)
+
+        self._p1_los_L0 = float(L0)
+        self._p1_los_kL = float(kL)
+        self._p1_los_Lmin = float(Lmin)
+        self._p1_los_Lmax = float(Lmax)
+        self._p1_los_last = {}
+
+        corner_phase_enabled = bool(cfg.get("corner_phase_enabled", False))
+        if not corner_phase_enabled:
+            dz_corner = float(cfg.get("deadzone_corner_ratio", 0.0))
+            w_ang_acc = float(cfg.get("w_ang_acc", 0.0))
+            corner_phase_enabled = bool(dz_corner > 0.0 or w_ang_acc > 0.0)
+        self._p1_corner_phase_enabled = bool(corner_phase_enabled)
 
     def _init_p4_config(self) -> None:
         """读取/初始化 P4.0 配置（可在 YAML 的 reward_weights.p4 下设置）。"""
@@ -2338,7 +2386,7 @@ class Env:
         return float(seg_dirs[segment_index])
     
     def calculate_direction_deviation(self, pt):
-        path_direction = self._get_path_direction(pt)
+        path_direction = self._get_path_direction(pt, v_exec=float(getattr(self, "velocity", 0.0)))
         current_direction = self._current_direction_angle
         
         tau = current_direction - path_direction

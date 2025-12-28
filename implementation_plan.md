@@ -1,86 +1,104 @@
-# PPO 轨迹平滑优化实施计划
+# P1-P3 轨迹优化实施计划（更新版）
 
-## 统一运动学参数（P1/P2/P3 共用）
+## 概述
 
-> **重要**：以下参数从 P1 开始生效，所有后续阶段沿用相同配置。
+基于 P0（残差控制 + 进度主导奖励）已验收通过，逐步实现：
+1. **P1**：入弯圆弧化（LOS前瞻 + Deadzone仅入弯生效）
+2. **P2**：出弯快速回线（回线奖励 + 对称性验收）
+3. **P3**：速度优化（速度正激励 + 直线高效进给）
 
-```yaml
-kinematic_constraints:
-  MAX_VEL: 100.0       # 100 mm/s（即 6000 mm/min）
-  MAX_ACC: 2000.0      # 2000 mm/s²
-  MAX_JERK: 20000.0    # 20000 mm/s³
-  MAX_ANG_VEL: 6.283185307179586   # 2π rad/s
-  MAX_ANG_ACC: 100.0   # rad/s²
-  MAX_ANG_JERK: 1000.0 # rad/s³
+---
+
+## 关键设计决策
+
+> [!IMPORTANT]
+> **Deadzone 仅入弯生效**：解决之前"出弯太晚"问题
+
+| 阶段 | 设计要点 |
+|-----|---------|
+| P1 | `deadzone_enter_ratio=0.15`（入弯），出弯和直线=0 |
+| P2 | `exit_symmetry_ratio ≥ 0.7`（入弯/出弯轨迹对称性验收） |
+| P3 | `w_v=3.0~5.0`（速度正激励） |
+
+---
+
+## 阶段依赖
+
+```
+P0 ✅ → P1 → P2 → P3
 ```
 
 ---
 
-## 当前问题与目标
+## P1：LOS 前瞻与入弯 Deadzone
 
-| 待解决问题 | 症状描述 | 解决方案 |
-|-----------|----------|----------|
-| **拐角尖角化** | 拐角处航向突变 | P1: LOS 前瞻 + Deadzone |
-| **全程速度偏低** | 速度远未达到 v_max | P3: 速度正激励 |
+**文档**：[P1_v4.1_LOS前瞻与deadzone_ZeroActionSmoke.md](file:///c:/Users/wumin/Nutstore/1/DDPG的轨迹平滑/基于强化学习的轨迹平滑/P1_v4.1_LOS前瞻与deadzone_ZeroActionSmoke.md)
 
----
+### 核心修改
+- `cnc_env.py`：LOS 参考方向（L0=2.0, Lmin=1.0, Lmax=6.0）
+- `reward.py`：入弯 Deadzone（仅 corner_phase="enter" 时生效）
 
-## 优化路径
+### 验收条件
+| 指标 | 阈值 |
+|-----|------|
+| `corner_peak_ang_acc` | 下降 ≥ 30% vs P0 |
+| `corner_mean_speed` | ≥ P0的80% |
+| `exit_recovery_steps` | ≤ P0 × 1.2（不恶化） |
 
-```mermaid
-flowchart LR
-    P0[P0 残差控制<br/>✅ 已通过] --> P1[P1 LOS+Deadzone<br/>解决拐角尖角]
-    P1 --> P2[P2 出弯回线<br/>+速度软约束]
-    P2 --> P3[P3 速度激励<br/>解决速度偏低]
-    P3 --> DONE[目标达成]
+### 自动化执行
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File PPO_project/tools/run_p1_pipeline.ps1
 ```
 
 ---
 
-## P1: LOS 前瞻与 Deadzone
+## P2：出弯回线奖励与对称性
 
-**目标**：解决拐角尖角问题
+**文档**：[P2_v4.1_出弯回线与速度软约束.md](file:///c:/Users/wumin/Nutstore/1/DDPG的轨迹平滑/基于强化学习的轨迹平滑/P2_v4.1_出弯回线与速度软约束.md)
 
-| 机制 | 作用 |
-|------|------|
-| 动态前瞻 $L(v)$ | 速度越大前瞻越远 |
-| Deadzone | 拐角允许切角 |
-| 角加速度惩罚 | 迫使转向摊开 |
+### 核心修改
+- `reward.py`：出弯回线奖励（exit window 期间 `r_recover = w_rec * delta_e`）
 
-**文档**: [P1_v4.1_LOS前瞻与deadzone_ZeroActionSmoke_pythoncmd.md](../P1_v4.1_LOS前瞻与deadzone_ZeroActionSmoke_pythoncmd.md)
+### 验收条件
+| 指标 | 阈值 |
+|-----|------|
+| `exit_recovery_steps_mean` | 下降 ≥ 30% vs P1 |
+| `exit_symmetry_ratio` | ≥ 0.7 |
+| `corner_mean_speed` | ≥ P1的90% |
 
----
-
-## P2: 出弯回线与速度软约束
-
-**目标**：优化出弯恢复
-
-| 机制 | 作用 |
-|------|------|
-| 回线奖励 | 仅在 exit window 生效 |
-| 速度软约束 | 曲率可达性惩罚 |
-
-**文档**: [P2_v4.1_出弯回线与速度软约束_pythoncmd.md](../P2_v4.1_出弯回线与速度软约束_pythoncmd.md)
+### 自动化执行
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File PPO_project/tools/run_p2_pipeline.ps1
+```
 
 ---
 
-## P3: 速度激励与直线高效进给
+## P3：速度激励与直线高效进给
 
-**目标**：解决全程速度偏低问题
+**文档**：[P3_v4.1_速度激励与直线高效进给.md](file:///c:/Users/wumin/Nutstore/1/DDPG的轨迹平滑/基于强化学习的轨迹平滑/P3_v4.1_速度激励与直线高效进给.md)
 
-| 机制 | 公式/说明 |
-|------|----------|
-| **速度正激励** | $r_{\text{speed}} = +w_v \cdot (v_{\text{exec}} / v_{\max})$ |
-| **直线段识别** | `dist_to_turn > threshold` |
-| **直线段速度目标** | `speed_target = 0.95 × v_max` |
+### 核心修改
+- `reward.py`：速度正激励 `r_speed = w_v * (v_exec / v_max)`
+- `cnc_env.py`：直线段识别与速度目标上调
 
-**文档**: [P3_v4.1_速度激励与直线高效进给.md](../P3_v4.1_速度激励与直线高效进给.md)
+### 验收条件
+| 指标 | 阈值 |
+|-----|------|
+| 直线段平均速度 | ≥ 0.85 × v_max |
+| 全程平均速度 | 较P2提升 ≥ 20% |
+
+### 自动化执行
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File PPO_project/tools/run_p3_pipeline.ps1
+```
 
 ---
 
-## 推荐执行顺序
+## 预计时间
 
-1. ✅ **P0**: 已通过
-2. **P1**: LOS + Deadzone（解决拐角）
-3. **P2**: 出弯回线 + 速度软约束
-4. **P3**: 速度激励（解决速度偏低）
+| 阶段 | 训练时间 | 验收 |
+|------|---------|------|
+| P1 | 4-6 小时 | 30 分钟 |
+| P2 | 4-6 小时 | 30 分钟 |
+| P3 | 4-6 小时 | 30 分钟 |
+| **总计** | **约 12-18 小时** | |

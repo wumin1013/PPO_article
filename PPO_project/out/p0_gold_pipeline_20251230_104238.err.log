@@ -1,0 +1,6 @@
+Traceback (most recent call last):
+  File "C:\Users\wumin\Nutstore\1\DDPG的轨迹平滑\基于强化学习的轨迹平滑\PPO_project\tools\p0_gold_pipeline.py", line 479, in <module>
+    raise SystemExit(main())
+  File "C:\Users\wumin\Nutstore\1\DDPG的轨迹平滑\基于强化学习的轨迹平滑\PPO_project\tools\p0_gold_pipeline.py", line 313, in main
+    os.environ.setdefault("DISABLE_FINAL_PLOT", "1")
+NameError: name 'os' is not defined

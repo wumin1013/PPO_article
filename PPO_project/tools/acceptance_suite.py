@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import os
 import random
+import re
 import sys
 import time
 from dataclasses import asdict, dataclass
@@ -30,6 +32,36 @@ def _set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def _hash_to_int(text: str) -> int:
+    digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16)
+
+
+def _parse_seed_list(text: str) -> List[int]:
+    try:
+        parsed = json.loads(text)
+        if isinstance(parsed, list):
+            return [int(v) for v in parsed]
+    except Exception:
+        pass
+    parts = re.split(r"[,\s]+", text.strip())
+    return [int(p) for p in parts if p]
+
+
+def _resolve_episode_seeds(episode_set: Optional[str], *, episodes: int, base_seed: int) -> Optional[List[int]]:
+    if not episode_set:
+        return None
+    path = Path(episode_set)
+    if path.exists():
+        seeds = _parse_seed_list(path.read_text(encoding="utf-8"))
+        if len(seeds) < episodes:
+            raise ValueError(f"episode_set seeds length {len(seeds)} < episodes {episodes}")
+        return seeds[:episodes]
+    mixed = int(base_seed) ^ _hash_to_int(str(episode_set))
+    rng = np.random.RandomState(mixed)
+    return [int(v) for v in rng.randint(0, 2**31 - 1, size=int(episodes))]
 
 
 def _resolve_path(path_str: str, *, project_root: Path) -> Path:
@@ -122,6 +154,8 @@ class SmokeSummary:
     phase: str
     passed: bool
     episodes: int
+    seed_eval: int
+    episode_set: Optional[str]
     mean_return: float
     mean_progress_final: float
     has_non_finite: bool
@@ -130,7 +164,14 @@ class SmokeSummary:
     config_path: str
 
 
-def run_p0_smoke(config: dict, *, episodes: int) -> Tuple[SmokeSummary, List[dict]]:
+def run_p0_smoke(
+    config: dict,
+    *,
+    episodes: int,
+    seed_eval: int,
+    episode_set: Optional[str] = None,
+    per_episode_seeds: Optional[List[int]] = None,
+) -> Tuple[SmokeSummary, List[dict]]:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env, _half_eps = _build_env(config, device=device)
 
@@ -141,6 +182,8 @@ def run_p0_smoke(config: dict, *, episodes: int) -> Tuple[SmokeSummary, List[dic
 
     zero_action = np.array([0.0, 0.0], dtype=float)
     for ep in range(int(episodes)):
+        if per_episode_seeds is not None:
+            _set_seed(int(per_episode_seeds[ep]))
         obs = env.reset()
         if not _is_finite_array(obs):
             has_non_finite = True
@@ -198,6 +241,8 @@ def run_p0_smoke(config: dict, *, episodes: int) -> Tuple[SmokeSummary, List[dic
         phase="p0_smoke",
         passed=bool(passed),
         episodes=int(episodes),
+        seed_eval=int(seed_eval),
+        episode_set=str(episode_set) if episode_set else None,
         mean_return=float(mean_return),
         mean_progress_final=float(mean_progress_final),
         has_non_finite=bool(has_non_finite),
@@ -215,6 +260,8 @@ class EvalSummary:
     episodes: int
     model_path: str
     deterministic: bool
+    seed_eval: int
+    episode_set: Optional[str]
     success_rate: float
     stall_rate: float
     mean_progress_final: float
@@ -245,6 +292,9 @@ def run_p0_eval(
     model_path: Path,
     episodes: int,
     deterministic: bool,
+    seed_eval: int,
+    episode_set: Optional[str] = None,
+    per_episode_seeds: Optional[List[int]] = None,
 ) -> Tuple[EvalSummary, List[dict]]:
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     env, half_epsilon = _build_env(config, device=device)
@@ -286,6 +336,8 @@ def run_p0_eval(
     start_wall = time.perf_counter()
     report_every = max(1, int(episodes) // 10)
     for ep in range(int(episodes)):
+        if per_episode_seeds is not None:
+            _set_seed(int(per_episode_seeds[ep]))
         obs = env.reset()
         if not _is_finite_array(obs):
             has_non_finite = True
@@ -374,6 +426,8 @@ def run_p0_eval(
         episodes=int(episodes),
         model_path=str(model_path),
         deterministic=bool(deterministic),
+        seed_eval=int(seed_eval),
+        episode_set=str(episode_set) if episode_set else None,
         success_rate=float(success_rate),
         stall_rate=float(stall_rate),
         mean_progress_final=float(mean_progress_final),
@@ -401,6 +455,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--episodes", type=int, default=5, help="Number of episodes")
     parser.add_argument("--out", type=str, required=True, help="Output directory for artifacts (summary.json)")
     parser.add_argument("--deterministic", action="store_true", help="Use deterministic policy (mu) for eval")
+    parser.add_argument("--seed", type=int, default=None, help="Override evaluation seed")
+    parser.add_argument("--episode_set", type=str, default=None, help="Episode set label or seed list file")
     args = parser.parse_args(argv)
 
     project_root = Path(__file__).resolve().parents[1]
@@ -409,14 +465,23 @@ def main(argv: Optional[List[str]] = None) -> int:
     config["__resolved_config_path__"] = str(resolved_config_path)
 
     seed = int(config.get("seed", config.get("experiment", {}).get("seed", 42)))
+    if args.seed is not None:
+        seed = int(args.seed)
     _set_seed(seed)
+    per_episode_seeds = _resolve_episode_seeds(args.episode_set, episodes=args.episodes, base_seed=seed)
 
     out_dir = _resolve_path(args.out, project_root=project_root)
     _ensure_out_dir(out_dir)
 
     phase = str(args.phase).strip()
     if phase == "p0_smoke":
-        summary, details = run_p0_smoke(config, episodes=args.episodes)
+        summary, details = run_p0_smoke(
+            config,
+            episodes=args.episodes,
+            seed_eval=seed,
+            episode_set=args.episode_set,
+            per_episode_seeds=per_episode_seeds,
+        )
         payload = {"summary": asdict(summary), "episodes": details}
         _write_json(out_dir / "summary.json", payload)
         print(json.dumps(asdict(summary), ensure_ascii=False, indent=2))
@@ -433,6 +498,9 @@ def main(argv: Optional[List[str]] = None) -> int:
             model_path=resolved_model_path,
             episodes=args.episodes,
             deterministic=args.deterministic,
+            seed_eval=seed,
+            episode_set=args.episode_set,
+            per_episode_seeds=per_episode_seeds,
         )
         payload = {"summary": asdict(summary), "episodes": details}
         _write_json(out_dir / "summary.json", payload)

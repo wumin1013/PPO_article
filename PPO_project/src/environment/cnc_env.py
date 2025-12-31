@@ -2355,7 +2355,7 @@ class Env:
         self.last_corridor_status = status
         return status
 
-    def _get_path_direction(self, pt):
+    def _get_path_direction(self, pt, v_exec: float | None = None, record: bool = False):
         """Use cached segment tangent; allow a small lookahead near segment end for sharp corners."""
         seg_dirs = self.cache.get("segment_directions") if isinstance(getattr(self, "cache", None), dict) else None
         if not isinstance(seg_dirs, list) or not seg_dirs:

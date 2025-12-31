@@ -13,10 +13,12 @@ class RewardCalculator:
         half_epsilon: float,
         max_jerk: float,
         max_ang_jerk: float,
+        max_ang_acc: float | None = None,
         safe_ratio: float | None = None,  # 兼容旧参数，逻辑中不再使用
     ):
         self.weights = weights or {}
         self.max_vel = max_vel
+        self.max_ang_acc = max_ang_acc
         self.max_jerk = max_jerk
         self.max_ang_jerk = max_ang_jerk
         self.half_epsilon = max(half_epsilon, 1e-6)

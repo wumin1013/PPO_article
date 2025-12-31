@@ -1,0 +1,52 @@
+{
+  "meta": {
+    "run_id": "P0_gold_20251230_034122",
+    "timestamp": "2025-12-31T12:14:32",
+    "git_hash": "44fbb98cd29d7bf42e8d357ec1e960b7df4a5a57",
+    "config_hash": "acc75056b1de60643e859cd0526e02387c63cb0fa88eea830028bb4782171a0f",
+    "checkpoint_hash": "5ad2b6c63fa5f9f9b643fa286e0f661a4224e2a0ef7fc1aedb10e634fbab4df0",
+    "seed_eval": 42,
+    "seed_source": "patched_config_eval.yaml",
+    "env_hash": "unknown",
+    "baseline_ref": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122",
+    "episode_set": null,
+    "episode_set_source": "config"
+  },
+  "global": {
+    "phase": "p0_smoke",
+    "passed": true,
+    "episodes": 5,
+    "deterministic": null,
+    "model_path": null,
+    "seed_eval": 42,
+    "episode_set": null,
+    "success_rate": null,
+    "stall_rate": null,
+    "mean_progress_final": 0.0,
+    "max_abs_contour_error": null,
+    "mean_return": -300.0,
+    "has_non_finite": false,
+    "half_epsilon": null,
+    "thresholds": {
+      "mean_return_lt": -20.0,
+      "mean_progress_final_lt": 0.02
+    },
+    "timestamp": "2025-12-31 12:04:37",
+    "config_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\config_eval.yaml"
+  },
+  "segment": {},
+  "smoothness": {},
+  "raw_keys": [
+    "config_path",
+    "episode_set",
+    "episodes",
+    "has_non_finite",
+    "mean_progress_final",
+    "mean_return",
+    "passed",
+    "phase",
+    "seed_eval",
+    "thresholds",
+    "timestamp"
+  ]
+}

@@ -114,7 +114,8 @@ class CSVLogger:
                 return
             except PermissionError:
                 if attempt == attempts - 1:
-                    raise
+                    # Sync/AV may lock the file; skip this row to keep training running.
+                    return
                 time.sleep(0.1)
 
     def log_step(self, **row: object) -> None:

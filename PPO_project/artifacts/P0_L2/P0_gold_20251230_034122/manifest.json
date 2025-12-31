@@ -1,0 +1,119 @@
+{
+  "run_id": "P0_gold_20251230_034122",
+  "selected_seed": 42,
+  "seeds": [
+    42,
+    43
+  ],
+  "selection_metrics": {
+    "42": {
+      "phase": "p0_eval",
+      "passed": true,
+      "episodes": 50,
+      "model_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\saved_models\\p0_seed42\\P0_gold_20251230_034122\\checkpoints\\best_model.pth",
+      "deterministic": false,
+      "seed_eval": 42,
+      "episode_set": null,
+      "success_rate": 1.0,
+      "stall_rate": 0.0,
+      "mean_progress_final": 1.0,
+      "max_abs_contour_error": 0.06469480202631317,
+      "has_non_finite": false,
+      "thresholds": {
+        "success_rate_ge": 0.8,
+        "stall_rate_le": 0.05,
+        "mean_progress_final_ge": 0.95,
+        "max_abs_contour_error_le": 0.75
+      },
+      "half_epsilon": 0.75,
+      "timestamp": "2025-12-31 10:24:08",
+      "config_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\configs\\train_square_p0_seed42.yaml"
+    },
+    "43": {
+      "phase": "p0_eval",
+      "passed": false,
+      "episodes": 50,
+      "model_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\saved_models\\p0_seed43\\P0_gold_20251230_034122\\checkpoints\\best_model.pth",
+      "deterministic": false,
+      "seed_eval": 43,
+      "episode_set": null,
+      "success_rate": 0.72,
+      "stall_rate": 0.28,
+      "mean_progress_final": 0.8286575376262042,
+      "max_abs_contour_error": 0.1740128056350915,
+      "has_non_finite": false,
+      "thresholds": {
+        "success_rate_ge": 0.8,
+        "stall_rate_le": 0.05,
+        "mean_progress_final_ge": 0.95,
+        "max_abs_contour_error_le": 0.75
+      },
+      "half_epsilon": 0.75,
+      "timestamp": "2025-12-31 11:23:14",
+      "config_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\configs\\train_square_p0_seed43.yaml"
+    }
+  },
+  "training": {
+    "seed": 42,
+    "num_episodes": 1000,
+    "max_steps": 4000
+  },
+  "evaluation": {
+    "seed": 42,
+    "episodes": 50,
+    "episode_set": null,
+    "deterministic": false
+  },
+  "eval": {
+    "phase": "p0_eval",
+    "command": "\"D:\\Anaconda\\envs\\PPO\\python.exe\" \"PPO_project/tools/acceptance_suite.py\" --phase p0_eval --config C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\config_eval.yaml --model C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\checkpoint.pth --episodes 50 --out C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\eval\\run2 --seed 42  ",
+    "episodes": 50,
+    "deterministic": false,
+    "seed_eval": 42,
+    "seed_source": "patched_config_eval.yaml",
+    "config_eval_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\config_eval.yaml",
+    "episode_set": null
+  },
+  "rollout_det": {
+    "command": "internal: p0_gold_pipeline.rollout_trace",
+    "seed_eval": 42,
+    "deterministic": false,
+    "episode_id": 0,
+    "trace_hash": "3ea05af285b4e1ea1b9820d1d44284771f79ac3b4c1073e190de1427f2e3fbc2"
+  },
+  "env_params_hash": "8db701afd6ca624dd9b25b15066b9ccae5980d42705c2ec7ee5db8f7b661cc58",
+  "config_sha256": "acc75056b1de60643e859cd0526e02387c63cb0fa88eea830028bb4782171a0f",
+  "git": {
+    "commit": "44fbb98cd29d7bf42e8d357ec1e960b7df4a5a57",
+    "dirty": true
+  },
+  "files": {
+    "checkpoint": "checkpoint.pth",
+    "config": "config.yaml",
+    "summary": "summary.json",
+    "trace": "trace.csv",
+    "overlay": "overlay.png",
+    "v_t": "v_t.png",
+    "e_n_t": "e_n_t.png"
+  },
+  "source": {
+    "model_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\saved_models\\p0_seed42\\P0_gold_20251230_034122\\checkpoints\\best_model.pth",
+    "config_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\saved_models\\p0_seed42\\P0_gold_20251230_034122\\config.yaml",
+    "eval_summary_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\p0_eval_seed42_P0_gold_20251230_034122\\summary.json"
+  },
+  "git_hash": "44fbb98cd29d7bf42e8d357ec1e960b7df4a5a57",
+  "config_hash": "acc75056b1de60643e859cd0526e02387c63cb0fa88eea830028bb4782171a0f",
+  "checkpoint_hash": "5ad2b6c63fa5f9f9b643fa286e0f661a4224e2a0ef7fc1aedb10e634fbab4df0",
+  "trace_hash": "3ea05af285b4e1ea1b9820d1d44284771f79ac3b4c1073e190de1427f2e3fbc2",
+  "episode_set": null,
+  "episode_set_source": "config",
+  "p0_gold_source": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_FINAL_OPTIMIZATION_PLAN\\00_Archive\\P0_gold\\P0_gold_20251230_034122",
+  "smoke": {
+    "phase": "p0_smoke",
+    "command": "\"D:\\Anaconda\\envs\\PPO\\python.exe\" \"C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\tools\\acceptance_suite.py\" --phase p0_smoke --config \"C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\config_eval.yaml\" --episodes 5 --out \"C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\smoke\" --seed 42",
+    "episodes": 5,
+    "seed_eval": 42,
+    "seed_source": "patched_config_eval.yaml",
+    "episode_set": null
+  }
+}

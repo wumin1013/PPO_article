@@ -53,10 +53,6 @@
 # ✅ P0 自验证与自动化验收（统一脚本）
 
 ## A) 改完代码立刻跑：自验证（无需训练）
-```bash
-cd PPO_project
-python tools/acceptance_suite.py --phase p0_smoke --config configs/train_square_p0.yaml --episodes 5 --out artifacts/p0_smoke
-```
 
 **自动 PASS 条件（脚本内）**
 - stationary 平均回报显著负（默认 `< -20`）
@@ -65,14 +61,8 @@ python tools/acceptance_suite.py --phase p0_smoke --config configs/train_square_
 
 ## B) 训练后跑：自动验收（允许进入 P1 的闸门）
 训练：
-```bash
-python main.py --mode train --config configs/train_square_p0.yaml
-```
 
 验收：
-```bash
-python tools/acceptance_suite.py --phase p0_eval --config configs/train_square_p0.yaml --model <PATH_TO_best_model.pth> --episodes 50 --out artifacts/p0_accept --deterministic
-```
 
 **自动 PASS 条件（脚本内）**
 - `success_rate >= 0.80`

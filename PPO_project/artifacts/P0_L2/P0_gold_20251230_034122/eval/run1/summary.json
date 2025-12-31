@@ -1,0 +1,59 @@
+{
+  "meta": {
+    "run_id": "P0_gold_20251230_034122",
+    "timestamp": "2025-12-31T12:14:32",
+    "git_hash": "44fbb98cd29d7bf42e8d357ec1e960b7df4a5a57",
+    "config_hash": "acc75056b1de60643e859cd0526e02387c63cb0fa88eea830028bb4782171a0f",
+    "checkpoint_hash": "5ad2b6c63fa5f9f9b643fa286e0f661a4224e2a0ef7fc1aedb10e634fbab4df0",
+    "seed_eval": 42,
+    "seed_source": "patched_config_eval.yaml",
+    "env_hash": "unknown",
+    "baseline_ref": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122",
+    "episode_set": null,
+    "episode_set_source": "config"
+  },
+  "global": {
+    "phase": "p0_eval",
+    "passed": true,
+    "episodes": 50,
+    "deterministic": false,
+    "model_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\saved_models\\p0_seed42\\P0_gold_20251230_034122\\checkpoints\\best_model.pth",
+    "seed_eval": 42,
+    "episode_set": null,
+    "success_rate": 1.0,
+    "stall_rate": 0.0,
+    "mean_progress_final": 1.0,
+    "max_abs_contour_error": 0.06469480202631317,
+    "mean_return": null,
+    "has_non_finite": false,
+    "half_epsilon": 0.75,
+    "thresholds": {
+      "success_rate_ge": 0.8,
+      "stall_rate_le": 0.05,
+      "mean_progress_final_ge": 0.95,
+      "max_abs_contour_error_le": 0.75
+    },
+    "timestamp": "2025-12-31 10:24:08",
+    "config_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\configs\\train_square_p0_seed42.yaml"
+  },
+  "segment": {},
+  "smoothness": {},
+  "raw_keys": [
+    "config_path",
+    "deterministic",
+    "episode_set",
+    "episodes",
+    "half_epsilon",
+    "has_non_finite",
+    "max_abs_contour_error",
+    "mean_progress_final",
+    "model_path",
+    "passed",
+    "phase",
+    "seed_eval",
+    "stall_rate",
+    "success_rate",
+    "thresholds",
+    "timestamp"
+  ]
+}

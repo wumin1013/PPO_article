@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Iterable, Optional, Sequence
 
+import os
+
 import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
@@ -105,6 +107,9 @@ class TrajectoryPlotter:
 
 def visualize_final_path(env) -> None:
     """绘制参考路径与实际轨迹。"""
+    if str(os.environ.get("DISABLE_FINAL_PLOT", "")).strip().lower() in {"1", "true", "yes", "on"}:
+        print("跳过最终轨迹可视化（DISABLE_FINAL_PLOT=1）")
+        return
     plt.figure(figsize=(10, 6), dpi=100)
 
     pm = _clean_path(env.Pm)

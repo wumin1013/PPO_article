@@ -1,0 +1,2 @@
+# Ignore large step-level training logs
+PPO_project/saved_models/**/logs/step_metrics_*.csv

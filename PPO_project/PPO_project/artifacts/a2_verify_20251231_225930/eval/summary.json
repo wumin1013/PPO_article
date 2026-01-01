@@ -1,0 +1,427 @@
+{
+  "summary": {
+    "phase": "p0_eval",
+    "passed": true,
+    "episodes": 50,
+    "model_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\checkpoint.pth",
+    "deterministic": false,
+    "seed_eval": 42,
+    "episode_set": null,
+    "success_rate": 1.0,
+    "stall_rate": 0.0,
+    "mean_progress_final": 1.0,
+    "max_abs_contour_error": 0.06469480202631317,
+    "has_non_finite": false,
+    "thresholds": {
+      "success_rate_ge": 0.8,
+      "stall_rate_le": 0.05,
+      "mean_progress_final_ge": 0.95,
+      "max_abs_contour_error_le": 0.75
+    },
+    "half_epsilon": 0.75,
+    "timestamp": "2025-12-31 23:19:52",
+    "config_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\config_eval.yaml"
+  },
+  "episodes": [
+    {
+      "episode": 0,
+      "return": -1020.1513465352297,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.052897890866454134,
+      "steps": 928
+    },
+    {
+      "episode": 1,
+      "return": -998.663393817743,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06070993134646052,
+      "steps": 908
+    },
+    {
+      "episode": 2,
+      "return": -1017.6318169930993,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.0602750717428453,
+      "steps": 925
+    },
+    {
+      "episode": 3,
+      "return": -1006.4857223422699,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.054441746769573036,
+      "steps": 915
+    },
+    {
+      "episode": 4,
+      "return": -1013.5565849924607,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05903346344504179,
+      "steps": 922
+    },
+    {
+      "episode": 5,
+      "return": -1045.9930226217343,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05595973639449767,
+      "steps": 951
+    },
+    {
+      "episode": 6,
+      "return": -1041.8857368789616,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06399130294814626,
+      "steps": 947
+    },
+    {
+      "episode": 7,
+      "return": -1012.3611670774922,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06180491110553632,
+      "steps": 920
+    },
+    {
+      "episode": 8,
+      "return": -993.4638904537533,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06155362994408442,
+      "steps": 903
+    },
+    {
+      "episode": 9,
+      "return": -990.9132028405198,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.062410129410638504,
+      "steps": 901
+    },
+    {
+      "episode": 10,
+      "return": -987.9793638975092,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.0605620319495035,
+      "steps": 898
+    },
+    {
+      "episode": 11,
+      "return": -1022.053098395483,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06243912033560761,
+      "steps": 929
+    },
+    {
+      "episode": 12,
+      "return": -1020.7397832159921,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06252060910968993,
+      "steps": 928
+    },
+    {
+      "episode": 13,
+      "return": -1010.2209288339625,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05004959328194758,
+      "steps": 920
+    },
+    {
+      "episode": 14,
+      "return": -1022.0367871832303,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06402948495944649,
+      "steps": 929
+    },
+    {
+      "episode": 15,
+      "return": -1019.267981229206,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06096423897893821,
+      "steps": 927
+    },
+    {
+      "episode": 16,
+      "return": -1054.8655383371479,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06469480202631317,
+      "steps": 958
+    },
+    {
+      "episode": 17,
+      "return": -1034.0246992718405,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06361110806501102,
+      "steps": 940
+    },
+    {
+      "episode": 18,
+      "return": -961.470175831775,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06020330225078041,
+      "steps": 874
+    },
+    {
+      "episode": 19,
+      "return": -1043.2836974900324,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06165764303043808,
+      "steps": 949
+    },
+    {
+      "episode": 20,
+      "return": -978.1019950557063,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06203936425185397,
+      "steps": 889
+    },
+    {
+      "episode": 21,
+      "return": -989.2288689133303,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.061002423330734246,
+      "steps": 899
+    },
+    {
+      "episode": 22,
+      "return": -990.9804480479386,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.057677103492235204,
+      "steps": 901
+    },
+    {
+      "episode": 23,
+      "return": -968.0078641104498,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05499591364277201,
+      "steps": 881
+    },
+    {
+      "episode": 24,
+      "return": -991.7246802151657,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06072672296250303,
+      "steps": 902
+    },
+    {
+      "episode": 25,
+      "return": -1018.0194987855027,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06264103014974864,
+      "steps": 925
+    },
+    {
+      "episode": 26,
+      "return": -1027.5636035495277,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05732603892255384,
+      "steps": 934
+    },
+    {
+      "episode": 27,
+      "return": -969.4602441206349,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06234715023720838,
+      "steps": 881
+    },
+    {
+      "episode": 28,
+      "return": -1005.8555333232805,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06072959526991717,
+      "steps": 914
+    },
+    {
+      "episode": 29,
+      "return": -1000.843441256507,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06312373354606926,
+      "steps": 910
+    },
+    {
+      "episode": 30,
+      "return": -992.0513300535517,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.0633217385541105,
+      "steps": 901
+    },
+    {
+      "episode": 31,
+      "return": -1056.557727338824,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.059920470980251925,
+      "steps": 960
+    },
+    {
+      "episode": 32,
+      "return": -983.0523361818672,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05983002048203545,
+      "steps": 894
+    },
+    {
+      "episode": 33,
+      "return": -1014.2879682135267,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06017092898443899,
+      "steps": 922
+    },
+    {
+      "episode": 34,
+      "return": -968.1819817693471,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.0606480172573054,
+      "steps": 880
+    },
+    {
+      "episode": 35,
+      "return": -1028.6681547604373,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06198607256306765,
+      "steps": 935
+    },
+    {
+      "episode": 36,
+      "return": -1029.6049505460555,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05772732581605666,
+      "steps": 936
+    },
+    {
+      "episode": 37,
+      "return": -1005.1594145210424,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05906814878117039,
+      "steps": 914
+    },
+    {
+      "episode": 38,
+      "return": -950.4329444308488,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05792895054633718,
+      "steps": 865
+    },
+    {
+      "episode": 39,
+      "return": -1012.1020141438119,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.061172187649603416,
+      "steps": 920
+    },
+    {
+      "episode": 40,
+      "return": -988.5601795105885,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06406166747019526,
+      "steps": 899
+    },
+    {
+      "episode": 41,
+      "return": -982.7345329813412,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.060120552414169026,
+      "steps": 893
+    },
+    {
+      "episode": 42,
+      "return": -1024.1441453358605,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06264583191152262,
+      "steps": 931
+    },
+    {
+      "episode": 43,
+      "return": -985.2285926616076,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05572476207578003,
+      "steps": 896
+    },
+    {
+      "episode": 44,
+      "return": -1054.6950177275216,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.056771510288213624,
+      "steps": 959
+    },
+    {
+      "episode": 45,
+      "return": -1043.4667645014401,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.057025767097239055,
+      "steps": 949
+    },
+    {
+      "episode": 46,
+      "return": -995.2201619593778,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.06159472144474876,
+      "steps": 905
+    },
+    {
+      "episode": 47,
+      "return": -1041.8628237237933,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.054461970843233225,
+      "steps": 948
+    },
+    {
+      "episode": 48,
+      "return": -1013.9276760979049,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05968588691826682,
+      "steps": 922
+    },
+    {
+      "episode": 49,
+      "return": -986.3498376695453,
+      "progress_final": 1.0,
+      "done_reason": "success",
+      "max_abs_contour_error": 0.05761188419198504,
+      "steps": 898
+    }
+  ]
+}

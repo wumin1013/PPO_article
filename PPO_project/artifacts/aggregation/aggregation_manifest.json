@@ -1,0 +1,10 @@
+{
+  "roots": [
+    "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts",
+    "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts"
+  ],
+  "bundle_count": 1,
+  "bundles": [
+    "artifacts\\P0_L2\\P0_gold_20251230_034122"
+  ]
+}

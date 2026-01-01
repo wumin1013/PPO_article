@@ -1,0 +1,2 @@
+run_id,bundle_path,trace_path,trace_steps,trace_rmse_error,trace_max_abs_error,trace_mean_velocity,trace_mean_jerk,trace_mean_kcm_intervention
+P0_gold_20251230_034122,D:\轨迹平滑\基于强化学习的轨迹平滑\PPO_project\artifacts\P0_L2\P0_gold_20251230_034122,D:\轨迹平滑\基于强化学习的轨迹平滑\PPO_project\artifacts\P0_L2\P0_gold_20251230_034122\rollout_det\trace.csv,928.0,0.02347822077843423,0.052897890866454134,42.79976262741299,20000.0,0.9228764837745167

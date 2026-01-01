@@ -94,6 +94,12 @@ training:
   save_interval: 100
   log_interval: 50
   checkpoint_interval_steps: 2048
+  step_log_interval_steps: 1  # step_metrics 写入间隔(steps), 0=关闭
+  traj_write_interval_steps: 50  # latest_trajectory.csv 写入间隔(steps), 0=关闭
+  traj_write_max_points: 2000  # latest_trajectory.csv 保留末尾点数
+  enable_latest_trajectory: true
+  enable_best_trajectory_snapshot: true
+  enable_final_visualization: true
 
 path:
   type: square

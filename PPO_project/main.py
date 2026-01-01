@@ -453,12 +453,29 @@ def train(
     smoothing_factor = training_config["smoothing_factor"]
     save_interval = training_config["save_interval"]
     log_interval = training_config["log_interval"]
-    checkpoint_interval_steps = training_config.get("checkpoint_interval_steps", 2048)
+    checkpoint_interval_steps = int(training_config.get("checkpoint_interval_steps", 2048))
 
-    traj_write_interval_steps = int(getattr(cli_overrides, "traj_write_interval_steps", 50) or 50)
-    traj_write_max_points = int(getattr(cli_overrides, "traj_write_max_points", 2000) or 2000)
-    traj_write_interval_steps = max(1, traj_write_interval_steps)
-    traj_write_max_points = max(10, traj_write_max_points)
+    def _resolve_int_setting(key: str, default: int) -> int:
+        cli_value = getattr(cli_overrides, key, None) if cli_overrides is not None else None
+        if cli_value is not None:
+            return int(cli_value)
+        cfg_value = training_config.get(key, default)
+        if cfg_value is None:
+            return int(default)
+        return int(cfg_value)
+
+    step_log_interval_steps = _resolve_int_setting("step_log_interval_steps", 1)
+    traj_write_interval_steps = _resolve_int_setting("traj_write_interval_steps", 50)
+    traj_write_max_points = _resolve_int_setting("traj_write_max_points", 2000)
+    enable_latest_trajectory = bool(training_config.get("enable_latest_trajectory", True))
+    enable_best_trajectory_snapshot = bool(training_config.get("enable_best_trajectory_snapshot", True))
+    enable_final_visualization = bool(training_config.get("enable_final_visualization", True))
+
+    step_log_interval_steps = max(step_log_interval_steps, 0)
+    traj_write_interval_steps = max(traj_write_interval_steps, 0)
+    traj_write_max_points = max(traj_write_max_points, 10)
+    if traj_write_interval_steps == 0:
+        enable_latest_trajectory = False
 
     smoothed_rewards: list[float] = []
     wall_time_start = time.perf_counter()
@@ -513,12 +530,15 @@ def train(
             state = env.reset(random_start=use_random_start)
             state = normalizer(state)
             paper_metrics = PaperMetrics()
+            collect_episode_trace = enable_latest_trajectory or enable_best_trajectory_snapshot
             current_episode_trace: list[tuple[float, float]] = []
-            start_pos = getattr(env, "current_position", None)
-            if start_pos is not None and len(start_pos) >= 2:
-                current_episode_trace.append((float(start_pos[0]), float(start_pos[1])))
-            # 提前覆盖写入，避免面板沿用上一回合轨迹（写入失败时静默跳过）。
-            _write_latest_trajectory(manager.logs_dir, current_episode_trace[-traj_write_max_points:])
+            if collect_episode_trace:
+                start_pos = getattr(env, "current_position", None)
+                if start_pos is not None and len(start_pos) >= 2:
+                    current_episode_trace.append((float(start_pos[0]), float(start_pos[1])))
+                # 提前覆盖写入，避免面板沿用上一回合轨迹（写入失败时静默跳过）。
+                if enable_latest_trajectory:
+                    _write_latest_trajectory(manager.logs_dir, current_episode_trace[-traj_write_max_points:])
 
             transition_dict = {
                 "states": [],
@@ -545,9 +565,10 @@ def train(
                 next_state = normalizer(next_state)
                 global_step += 1
 
-                pos_sample = getattr(env, "current_position", None)
-                if pos_sample is not None and len(pos_sample) >= 2:
-                    current_episode_trace.append((float(pos_sample[0]), float(pos_sample[1])))
+                if collect_episode_trace:
+                    pos_sample = getattr(env, "current_position", None)
+                    if pos_sample is not None and len(pos_sample) >= 2:
+                        current_episode_trace.append((float(pos_sample[0]), float(pos_sample[1])))
 
                 transition_dict["states"].append(state)
                 transition_dict["actions"].append(clipped_action.tolist())
@@ -562,23 +583,33 @@ def train(
                     kcm_intervention=info["kcm_intervention"],
                 )
 
-                step_logger.log_step(
-                    episode_idx=episode,
-                    env_step=info["step"],
-                    reward=reward,
-                    contour_error=info["contour_error"],
-                    velocity=float(getattr(env, "velocity", 0.0)),
-                    acceleration=float(getattr(env, "acceleration", 0.0)),
-                    jerk=info["jerk"],
-                    kcm_intervention=info["kcm_intervention"],
-                )
+                step_index = global_step
+                step_in_episode = info.get("step", None)
+                try:
+                    if step_in_episode is not None:
+                        step_index = int(step_in_episode)
+                except Exception:
+                    step_index = global_step
+
+                if step_log_interval_steps > 0 and step_index % step_log_interval_steps == 0:
+                    step_logger.log_step(
+                        episode_idx=episode,
+                        env_step=info["step"],
+                        reward=reward,
+                        contour_error=info["contour_error"],
+                        velocity=float(getattr(env, "velocity", 0.0)),
+                        acceleration=float(getattr(env, "acceleration", 0.0)),
+                        jerk=info["jerk"],
+                        kcm_intervention=info["kcm_intervention"],
+                    )
 
                 # 每隔 N 步覆盖写入 latest_trajectory.csv，供 Streamlit 面板近实时显示。
-                try:
-                    step_in_episode = int(info.get("step", 0))
-                except Exception:
-                    step_in_episode = 0
-                if step_in_episode > 0 and step_in_episode % traj_write_interval_steps == 0:
+                if (
+                    enable_latest_trajectory
+                    and traj_write_interval_steps > 0
+                    and collect_episode_trace
+                    and step_index % traj_write_interval_steps == 0
+                ):
                     _write_latest_trajectory(manager.logs_dir, current_episode_trace[-traj_write_max_points:])
 
                 if hasattr(agent, "actor") and global_step - last_checkpoint_step >= checkpoint_interval_steps:
@@ -641,7 +672,8 @@ def train(
             )
 
             # 回合结束时也覆盖写入 latest_trajectory.csv（面板仅用于展示，保留末尾片段以降低 IO）。
-            _write_latest_trajectory(manager.logs_dir, current_episode_trace[-traj_write_max_points:])
+            if enable_latest_trajectory and collect_episode_trace:
+                _write_latest_trajectory(manager.logs_dir, current_episode_trace[-traj_write_max_points:])
 
             eval_reward = smoothed_rewards[-1] if smoothed_rewards else episode_reward
             if hasattr(agent, "actor") and eval_reward > best_eval_reward:
@@ -654,8 +686,9 @@ def train(
                     config=config,
                 )
                 # 保存最佳模型对应的轨迹快照
-                best_traj_path = manager.logs_dir / f"best_trajectory_ep{episode+1}.csv"
-                _write_trajectory_to_file(best_traj_path, current_episode_trace)
+                if enable_best_trajectory_snapshot and collect_episode_trace:
+                    best_traj_path = manager.logs_dir / f"best_trajectory_ep{episode+1}.csv"
+                    _write_trajectory_to_file(best_traj_path, current_episode_trace)
                 print(f"发现更优模型: eval_reward={eval_reward:.2f}, 保存到 {best_path}")
 
             if (episode + 1) % log_interval == 0:
@@ -729,11 +762,14 @@ def train(
         )
         print(f"\n最终模型已保存: {final_model_path}")
 
-    print(f"\n可视化最终轨迹(ε={env_config['epsilon']:.3f})")
-    try:
-        visualize_final_path(env)
-    except Exception as exc:
-        print(f"可视化轨迹时出现警告: {exc}")
+    if enable_final_visualization:
+        print(f"\n可视化最终轨迹(ε={env_config['epsilon']:.3f})")
+        try:
+            visualize_final_path(env)
+        except Exception as exc:
+            print(f"可视化轨迹时出现警告: {exc}")
+    else:
+        print("\n跳过最终轨迹可视化 (enable_final_visualization=false)")
 
 
 def test(
@@ -944,8 +980,9 @@ if __name__ == "__main__":
     parser.add_argument("--max_ang_vel", type=float, default=None, help="覆盖最大角速度 (MAX_ANG_VEL)")
     parser.add_argument("--max_ang_acc", type=float, default=None, help="覆盖最大角加速度 (MAX_ANG_ACC)")
     parser.add_argument("--max_ang_jerk", type=float, default=None, help="覆盖最大角跃度 (MAX_ANG_JERK)")
-    parser.add_argument("--traj_write_interval_steps", type=int, default=50, help="latest_trajectory.csv 覆盖写入间隔 (steps)")
-    parser.add_argument("--traj_write_max_points", type=int, default=2000, help="latest_trajectory.csv 最多写入点数 (保留末尾)")
+    parser.add_argument("--traj_write_interval_steps", type=int, default=None, help="latest_trajectory.csv 覆盖写入间隔 (steps)")
+    parser.add_argument("--traj_write_max_points", type=int, default=None, help="latest_trajectory.csv 最多写入点数 (保留末尾)")
+    parser.add_argument("--step_log_interval_steps", type=int, default=None, help="step_metrics 写入间隔 (steps, 0=关闭)")
 
     args = parser.parse_args()
 

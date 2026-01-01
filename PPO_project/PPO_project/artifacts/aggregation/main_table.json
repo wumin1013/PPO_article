@@ -1,0 +1,41 @@
+{
+  "rows": [
+    {
+      "run_id": "P0_gold_20251230_034122",
+      "bundle_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122",
+      "mode": "train",
+      "enable_kcm": true,
+      "smooth_weight": 0.05,
+      "baseline_ref": null,
+      "git_hash": "44fbb98cd29d7bf42e8d357ec1e960b7df4a5a57",
+      "config_hash": "acc75056b1de60643e859cd0526e02387c63cb0fa88eea830028bb4782171a0f",
+      "checkpoint_hash": "5ad2b6c63fa5f9f9b643fa286e0f661a4224e2a0ef7fc1aedb10e634fbab4df0",
+      "eval_pass": true,
+      "smoke_pass": true,
+      "verdict_pass": true,
+      "episodes": 50,
+      "seed_eval": 42,
+      "episode_set": null,
+      "success_rate": 1.0,
+      "stall_rate": 0.0,
+      "mean_progress_final": 1.0,
+      "max_abs_contour_error": 0.06469480202631317,
+      "has_non_finite": false,
+      "half_epsilon": 0.75,
+      "mean_steps": 916.7,
+      "max_steps": 960,
+      "summary_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\eval\\run2\\summary.json",
+      "summary_raw_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\eval\\run2\\summary_raw.json",
+      "smoke_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\smoke\\summary.json",
+      "trace_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_gold_20251230_034122\\rollout_det\\trace.csv",
+      "trace_steps": 928.0,
+      "trace_rmse_error": 0.02347822077843423,
+      "trace_max_abs_error": 0.052897890866454134,
+      "trace_mean_velocity": 42.79976262741299,
+      "trace_mean_jerk": 20000.0,
+      "trace_mean_kcm_intervention": 0.9228764837745167,
+      "ablation_key": "train|kcm=True|smooth=True"
+    }
+  ],
+  "count": 1
+}

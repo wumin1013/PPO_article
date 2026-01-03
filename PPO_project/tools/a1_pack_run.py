@@ -35,6 +35,13 @@ def try_git_hash(repo_root: Path) -> str:
     except Exception:
         return "unknown"
 
+def read_baseline_ref(project_root: Path) -> str | None:
+    baseline_path = project_root / "artifacts" / "P0_L2" / "BASELINE_REF.txt"
+    if not baseline_path.exists():
+        return None
+    text = baseline_path.read_text(encoding="utf-8").strip()
+    return text or None
+
 def write_config_eval(src_cfg: Path, dst_cfg: Path, seed_eval: int) -> dict:
     try:
         import yaml  # type: ignore
@@ -117,6 +124,8 @@ def main():
     args=ap.parse_args()
 
     project_root = Path(__file__).resolve().parents[1]
+    if not args.baseline_ref:
+        args.baseline_ref = read_baseline_ref(project_root)
     run_id = args.run_id or datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     out = (project_root / args.out_root / args.tag / run_id).resolve()
     out.mkdir(parents=True, exist_ok=True)

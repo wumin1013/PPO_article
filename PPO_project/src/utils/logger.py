@@ -134,8 +134,15 @@ class DataLogger:
         "velocity",
         "acceleration",
         "jerk",
+        "omega",
+        "domega",
+        "jerk_proxy",
         "contour_error",
         "kcm_intervention",
+        "corner_mask",
+        "dist_to_corner",
+        "mode",
+        "mode_proxy",
         "reward_components",
     ]
 
@@ -164,11 +171,26 @@ class DataLogger:
         jerk: float,
         contour_error: float,
         kcm_intervention: float,
+        omega: Optional[float] = None,
+        domega: Optional[float] = None,
+        jerk_proxy: Optional[float] = None,
+        corner_mask: Optional[float] = None,
+        dist_to_corner: Optional[float] = None,
+        mode: Optional[str] = None,
+        mode_proxy: Optional[float] = None,
         reward_components: Optional[dict] = None,
     ) -> None:
         self.current_time += float(dt)
         ref_x, ref_y = reference_point
         pos_x, pos_y = position
+        def _float_or_empty(value: Optional[float]) -> object:
+            if value is None:
+                return ""
+            try:
+                return float(value)
+            except Exception:
+                return ""
+
         row = {
             "timestamp": round(self.current_time, 6),
             "pos_x": float(pos_x),
@@ -178,8 +200,15 @@ class DataLogger:
             "velocity": float(velocity),
             "acceleration": float(acceleration),
             "jerk": float(jerk),
+            "omega": _float_or_empty(omega),
+            "domega": _float_or_empty(domega),
+            "jerk_proxy": _float_or_empty(jerk_proxy),
             "contour_error": float(contour_error),
             "kcm_intervention": float(kcm_intervention),
+            "corner_mask": _float_or_empty(corner_mask),
+            "dist_to_corner": _float_or_empty(dist_to_corner),
+            "mode": "" if mode is None else str(mode),
+            "mode_proxy": _float_or_empty(mode_proxy),
             "reward_components": json.dumps(reward_components or {}),
         }
         with self.log_path.open("a", newline="", encoding="utf-8") as file:

@@ -1324,8 +1324,15 @@ def _rollout_episode(env: Env, agent) -> Tuple[dict, Dict[str, List[float]]]:
         "velocity": [],
         "acceleration": [],
         "jerk": [],
+        "omega": [],
+        "domega": [],
+        "jerk_proxy": [],
         "contour_error": [],
         "kcm_intervention": [],
+        "corner_mask": [],
+        "dist_to_corner": [],
+        "mode": [],
+        "mode_proxy": [],
     }
 
     done = False
@@ -1341,6 +1348,21 @@ def _rollout_episode(env: Env, agent) -> Tuple[dict, Dict[str, List[float]]]:
                 path_points=env.Pm,
                 segment_index=info.get("segment_idx", getattr(env, "current_segment_idx", 0)),
             )
+            corridor_status = info.get("corridor_status", {})
+            if not isinstance(corridor_status, dict):
+                corridor_status = {}
+            p4_status = info.get("p4_status", {})
+            if not isinstance(p4_status, dict):
+                p4_status = {}
+            corner_mode = float(p4_status.get("corner_mode", 0.0))
+            corner_phase = bool(corridor_status.get("corner_phase", False))
+            corner_mask = 1.0 if (corner_mode >= 0.5 or corner_phase) else 0.0
+            dist_to_corner = p4_status.get("dist_to_turn", corridor_status.get("dist_to_turn", float("inf")))
+            if dist_to_corner is None:
+                dist_to_corner = float("inf")
+            recovery_active = bool(float(p4_status.get("recovery_cap_active", 0.0)) >= 0.5)
+            mode_proxy = 2.0 if recovery_active else (1.0 if corner_mask >= 0.5 else 0.0)
+            mode_label = "recovery" if recovery_active else ("corner" if corner_mask >= 0.5 else "normal")
             trace["timestamp"].append(step_idx * dt)
             trace["position_x"].append(float(env.current_position[0]))
             trace["position_y"].append(float(env.current_position[1]))
@@ -1349,8 +1371,15 @@ def _rollout_episode(env: Env, agent) -> Tuple[dict, Dict[str, List[float]]]:
             trace["velocity"].append(float(env.velocity))
             trace["acceleration"].append(float(env.acceleration))
             trace["jerk"].append(float(env.jerk))
+            trace["omega"].append(float(getattr(env, "angular_vel", 0.0)))
+            trace["domega"].append(float(getattr(env, "angular_acc", 0.0)))
+            trace["jerk_proxy"].append(float(getattr(env, "angular_jerk", 0.0)))
             trace["contour_error"].append(float(info.get("contour_error", 0.0)))
             trace["kcm_intervention"].append(float(info.get("kcm_intervention", 0.0)))
+            trace["corner_mask"].append(float(corner_mask))
+            trace["dist_to_corner"].append(float(dist_to_corner))
+            trace["mode"].append(mode_label)
+            trace["mode_proxy"].append(float(mode_proxy))
 
             paper_metrics.update(
                 contour_error=info["contour_error"],

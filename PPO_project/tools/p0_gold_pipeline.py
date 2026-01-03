@@ -192,11 +192,26 @@ def _rollout_trace(config: dict, model_path: Path, *, deterministic: bool) -> Li
                 action = np.array([np.clip(action[0], -1.0, 1.0), np.clip(action[1], 0.0, 1.0)], dtype=float)
 
             obs, _reward, done, info = env.step(action)
+            corridor_status = info.get("corridor_status", {})
+            if not isinstance(corridor_status, dict):
+                corridor_status = {}
+            p4_status = info.get("p4_status", {})
+            if not isinstance(p4_status, dict):
+                p4_status = {}
             ref_point = DataLogger.project_to_path(
                 position=env.current_position,
                 path_points=env.Pm,
                 segment_index=info.get("segment_idx", getattr(env, "current_segment_idx", 0)),
             )
+            corner_mode = float(p4_status.get("corner_mode", 0.0))
+            corner_phase = bool(corridor_status.get("corner_phase", False))
+            corner_mask = 1.0 if (corner_mode >= 0.5 or corner_phase) else 0.0
+            dist_to_corner = p4_status.get("dist_to_turn", corridor_status.get("dist_to_turn", float("inf")))
+            if dist_to_corner is None:
+                dist_to_corner = float("inf")
+            recovery_active = bool(float(p4_status.get("recovery_cap_active", 0.0)) >= 0.5)
+            mode_proxy = 2.0 if recovery_active else (1.0 if corner_mask >= 0.5 else 0.0)
+            mode_label = "recovery" if recovery_active else ("corner" if corner_mask >= 0.5 else "normal")
             trace_rows.append(
                 {
                     "timestamp": float(step_idx * dt),
@@ -207,8 +222,15 @@ def _rollout_trace(config: dict, model_path: Path, *, deterministic: bool) -> Li
                     "velocity": float(env.velocity),
                     "acceleration": float(env.acceleration),
                     "jerk": float(env.jerk),
+                    "omega": float(getattr(env, "angular_vel", 0.0)),
+                    "domega": float(getattr(env, "angular_acc", 0.0)),
+                    "jerk_proxy": float(getattr(env, "angular_jerk", 0.0)),
                     "contour_error": float(info.get("contour_error", 0.0)),
                     "kcm_intervention": float(info.get("kcm_intervention", 0.0)),
+                    "corner_mask": float(corner_mask),
+                    "dist_to_corner": float(dist_to_corner),
+                    "mode": mode_label,
+                    "mode_proxy": float(mode_proxy),
                 }
             )
             step_idx += 1

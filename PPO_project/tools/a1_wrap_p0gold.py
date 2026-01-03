@@ -176,7 +176,7 @@ def verdict_from_norm(s1: dict, s2: dict, smoke: dict | None = None) -> dict:
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--p0_gold_dir", required=True)
-    ap.add_argument("--out_root", default="artifacts/P0_gold_L2")
+    ap.add_argument("--out_root", default="artifacts/P0_L2")
     ap.add_argument("--seed_eval", type=int, default=43)
     ap.add_argument("--episodes", type=int, default=20)
     ap.add_argument("--smoke_episodes", type=int, default=5)
@@ -373,8 +373,16 @@ def main():
         m["rollout_det"] = {"command_template": args.rollout_cmd}
     json_dump(m, out / "manifest.json")
 
+    baseline_ref_path = (project_root / args.out_root / "BASELINE_REF.txt").resolve()
+    try:
+        rel_path = out.resolve().relative_to(project_root.parent)
+        baseline_ref_path.write_text(str(rel_path) + "\n", encoding="utf-8")
+    except Exception:
+        baseline_ref_path.write_text(str(out.resolve()) + "\n", encoding="utf-8")
+
     print(f"[OK] Level-2 bundle written to: {out}")
     print(f"[VERDICT] pass={verdict['pass']}")
+    print(f"[BASELINE_REF] {baseline_ref_path}")
 
 if __name__ == "__main__":
     main()

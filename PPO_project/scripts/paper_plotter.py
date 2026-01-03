@@ -74,8 +74,8 @@ def resolve_csv_path(path_str: str) -> Path:
 def _ensure_columns(df: pd.DataFrame, label: str) -> pd.DataFrame:
     fallbacks: Dict[str, List[str]] = {
         "timestamp": ["step", "env_step", "episode_idx", "wall_time"],
-        "pos_x": ["x", "ref_x"],
-        "pos_y": ["y", "ref_y"],
+        "pos_x": ["position_x", "x", "ref_x", "reference_x"],
+        "pos_y": ["position_y", "y", "ref_y", "reference_y"],
         "velocity": ["speed", "mean_velocity"],
         "acceleration": ["acc", "mean_acceleration"],
         "jerk": ["mean_jerk"],

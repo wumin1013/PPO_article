@@ -61,3 +61,12 @@ FAIL：
 - 自动更新：`paper_assets/tables/tab_results.csv`（加入 recovery 列）
 
 ---
+
+## 7) 一键清理（可选）
+仅保留：P0_L2 基线包 + aggregation + B2a/B2b 各自最优 Run Bundle。
+
+前提：已完成 A3 聚合并更新 `main_table.csv`。
+
+```bash
+python PPO_project/tools/cleanup_keep_best.py --phases B2a,B2b --apply
+```

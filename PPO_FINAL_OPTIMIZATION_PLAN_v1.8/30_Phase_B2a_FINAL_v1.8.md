@@ -70,3 +70,12 @@ FAIL：
 - 在 Run Bundle 的 manifest 中记录对应论文标签：`paper_targets=["fig:curve_s","fig:curve_butterfly","tab:results"]`
 
 ---
+
+## 8) 一键清理（可选）
+仅保留：P0_L2 基线包 + aggregation + B2a 最优 Run Bundle。
+
+前提：已完成 A3 聚合并更新 `main_table.csv`。
+
+```bash
+python PPO_project/tools/cleanup_keep_best.py --phases B2a --apply
+```

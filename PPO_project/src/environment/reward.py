@@ -37,6 +37,7 @@ class RewardCalculator:
         end_distance: float,
         jerk: float,
         angular_jerk: float,
+        angular_acc: float = 0.0,
         # P6.1: 动作变化率惩罚（policy 层）
         du_theta_u: float = 0.0,
         du_v_u: float = 0.0,
@@ -82,17 +83,46 @@ class RewardCalculator:
         w_tau = abs(float(self.weights.get("w_tau", 2.0)))
         w_t = abs(float(self.weights.get("w_t", 1.0)))
         w_smooth = abs(float(self.weights.get("w_smooth", 0.0)))
+        w_ang_acc = abs(float(self.weights.get("w_ang_acc", 0.0)))
         smooth_corner_only = bool(self.weights.get("smooth_corner_only", False))
+        track_deadzone_ratio = float(self.weights.get("track_deadzone_ratio", 0.0))
+        track_outside_weight = float(self.weights.get("track_outside_weight", 1.0))
+        corner_w_tau_scale = float(self.weights.get("corner_w_tau_scale", 1.0))
+
+        if not (track_deadzone_ratio >= 0.0):
+            track_deadzone_ratio = 0.0
+        elif track_deadzone_ratio >= 1.0:
+            track_deadzone_ratio = 0.999
+
+        if not (track_outside_weight >= 1.0):
+            track_outside_weight = 1.0
+
+        if not (corner_w_tau_scale >= 0.0):
+            corner_w_tau_scale = 1.0
 
         progress_now = float(progress)
         progress_diff = max(0.0, progress_now - float(self.last_progress))
 
-        error_ratio = abs(float(contour_error)) / max(float(self.half_epsilon), 1e-6)
+        error_abs = abs(float(contour_error))
+        error_ratio = error_abs / max(float(self.half_epsilon), 1e-6)
         tau = abs(float(heading_error))
 
         r_progress = w_s * progress_diff
-        r_track = -w_e * (error_ratio**2)
-        r_dir = -w_tau * (tau**2)
+        if bool(corner_mask):
+            deadzone = track_deadzone_ratio * float(self.half_epsilon)
+            if error_abs <= deadzone:
+                r_track = 0.0
+            elif error_abs <= float(self.half_epsilon):
+                denom = max(float(self.half_epsilon) - deadzone, 1e-6)
+                scaled = (error_abs - deadzone) / denom
+                r_track = -w_e * (scaled**2)
+            else:
+                r_track = -w_e * (error_ratio**2) * track_outside_weight
+        else:
+            r_track = -w_e * (error_ratio**2)
+
+        w_tau_eff = w_tau * (corner_w_tau_scale if bool(corner_mask) else 1.0)
+        r_dir = -w_tau_eff * (tau**2)
         r_time = -w_t
 
         r_smooth = 0.0
@@ -100,6 +130,9 @@ class RewardCalculator:
             jerk_ratio = abs(float(jerk)) / max(float(self.max_jerk), 1e-6)
             ang_jerk_ratio = abs(float(angular_jerk)) / max(float(self.max_ang_jerk), 1e-6)
             r_smooth = -w_smooth * (jerk_ratio**2 + ang_jerk_ratio**2)
+        if bool(corner_mask) and w_ang_acc > 0.0 and self.max_ang_acc is not None:
+            ang_acc_ratio = abs(float(angular_acc)) / max(float(self.max_ang_acc), 1e-6)
+            r_smooth += -w_ang_acc * (ang_acc_ratio**2)
 
         total = float(r_progress + r_track + r_dir + r_time + r_smooth)
 

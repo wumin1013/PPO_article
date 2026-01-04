@@ -168,11 +168,22 @@ def _subsample_xy(x: np.ndarray, y: np.ndarray, *, max_points: int = 2000) -> tu
     return x[::step], y[::step]
 
 
-def _save_figure(fig: plt.Figure, out_path: Path, *, dpi: int = 200, svg: bool = False) -> None:
+def _save_figure(
+    fig: plt.Figure,
+    out_path: Path,
+    *,
+    dpi: int = 200,
+    svg: bool = False,
+    hires_dpi: Optional[int] = None,
+    hires_suffix: str = "_hires",
+) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=dpi)
     if svg:
         fig.savefig(out_path.with_suffix(".svg"))
+    if hires_dpi is not None and hires_dpi > 0:
+        hires_path = out_path.with_name(f"{out_path.stem}{hires_suffix}{out_path.suffix}")
+        fig.savefig(hires_path, dpi=hires_dpi)
 
 
 def _load_yaml(path: Path) -> dict:
@@ -348,6 +359,9 @@ def _plot_overlay(
     left_band: Optional[np.ndarray],
     right_band: Optional[np.ndarray],
     out_path: Path,
+    *,
+    hires_dpi: Optional[int] = None,
+    hires_suffix: str = "_hires",
 ) -> None:
     fig, ax = plt.subplots(figsize=(6.5, 6.0))
 
@@ -374,7 +388,7 @@ def _plot_overlay(
     ax.grid(True, linestyle=":", alpha=0.5)
     ax.legend(loc="upper right")
     fig.tight_layout()
-    _save_figure(fig, out_path, dpi=240, svg=True)
+    _save_figure(fig, out_path, dpi=240, svg=True, hires_dpi=hires_dpi, hires_suffix=hires_suffix)
     plt.close(fig)
 
 
@@ -445,6 +459,9 @@ def _plot_points(
     left_band: Optional[np.ndarray],
     right_band: Optional[np.ndarray],
     out_path: Path,
+    *,
+    hires_dpi: Optional[int] = None,
+    hires_suffix: str = "_hires",
 ) -> None:
     fig, ax = plt.subplots(figsize=(6.5, 6.0))
 
@@ -488,7 +505,7 @@ def _plot_points(
     ax.grid(True, linestyle=":", alpha=0.5)
     ax.legend(loc="upper right")
     fig.tight_layout()
-    _save_figure(fig, out_path, dpi=300, svg=True)
+    _save_figure(fig, out_path, dpi=300, svg=True, hires_dpi=hires_dpi, hires_suffix=hires_suffix)
     plt.close(fig)
 
 
@@ -498,6 +515,9 @@ def main() -> None:
     parser.add_argument("--candidate_bundle", required=True, help="Candidate bundle dir or trace.csv")
     parser.add_argument("--baseline_label", default="baseline", help="Legend label for baseline")
     parser.add_argument("--candidate_label", default="candidate", help="Legend label for candidate")
+    parser.add_argument("--hires", action="store_true", help="Save high-resolution trajectory plots")
+    parser.add_argument("--hires_dpi", type=int, default=600, help="DPI for high-resolution plots")
+    parser.add_argument("--hires_suffix", default="_hires", help="Suffix for high-resolution files")
     parser.add_argument(
         "--out_dir",
         default=None,
@@ -523,8 +543,27 @@ def main() -> None:
 
     ref_path, left_band, right_band = _resolve_reference_and_band(baseline, candidate, candidate_bundle)
 
-    _plot_overlay(baseline, candidate, ref_path, left_band, right_band, out_dir / "overlay.png")
-    _plot_points(baseline, candidate, ref_path, left_band, right_band, out_dir / "trajectory_points.png")
+    hires_dpi = args.hires_dpi if args.hires and args.hires_dpi > 0 else None
+    _plot_overlay(
+        baseline,
+        candidate,
+        ref_path,
+        left_band,
+        right_band,
+        out_dir / "overlay.png",
+        hires_dpi=hires_dpi,
+        hires_suffix=args.hires_suffix,
+    )
+    _plot_points(
+        baseline,
+        candidate,
+        ref_path,
+        left_band,
+        right_band,
+        out_dir / "trajectory_points.png",
+        hires_dpi=hires_dpi,
+        hires_suffix=args.hires_suffix,
+    )
     _plot_series(baseline, candidate, key="velocity", ylabel="Velocity", title="v(t)", out_path=out_dir / "v_t.png")
     _plot_series(
         baseline,

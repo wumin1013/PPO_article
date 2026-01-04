@@ -19,6 +19,14 @@ def _resolve(path_str: str) -> Path:
     return (PROJECT_ROOT / path).resolve()
 
 
+def _is_within(child: Path, parent: Path) -> bool:
+    try:
+        child.resolve().relative_to(parent.resolve())
+        return True
+    except Exception:
+        return False
+
+
 def _read_table(path: Path) -> List[Dict[str, str]]:
     if not path.exists():
         return []
@@ -53,6 +61,16 @@ def _bundle_tag(bundle_path: str) -> Optional[str]:
         if idx + 1 < len(parts):
             return parts[idx + 1]
     return parts[0] if parts else None
+
+
+def _read_baseline_ref(baseline_dir: Path) -> Optional[Path]:
+    ref_path = baseline_dir / "BASELINE_REF.txt"
+    if not ref_path.exists():
+        return None
+    text = ref_path.read_text(encoding="utf-8").strip()
+    if not text:
+        return None
+    return _resolve(text)
 
 
 def _f_max(row: Dict[str, str], key: str, *, default: float = -1e12) -> float:
@@ -170,6 +188,9 @@ def main() -> int:
     aggregation_dir = artifacts_root / "aggregation"
     if baseline_dir.exists():
         keep_top_dirs.append(baseline_dir.resolve())
+        baseline_ref = _read_baseline_ref(baseline_dir)
+        if baseline_ref and baseline_ref.exists():
+            keep_bundle_dirs.append(baseline_ref.resolve())
     if aggregation_dir.exists():
         keep_top_dirs.append(aggregation_dir.resolve())
 
@@ -194,6 +215,8 @@ def main() -> int:
 
     bundle_dirs = _find_bundle_dirs(artifacts_root)
     for bundle_dir in bundle_dirs:
+        if baseline_dir.exists() and _is_within(bundle_dir, baseline_dir):
+            continue
         if bundle_dir.resolve() in keep_dirs:
             continue
         _delete_dir(bundle_dir, apply=bool(args.apply))

@@ -2419,6 +2419,8 @@ class Env:
             p4_status = {}
         speed_target = p4_status.get("speed_target", None)
         speed_target = float(speed_target) if speed_target is not None else None
+        corner_mode = float(p4_status.get("corner_mode", 0.0))
+        corner_mask = bool(corner_mode >= 0.5 or corridor_corner_phase)
         v_ratio_exec = p4_status.get("v_ratio_exec", None)
         v_ratio_exec = float(v_ratio_exec) if v_ratio_exec is not None else None
         progress_multiplier = float(p4_status.get("progress_multiplier", 1.0))
@@ -2442,6 +2444,7 @@ class Env:
             du_mode=str(getattr(self, "_p6_du_mode", "l1")),
             lap_completed=lap_done,
             is_closed=self.closed,
+            corner_mask=corner_mask,
             v_ratio_exec=v_ratio_exec,
             speed_target=speed_target,
             speed_weight=float(getattr(self, "_p4_speed_weight", 6.0)),

@@ -45,6 +45,7 @@ class RewardCalculator:
         du_mode: str = "l1",
         lap_completed: bool = False,
         is_closed: bool = False,
+        corner_mask: bool = False,
         # P4.0: turn-aware speed target / time penalty / exit boost / stall
         v_ratio_exec: float | None = None,
         speed_target: float | None = None,
@@ -81,6 +82,7 @@ class RewardCalculator:
         w_tau = abs(float(self.weights.get("w_tau", 2.0)))
         w_t = abs(float(self.weights.get("w_t", 1.0)))
         w_smooth = abs(float(self.weights.get("w_smooth", 0.0)))
+        smooth_corner_only = bool(self.weights.get("smooth_corner_only", False))
 
         progress_now = float(progress)
         progress_diff = max(0.0, progress_now - float(self.last_progress))
@@ -94,7 +96,7 @@ class RewardCalculator:
         r_time = -w_t
 
         r_smooth = 0.0
-        if w_smooth > 0.0:
+        if w_smooth > 0.0 and (not smooth_corner_only or bool(corner_mask)):
             jerk_ratio = abs(float(jerk)) / max(float(self.max_jerk), 1e-6)
             ang_jerk_ratio = abs(float(angular_jerk)) / max(float(self.max_ang_jerk), 1e-6)
             r_smooth = -w_smooth * (jerk_ratio**2 + ang_jerk_ratio**2)

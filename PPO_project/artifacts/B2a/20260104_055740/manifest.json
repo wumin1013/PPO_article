@@ -1,0 +1,22 @@
+{
+  "run_id": "20260104_055740",
+  "git_hash": "973013c53fa6df8fcf32c5a0448d357a342a6725",
+  "config_hash": "975c9dbf1ab91d3734d3992d2026f467963e3c87ca93b5bb88dda44e9af6fa2b",
+  "checkpoint_hash": "899fd5f59d928461e0c6280b7cb670e6b56c4fdabe3cfeb6cdc34c8d6dbb4aab",
+  "trace_hash": null,
+  "episode_set_source": "config",
+  "baseline_ref": "PPO_project/artifacts/P0_L2/P0_gold_20251230_034122",
+  "eval": {
+    "phase": "p0_eval",
+    "command_run1": "conda run -n PPO python PPO_project/tools/acceptance_suite.py --phase p0_eval --config \"C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\B2a\\20260104_055740\\config_eval.yaml\" --model \"C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\B2a\\20260104_055740\\checkpoint.pth\" --episodes 50 --out \"C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\B2a\\20260104_055740\\eval\\run1\" --deterministic",
+    "command_run2": "conda run -n PPO python PPO_project/tools/acceptance_suite.py --phase p0_eval --config \"C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\B2a\\20260104_055740\\config_eval.yaml\" --model \"C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\B2a\\20260104_055740\\checkpoint.pth\" --episodes 50 --out \"C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\B2a\\20260104_055740\\eval\\run2\" --deterministic",
+    "episodes": 50,
+    "deterministic": true,
+    "seed_eval": 43,
+    "seed_source": "patched_config_eval.yaml",
+    "config_eval_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\B2a\\20260104_055740\\config_eval.yaml"
+  },
+  "rollout_det": {
+    "command_template": null
+  }
+}

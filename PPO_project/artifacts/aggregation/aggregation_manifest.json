@@ -1,10 +1,13 @@
 {
   "roots": [
-    "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts",
+    "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\artifacts",
     "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts"
   ],
-  "bundle_count": 1,
+  "bundle_count": 4,
   "bundles": [
+    "artifacts\\B2a_short\\20260104_003215",
+    "artifacts\\B2a_short\\20260104_015048",
+    "artifacts\\B2a\\20260104_055740",
     "artifacts\\P0_L2\\P0_gold_20251230_034122"
   ]
 }

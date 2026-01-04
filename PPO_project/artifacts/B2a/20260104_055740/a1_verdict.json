@@ -1,0 +1,49 @@
+{
+  "pass": true,
+  "checks": [
+    {
+      "key": "global.passed",
+      "run1": true,
+      "run2": true,
+      "delta": 0,
+      "pass": true,
+      "rel_thr": 0.0,
+      "abs_thr": 0.0
+    },
+    {
+      "key": "global.success_rate",
+      "run1": 1.0,
+      "run2": 1.0,
+      "delta": 0.0,
+      "pass": true,
+      "rel_thr": 0.05,
+      "abs_thr": 1e-06
+    },
+    {
+      "key": "global.max_abs_contour_error",
+      "run1": 0.06481681220523328,
+      "run2": 0.06481681220523328,
+      "delta": 0.0,
+      "pass": true,
+      "rel_thr": 0.01,
+      "abs_thr": 0.0001
+    },
+    {
+      "key": "global.mean_progress_final",
+      "run1": 1.0,
+      "run2": 1.0,
+      "delta": 0.0,
+      "pass": true,
+      "rel_thr": 0.01,
+      "abs_thr": 0.0001
+    }
+  ],
+  "reasons": [],
+  "paths": {
+    "run1_norm": "eval/run1/summary.json",
+    "run2_norm": "eval/run2/summary.json",
+    "run1_raw": "eval/run1/summary_raw.json",
+    "run2_raw": "eval/run2/summary_raw.json",
+    "trace": null
+  }
+}

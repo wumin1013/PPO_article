@@ -1,0 +1,46 @@
+{
+  "meta": {
+    "run_id": "20260104_055740",
+    "timestamp": "2026-01-04T06:43:59",
+    "git_hash": "973013c53fa6df8fcf32c5a0448d357a342a6725",
+    "config_hash": "975c9dbf1ab91d3734d3992d2026f467963e3c87ca93b5bb88dda44e9af6fa2b",
+    "checkpoint_hash": "899fd5f59d928461e0c6280b7cb670e6b56c4fdabe3cfeb6cdc34c8d6dbb4aab",
+    "seed_eval": 43,
+    "seed_source": "patched_config_eval.yaml",
+    "env_hash": "unknown",
+    "baseline_ref": "PPO_project/artifacts/P0_L2/P0_gold_20251230_034122",
+    "episode_set_source": "config"
+  },
+  "global": {
+    "phase": "p0_eval",
+    "passed": true,
+    "episodes": 50,
+    "deterministic": true,
+    "success_rate": 1.0,
+    "stall_rate": 0.0,
+    "mean_progress_final": 1.0,
+    "max_abs_contour_error": 0.06481681220523328,
+    "has_non_finite": false,
+    "half_epsilon": 0.75
+  },
+  "segment": {},
+  "smoothness": {},
+  "raw_keys": [
+    "config_path",
+    "deterministic",
+    "episode_set",
+    "episodes",
+    "half_epsilon",
+    "has_non_finite",
+    "max_abs_contour_error",
+    "mean_progress_final",
+    "model_path",
+    "passed",
+    "phase",
+    "seed_eval",
+    "stall_rate",
+    "success_rate",
+    "thresholds",
+    "timestamp"
+  ]
+}

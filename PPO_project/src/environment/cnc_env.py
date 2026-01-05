@@ -2437,6 +2437,7 @@ class Env:
             end_distance=end_distance,
             jerk=self.jerk,
             angular_jerk=self.angular_jerk,
+            angular_acc=self.angular_acc,
             du_theta_u=float(du_theta_u),
             du_v_u=float(du_v_u),
             du_enabled=bool(getattr(self, "_p6_du_enabled", False)),

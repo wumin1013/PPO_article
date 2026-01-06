@@ -1,5 +1,5 @@
-# Phase B2b：出弯回线（Recovery）（FINAL v1.8）
-版本日期：2026-01-03  
+# Phase B2b：出弯回线（Recovery）（FINAL v1.9）
+版本日期：2026-01-06  
 依赖：B2a 已得到至少 1 个不退化且平滑改善的候选 run。
 
 ---

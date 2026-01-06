@@ -1,8 +1,11 @@
 # Phase B2a+：允差带内平滑优化方案（方案1+2+3）
-版本日期：2026-01-04  
-关联：`PPO_FINAL_OPTIMIZATION_PLAN_v1.8/30_Phase_B2a_FINAL_v1.8.md`
+版本日期：2026-01-06  
+关联：`PPO_FINAL_OPTIMIZATION_PLAN_v1.8/30_Phase_B2a_FINAL_v1.9.md`
 
 ---
+> 前置要求：已完成 `32_Phase_B2a1_ArcInBand_Tangent_Learning_v1.9.md`，确保 inside_ratio 不再反号且走廊/航向 shaping 已生效。
+> 本文档只做“圆弧已出现之后”的平滑度权重微调与带内形态精修。
+
 
 ## 1) 理解阶段（现状与痛点）
 - 轨迹仍贴中心线，拐角几何形态几乎不变，仅角加速度下降。

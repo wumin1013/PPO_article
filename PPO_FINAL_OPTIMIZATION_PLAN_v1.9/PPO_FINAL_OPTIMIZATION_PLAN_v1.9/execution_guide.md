@@ -58,7 +58,7 @@ flowchart TB
 
 | 步骤 | 操作 | 产出 |
 |------|------|------|
-| 1 | 打开 `20_Phase_B1_FINAL_v1.8.md` | 理解要求 |
+| 1 | 打开 `20_Phase_B1_FINAL_v1.9.md` | 理解要求 |
 | 2 | 确认分段指标可计算（corner_mask） | 代码检查 |
 | 3 | 生成 P0 基线图 | `P0_overlay.png`, `P0_v_t.png` |
 
@@ -68,7 +68,7 @@ flowchart TB
 
 | 步骤 | 操作 | 产出 |
 |------|------|------|
-| 1 | 打开 `30_Phase_B2a_FINAL_v1.8.md` | 理解平滑性指标 |
+| 1 | 打开 `30_Phase_B2a_FINAL_v1.9.md` | 理解平滑性指标 |
 | 2 | 修改 `src/reward.py` | 增加拐角平滑奖励 |
 | 3 | 创建 `configs/train_square_b2a.yaml` | 训练配置 |
 | 4 | 运行训练 | `saved_models/b2a_seed42/` |
@@ -82,7 +82,7 @@ flowchart TB
 
 | 步骤 | 操作 | 产出 |
 |------|------|------|
-| 1 | 打开 `40_Phase_B2b_FINAL_v1.8.md` | |
+| 1 | 打开 `40_Phase_B2b_FINAL_v1.9.md` | |
 | 2 | 修改出弯恢复相关奖励/状态 | |
 | 3 | 训练 → Eval → A1归档 | |
 | 4 | 生成出弯恢复曲线 | recovery_time 对比 |
@@ -93,7 +93,7 @@ flowchart TB
 
 | 步骤 | 操作 | 产出 |
 |------|------|------|
-| 1 | 打开 `50_Phase_B2c_FINAL_v1.8.md` | |
+| 1 | 打开 `50_Phase_B2c_FINAL_v1.9.md` | |
 | 2 | 修改直线段速度奖励 | |
 | 3 | 训练 → Eval → A1归档 | |
 | 4 | 生成速度对比图 | 直线段速度提升 |
@@ -104,7 +104,7 @@ flowchart TB
 
 | 步骤 | 操作 | 产出 |
 |------|------|------|
-| 1 | 打开 `60_Phase_C_FINAL_v1.8.md` | |
+| 1 | 打开 `60_Phase_C_FINAL_v1.9.md` | |
 | 2 | 创建 `paper_assets/` 目录 | |
 | 3 | 批量生成所有对比图 | `figures/*.png` |
 | 4 | 导出表格数据 | `tables/tab_results.csv` |
@@ -116,7 +116,7 @@ flowchart TB
 
 | 步骤 | 操作 | 产出 |
 |------|------|------|
-| 1 | 打开 `70_Phase_D_FINAL_v1.8.md` | |
+| 1 | 打开 `70_Phase_D_FINAL_v1.9.md` | |
 | 2 | 关闭 KCM 重新训练 | ablation_no_kcm |
 | 3 | 关闭拐角奖励重新训练 | ablation_no_corner |
 | 4 | 生成消融表格和图 | `tab_ablation.csv` |

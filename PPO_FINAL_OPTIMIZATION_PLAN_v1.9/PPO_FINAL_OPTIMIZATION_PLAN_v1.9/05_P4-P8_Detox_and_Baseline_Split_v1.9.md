@@ -1,5 +1,5 @@
-# Patch 05：Detox & Baseline Split（决策版）FINAL v1.8
-版本日期：2026-01-03
+# Patch 05：Detox & Baseline Split（决策版）FINAL v1.9
+版本日期：2026-01-06
 
 > 这份文档在 v1.8 中被“重新定位”：  
 > **不再要求大规模重构**，只保留对 PhaseB 必需的部分：  

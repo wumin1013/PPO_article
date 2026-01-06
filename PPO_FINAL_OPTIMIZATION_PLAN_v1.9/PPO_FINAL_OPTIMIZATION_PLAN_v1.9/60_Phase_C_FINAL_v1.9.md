@@ -1,5 +1,5 @@
-# Phase C：论文图表自动生成（FINAL v1.8）
-版本日期：2026-01-03  
+# Phase C：论文图表自动生成（FINAL v1.9）
+版本日期：2026-01-06  
 依赖：至少存在 baseline_ref（P0_L2）+ 2 个以上 PhaseB Run Bundle。
 
 > 目标：把“写论文”从手工搬运变成自动流水线：  

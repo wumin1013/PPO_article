@@ -11,11 +11,45 @@ from pathlib import Path
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from src.environment.cnc_env import CNCEnv
+from src.environment import Env
+from src.utils.path_generator import get_path_by_name
+import torch
 
 def load_config(config_path):
     with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
+
+def build_env_from_config(cfg):
+    """构建环境，与 acceptance_suite.py 保持一致"""
+    env_cfg = cfg["environment"]
+    kcm_cfg = cfg["kinematic_constraints"]
+    path_cfg = cfg["path"]
+    reward_weights = cfg.get("reward_weights", {})
+
+    scale = float(path_cfg.get("scale", 10.0))
+    num_points = int(path_cfg.get("num_points", 200))
+    extra_kwargs = {k: v for k, v in path_cfg.items() if k not in {"type", "scale", "num_points"}}
+    path_points = get_path_by_name(str(path_cfg["type"]), scale=scale, num_points=num_points, **extra_kwargs)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    
+    env = Env(
+        device=device,
+        epsilon=env_cfg["epsilon"],
+        interpolation_period=env_cfg["interpolation_period"],
+        MAX_VEL=kcm_cfg["MAX_VEL"],
+        MAX_ACC=kcm_cfg["MAX_ACC"],
+        MAX_JERK=kcm_cfg["MAX_JERK"],
+        MAX_ANG_VEL=kcm_cfg["MAX_ANG_VEL"],
+        MAX_ANG_ACC=kcm_cfg["MAX_ANG_ACC"],
+        MAX_ANG_JERK=kcm_cfg["MAX_ANG_JERK"],
+        Pm=path_points,
+        max_steps=env_cfg["max_steps"],
+        lookahead_points=env_cfg.get("lookahead_points", 5),
+        reward_weights=reward_weights,
+        return_normalized_obs=True,
+    )
+    return env
 
 def run_episode(env, max_steps=1000, seed=42):
     env.reset()
@@ -84,9 +118,9 @@ def run_episode(env, max_steps=1000, seed=42):
 def generate_trace(config_path, output_path, seed=42):
     cfg = load_config(config_path)
     # Ensure deterministic
-    cfg["seed"] = seed
+    np.random.seed(seed)
     
-    env = CNCEnv(cfg)
+    env = build_env_from_config(cfg)
     trace = run_episode(env, max_steps=2000, seed=seed)
     
     df = pd.DataFrame(trace)

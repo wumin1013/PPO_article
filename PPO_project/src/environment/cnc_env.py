@@ -391,6 +391,31 @@ class Env:
         self._progress_cumulative_lengths = cumulative
         self._progress_total_length = total
 
+    def _get_current_arc_length(self) -> float:
+        """获取当前位置的弧长（基于投影）"""
+        pt = self.current_position
+        seg_idx = self._find_containing_segment(pt)
+        if seg_idx < 0:
+            seg_idx = max(self.current_segment_idx, 0)
+        
+        if seg_idx >= len(self.Pm) - 1:
+            return float(self._progress_total_length)
+        
+        p1 = np.array(self.Pm[seg_idx])
+        p2 = np.array(self.Pm[seg_idx + 1])
+        seg_vec = p2 - p1
+        seg_len_sq = np.dot(seg_vec, seg_vec)
+        
+        if seg_len_sq < 1e-12:
+            t = 0.0
+        else:
+            t = np.clip(np.dot(pt - p1, seg_vec) / seg_len_sq, 0.0, 1.0)
+        
+        seg_len = float(self._progress_segment_lengths[seg_idx]) if seg_idx < len(self._progress_segment_lengths) else 0.0
+        cumulative_s = float(self._progress_cumulative_lengths[seg_idx]) if seg_idx < len(self._progress_cumulative_lengths) else 0.0
+        
+        return cumulative_s + t * seg_len
+
     def _compute_turn_info(self) -> Dict[str, Any]:
         """统一的 turn 感知计算与状态更新"""
         s_now = self._get_current_arc_length()

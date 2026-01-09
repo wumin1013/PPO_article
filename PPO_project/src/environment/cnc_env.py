@@ -17,7 +17,8 @@ except ImportError:  # pragma: no cover
     rtree_index = None
 
 from src.environment.kinematics import apply_kinematic_constraints
-from src.environment.reward import RewardCalculator
+from src.environment.reward import RewardCalculator, RewardContext
+from src.utils.debug import DebugCollector
 from src.utils.geometry import (
     generate_offset_paths,
     is_point_in_polygon,
@@ -239,12 +240,15 @@ class Env:
         self._init_p1_config()
         # 初始化 P4.0 配置（turn-aware speed target / exit boost / stall / speed cap）
         self._init_p4_config()
-        # 初始化 P6.1 配置（抑制抖动：Δu 惩罚 + 目标速度平滑器）
-        self._init_p6_1_config()
+        # P6.1 已移除
         # 初始化 P7.3 配置（平滑与终点可靠性）
         self._init_p7_3_config()
         # 初始化 P8.0 配置（真实几何 + 刹车包络）
         self._init_p8_config()
+        
+        self.debug_collector = DebugCollector(
+            trace_ring_size=getattr(self, "_p7_3_trace_ring_size", 200)
+        )
         
         self.reset()
 
@@ -387,6 +391,63 @@ class Env:
         self._progress_cumulative_lengths = cumulative
         self._progress_total_length = total
 
+    def _compute_turn_info(self) -> Dict[str, Any]:
+        """统一的 turn 感知计算与状态更新"""
+        s_now = self._get_current_arc_length()
+        if not math.isfinite(s_now):
+            s_now = 0.0
+
+        raw_scan = self._scan_for_next_turn(float(s_now))
+        dist_to_turn = float(raw_scan.get("dist_to_turn", float("inf")))
+        turn_angle = float(raw_scan.get("turn_angle", 0.0))
+
+        # --- Corner Phase Hysteresis Logic (Solidified) ---
+        corner_before = bool(getattr(self, "in_corner_phase", False))
+        corner_after = corner_before
+
+        # Use attributes initialized in _init_corridor_config (now considered core or legacy-compat)
+        theta_enter = float(getattr(self, "_corridor_theta_enter", 0.26))
+        theta_exit = float(getattr(self, "_corridor_theta_exit", 0.14))
+        dist_enter = float(getattr(self, "_corridor_dist_enter", 3.0))
+        dist_exit = float(getattr(self, "_corridor_dist_exit", 4.5))
+
+        abs_angle = abs(turn_angle)
+
+        if not corner_before:
+            if abs_angle >= theta_enter and dist_to_turn <= dist_enter:
+                corner_after = True
+        else:
+            if abs_angle <= theta_exit or dist_to_turn >= dist_exit:
+                corner_after = False
+
+        self.in_corner_phase = corner_after
+        
+        # P7.1 Corner Toggle Counting
+        if corner_after != corner_before:
+            self._p7_1_corner_toggle_count = int(getattr(self, "_p7_1_corner_toggle_count", 0)) + 1
+            
+        if corner_after:
+            self._p7_1_exit_timer = -1
+        else:
+            if corner_before and not corner_after:
+                self._p7_1_exit_timer = 0
+            else:
+                prev_exit = int(getattr(self, "_p7_1_exit_timer", -1))
+                if prev_exit >= 0:
+                    self._p7_1_exit_timer = prev_exit + 1
+
+        return {
+            "in_turn_zone": dist_to_turn < float(getattr(self, "_turn_zone_threshold", 50.0)),
+            "corner_phase": corner_after,
+            "turn_sign": int(raw_scan.get("turn_sign", 0)),
+            "dist_to_turn": dist_to_turn,
+            "turn_angle": turn_angle,
+            "turn_severity": abs_angle / math.pi,
+            "recommended_v_cap": float(self.MAX_VEL), # To be updated by speed cap logic if needed
+            "is_isolated_corner": bool(raw_scan.get("is_isolated_corner", True)),
+            "turn_s": float(raw_scan.get("turn_s", 0.0)),
+        }
+
     def reset(self, random_start: bool = False):
         self.current_step = 0
         self.trajectory_states = []
@@ -407,7 +468,10 @@ class Env:
         # P7.3：kappa 执行量（奇异点保护）与平滑状态（每回合重置）
         self._p7_3_prev_kappa_exec = 0.0
         self._p7_3_kappa_filt = 0.0
-        self._p7_3_trace_ring = []
+        
+        # Clear debug collector ring
+        self.debug_collector.reset()
+        
         # P7.1：出弯回中 ramp + corner_phase 抖动计数（每回合重置）
         self._p7_1_exit_timer = -1
         self._p7_1_corner_toggle_count = 0
@@ -444,21 +508,22 @@ class Env:
         self.kcm_intervention = 0.0
         self.reward_calculator.reset()
 
-        # P6.1：重置抖动抑制相关状态
+        # P6.1 Legacy removed, but ensuring init if accessed safely
         self._p6_prev_action_policy = None
-        self._p6_v_target_prev = 0.0
-        self._p6_a_ref_prev = 0.0
-        self._p6_v_target_initialized = False
 
-        # 初始观测对齐单文件脚本：固定起点、零进度、使用首段长度
+        # 初始观测
         _proj, _seg_idx, s_now, _t_hat, _n_hat = self._project_onto_progress_path(self.current_position)
-        scan = self._scan_for_next_turn(float(s_now))
-        distance_to_next_turn = float(scan.get("dist_to_turn", float("inf")))
+        
+        # Phase 20: Use _compute_turn_info
+        self.turn_info = self._compute_turn_info()
+        distance_to_next_turn = self.turn_info["dist_to_turn"]
+        next_angle = self.turn_info["turn_angle"]
+        
         if not math.isfinite(distance_to_next_turn):
             distance_to_next_turn = float(getattr(self, "_progress_total_length", 0.0))
+            
         overall_progress = 0.0
         tau_initial = 0.0
-        next_angle = float(scan.get("turn_angle", 0.0))
         lookahead_features = self._compute_lookahead_features()
 
         self.state = np.array(
@@ -492,9 +557,10 @@ class Env:
   
     def step(self, action):
         self.current_step += 1
+        
+        # --- 1. Decision & Kinematics ---
         prev_vel = self.velocity
         prev_acc = self.acceleration
-        # 角运动约束处
         prev_ang_vel = self.angular_vel
         prev_ang_acc = self.angular_acc
 
@@ -502,103 +568,50 @@ class Env:
         policy_theta = float(policy_action[0]) if policy_action.size > 0 else 0.0
         policy_length = float(policy_action[1]) if policy_action.size > 1 else 0.0
 
-        # 先按动作空间边界裁剪，保持 PPO 使用的 log_prob 与送入环境的一致
+        # Clip action
         policy_theta = np.clip(policy_theta, -1.0, 1.0)
         policy_length = np.clip(policy_length, 0.0, 1.0)
         action_policy = np.array([policy_theta, policy_length], dtype=float)
 
-        # P6.1：动作变化率（policy 层，ratio 动作）
-        du_theta = 0.0
-        du_v = 0.0
-        prev_u = getattr(self, "_p6_prev_action_policy", None)
-        if isinstance(prev_u, np.ndarray) and prev_u.shape == (2,):
-            du_theta = float(action_policy[0] - prev_u[0])
-            du_v = float(action_policy[1] - prev_u[1])
-        self._p6_prev_action_policy = action_policy.copy()
-
         corner_phase_before = bool(getattr(self, "in_corner_phase", False))
         exit_boost_before = int(getattr(self, "_p4_exit_boost_remaining", 0))
 
-        # P4.0：预计算 turn/speed 量（基于 s_t），用于速度目标与硬上限裁剪
+        # P4 Status & Caps
         p4_status = self._compute_p4_pre_step_status()
         v_u_policy = float(policy_length)
         omega_u_policy = float(policy_theta)
         p4_status["v_ratio_policy"] = float(v_u_policy)
         p4_status["exit_boost_remaining"] = float(exit_boost_before)
 
+        # Solidify: Always apply caps if logic is active (checked inside compute_p4 or via config)
         v_ratio_cap = float(p4_status.get("v_ratio_cap", 1.0))
-        if not bool(getattr(self, "_p4_speed_cap_enabled", True)):
-            # P8.0：即便关闭 turning-feasible cap，也必须保留刹车包络（终点停下/进弯可刹住）
-            v_ratio_cap = float(p4_status.get("v_ratio_brake", 1.0))
-            p4_status["v_ratio_cap"] = float(v_ratio_cap)
-
-        # === P5.0：比率层裁剪（仍是 ratio）===
+        
         v_u_exec = float(min(v_u_policy, v_ratio_cap))
 
-        # === P5.0：比率→物理量映射（KCM 输入必须是物理量）===
+        # Map to physical units
         omega_intent = float(omega_u_policy) * float(self.MAX_ANG_VEL)
         v_intent = float(v_u_exec) * float(self.MAX_VEL)
-
-        # turning-feasible cap 在物理量上的等价 max_vel
+        
+        # P6.1 Smoother removed: use intent directly
+        raw_linear_vel_intent = v_intent
+        raw_angular_vel_intent = omega_intent
+        
         max_vel_cap_phys = float(min(float(self.MAX_VEL), float(v_ratio_cap) * float(self.MAX_VEL)))
-        p4_status["omega_u_policy"] = float(omega_u_policy)
-        p4_status["omega_intent"] = float(omega_intent)
-        p4_status["v_u_policy"] = float(v_u_policy)
-        p4_status["v_u_exec"] = float(v_u_exec)
-        p4_status["v_intent"] = float(v_intent)  # v_des（已包含 cap）
-        p4_status["max_vel_cap_phys"] = float(max_vel_cap_phys)
-        p4_status["du_theta_u"] = float(du_theta)
-        p4_status["du_v_u"] = float(du_v)
-        p4_status["du_l1"] = float(abs(du_theta) + abs(du_v))
+        
+        # Store status
+        p4_status.update({
+            "omega_u_policy": float(omega_u_policy),
+            "omega_intent": float(omega_intent),
+            "v_u_policy": float(v_u_policy),
+            "v_u_exec": float(v_u_exec),
+            "v_intent": float(v_intent),
+            "max_vel_cap_phys": float(max_vel_cap_phys),
+            "du_theta_u": 0.0,
+            "du_v_u": 0.0,
+            "du_l1": 0.0,
+        })
 
-        # policy 意图作为物理量输入约束（速度意图先经 turning-feasible cap，再进 KCM）
-        raw_angular_vel_intent = float(omega_intent)
-
-        # P6.1：目标速度平滑器（v_des -> v_target）
-        v_des = float(v_intent)
-        v_target = float(v_des)
-        if bool(getattr(self, "_p6_v_target_smoother_enabled", False)):
-            dt = float(self.interpolation_period)
-            if not bool(getattr(self, "_p6_v_target_initialized", False)):
-                v_target = float(v_des)
-                self._p6_v_target_prev = float(v_target)
-                self._p6_a_ref_prev = 0.0
-                self._p6_v_target_initialized = True
-            else:
-                v_prev = float(getattr(self, "_p6_v_target_prev", 0.0))
-                mode = str(getattr(self, "_p6_v_target_mode", "accel")).lower()
-                if mode == "lowpass":
-                    tau = float(max(float(getattr(self, "_p6_v_target_tau", 0.10)), 1e-6))
-                    beta = float(dt / (tau + dt))
-                    v_target = float(v_prev + beta * (v_des - v_prev))
-                else:
-                    a_ref_max = float(max(float(getattr(self, "_p6_a_ref_max", 0.0)), 0.0))
-                    a_prev = float(getattr(self, "_p6_a_ref_prev", 0.0))
-                    a_des = float((v_des - v_prev) / max(dt, 1e-6))
-                    a_ref = float(np.clip(a_des, -a_ref_max, a_ref_max))
-                    if bool(getattr(self, "_p6_j_ref_enabled", True)):
-                        j_ref_max = float(max(float(getattr(self, "_p6_j_ref_max", 0.0)), 0.0))
-                        a_low = float(a_prev - j_ref_max * dt)
-                        a_high = float(a_prev + j_ref_max * dt)
-                        a_ref = float(np.clip(a_ref, a_low, a_high))
-                    v_target = float(v_prev + a_ref * dt)
-                    # 避免跨越 v_des（防止振荡）
-                    if (v_des - v_prev) * (v_des - v_target) < 0.0:
-                        v_target = float(v_des)
-                        a_ref = float((v_target - v_prev) / max(dt, 1e-6))
-                    self._p6_a_ref_prev = float(a_ref)
-                self._p6_v_target_prev = float(v_target)
-
-        # 目标器输出仍需遵守物理上限与 turning-feasible cap
-        v_target = float(np.clip(v_target, 0.0, max_vel_cap_phys))
-        p4_status["v_des"] = float(v_des)
-        p4_status["v_target"] = float(v_target)
-        raw_linear_vel_intent = float(v_target)
-
-        # P7.3：曲率平滑（基于执行量定义 kappa=|omega|/(v+eps)），在约束前做温和滤波（默认关闭）
-        raw_angular_vel_intent = float(self._p7_3_apply_kappa_smoothing(raw_angular_vel_intent, raw_linear_vel_intent))
-
-        # 使用Numba优化的约束计算
+        # Apply Kinematics
         (self.velocity, self.acceleration, self.jerk,
          self.angular_vel, self.angular_acc, self.angular_jerk) = apply_kinematic_constraints(
             prev_vel, prev_acc, prev_ang_vel, prev_ang_acc,
@@ -606,121 +619,93 @@ class Env:
             max_vel_cap_phys, self.MAX_ACC, self.MAX_JERK,
             self.MAX_ANG_VEL, self.MAX_ANG_ACC, self.MAX_ANG_JERK
         )
-        
-        # === 计算KCM干预程度：物理量差值（归一化到约[0,2]量级，避免奖励尺度爆炸）===
+
+        # KCM Intervention
         velocity_diff = abs(self.velocity - raw_linear_vel_intent) / max(float(self.MAX_VEL), 1e-6)
         angular_vel_diff = abs(self.angular_vel - raw_angular_vel_intent) / max(float(self.MAX_ANG_VEL), 1e-6)
         self.kcm_intervention = float(velocity_diff + angular_vel_diff)
-        
-        # === 使用修正后的动作执行状态转===
-        # 构建最终安全动
-        safe_action = (self.angular_vel, self.velocity)  # final_vel是线速度
-        next_state = self.apply_action(safe_action)
-        self.state = next_state
-        self.trajectory_states.append(next_state)
 
-        # P4.0：更新本步实际执行速度比（考虑 KCM 与 cap 后的最终速度）
+        # Update P4 Exec Status
         v_ratio_exec = float(self.velocity / max(float(self.MAX_VEL), 1e-6))
         omega_u_exec = float(self.angular_vel / max(float(self.MAX_ANG_VEL), 1e-6))
-        p4_status["v_ratio_exec"] = float(v_ratio_exec)
-        p4_status["omega_u_exec"] = float(omega_u_exec)
-        p4_status["omega_exec"] = float(self.angular_vel)
-        p4_status["v_exec"] = float(self.velocity)
-
-        # P7.3：执行曲率（奇异点保护）+ dkappa 诊断（用于验收脚本）
-        kappa_exec = float(self._p7_3_compute_kappa_exec(v_exec=float(self.velocity), omega_exec=float(self.angular_vel)))
-        prev_kappa_exec = float(getattr(self, "_p7_3_prev_kappa_exec", 0.0))
-        dkappa_exec = float(abs(kappa_exec - prev_kappa_exec))
-        self._p7_3_prev_kappa_exec = float(kappa_exec)
-        p4_status["kappa_exec"] = float(kappa_exec)
-        p4_status["dkappa_exec"] = float(dkappa_exec)
-
-        # P7.3：数值安全（kappa/dkappa/state/reward/obs 永不 NaN/Inf；异常立刻 dump）
-        self._p7_3_trace_append(p4_status=p4_status)
-        self._p7_3_assert_finite(name="kappa_exec", value=kappa_exec, p4_status=p4_status)
-        self._p7_3_assert_finite(name="dkappa_exec", value=dkappa_exec, p4_status=p4_status)
-        self._p7_3_assert_finite_array(name="state", arr=self.state, p4_status=p4_status)
-
-        # P4.0：停滞检测（progress_diff 很小 + 低速，持续 N 步则终止）
-        self._p4_stall_triggered = False
-        progress_now = float(self.state[4]) if len(self.state) > 4 else 0.0
-        progress_diff = max(0.0, progress_now - float(getattr(self, "_p4_last_progress_for_stall", 0.0)))
-        self._p4_last_progress_for_stall = float(progress_now)
-
-        if bool(getattr(self, "_p4_stall_enabled", True)) and not bool(getattr(self, "reached_target", False)):
-            # P7.3：stall 与 corner_phase/cap 联动
-            if bool(corner_phase_before):
-                # corner_phase 内不触发 stall（避免转弯低速被误杀）
-                self._p4_stall_counter = 0
-            else:
-                stall_progress_eps = float(getattr(self, "_p4_stall_progress_eps", 1e-4))
-                stall_v_eps = float(getattr(self, "_p4_stall_v_eps", 0.05))
-                cap_low = float(getattr(self, "_p7_3_stall_cap_low", 0.25))
-                v_ratio_cap_now = float(p4_status.get("v_ratio_cap", 1.0))
-                low_cap = bool(math.isfinite(v_ratio_cap_now) and v_ratio_cap_now < cap_low)
-
-                if progress_diff < stall_progress_eps and (low_cap or v_ratio_exec < stall_v_eps):
-                    self._p4_stall_counter = int(getattr(self, "_p4_stall_counter", 0)) + 1
-                else:
-                    self._p4_stall_counter = 0
-            if int(getattr(self, "_p4_stall_counter", 0)) >= int(getattr(self, "_p4_stall_steps", 300)):
-                self._p4_stall_triggered = True
-
-        p4_status["stall_counter"] = float(int(getattr(self, "_p4_stall_counter", 0)))
-        p4_status["stall_triggered"] = float(1.0 if bool(getattr(self, "_p4_stall_triggered", False)) else 0.0)
-
-        # 更新误差历史
-        current_error = self.get_contour_error(self.current_position)
-        self.error_history.append(current_error)
-        if len(self.error_history) > self.max_error_history:
-            self.error_history.pop(0)  # 保持固定长度
-
-        # 保存本步 P4 状态供 reward/info 使用（reward 基于 s_t 的目标 + s_{t+1} 的结果）
-        self._p4_step_status = dict(p4_status)
-
-        reward = self.calculate_reward()
-        self._p7_3_assert_finite(name="reward", value=reward, p4_status=p4_status)
-        done = self.is_done()
-
-        # P4.0：出弯 boost 更新（基于 corner_phase s_t -> s_{t+1} 的状态转移）
-        corner_phase_after = bool(getattr(self, "last_corridor_status", {}).get("corner_phase", False))
-        if bool(getattr(self, "_p4_exit_boost_enabled", True)) and corner_phase_before and not corner_phase_after:
-            self._p4_exit_boost_remaining = int(getattr(self, "_p4_exit_window_steps", 0))
-            if bool(getattr(self, "enable_p4_diagnostics", False)):
-                cs = getattr(self, "last_corridor_status", {}) or {}
-                if not isinstance(cs, dict):
-                    cs = {}
-                alpha_dbg = float(cs.get("alpha", float("nan")))
-                L_dbg = float(cs.get("L", float("nan")))
-                v_ratio_exec_dbg = float(getattr(self, "_p4_step_status", {}).get("v_ratio_exec", float("nan")))
-                exit_window = int(getattr(self, "_p4_exit_window_steps", 0))
-                print(
-                    f"[P4_EXIT] step={int(getattr(self, 'current_step', 0))} alpha={alpha_dbg:.4f} L={L_dbg:.4f} "
-                    f"v_ratio_exec={v_ratio_exec_dbg:.4f} exit_window={exit_window}"
-                )
-        else:
-            if int(getattr(self, "_p4_exit_boost_remaining", 0)) > 0:
-                self._p4_exit_boost_remaining = int(getattr(self, "_p4_exit_boost_remaining", 0)) - 1
-
-        # 添加info字典作为第四个返回值
+        
+        p4_status.update({
+            "v_ratio_exec": float(v_ratio_exec),
+            "omega_u_exec": float(omega_u_exec),
+            "omega_exec": float(self.angular_vel),
+            "v_exec": float(self.velocity),
+        })
+        
+        # --- 2. Physics Update ---
+        safe_action = (self.angular_vel, self.velocity)
+        self._apply_action_physics(safe_action)
+        
+        # --- 3. Perception Update ---
+        self.turn_info = self._compute_turn_info()
+        self._update_segment_info()
+        self.state = self._build_observation()
+        
+        # --- 4. Termination Check ---
+        done, done_reason = self._check_termination(p4_status, corner_phase_before)
+        
+        # --- 5. Reward Calculation ---
+        ctx = RewardContext(
+            contour_error=self.get_contour_error(self.current_position),
+            progress=float(self.state[4]) if len(self.state) > 4 else 0.0,
+            velocity=float(self.velocity),
+            heading_error=float(self.state[0]), 
+            jerk=float(self.jerk),
+            angular_jerk=float(self.angular_jerk),
+            angular_acc=float(self.angular_acc),
+            kcm_intervention=float(self.kcm_intervention),
+            corner_mask=bool(self.turn_info.get("corner_phase", False)),
+            turn_sign=int(self.turn_info.get("turn_sign", 0)),
+            stall_triggered=bool(getattr(self, "_p4_stall_triggered", False)),
+            lap_completed=bool(getattr(self, "lap_completed", False)),
+            is_closed=bool(self.closed),
+            end_distance=float(self.state[3]),
+            p4_status=p4_status,
+            corridor_status=getattr(self, "last_corridor_status", {}),
+            du_theta_u=0.0,
+            du_v_u=0.0,
+        )
+        reward, components = self.reward_calculator.calculate_reward(ctx)
+        
+        # --- 6. Info ---
         info = {
             "position": self.current_position.copy(),
             "step": self.current_step,
-            "contour_error": self.get_contour_error(self.current_position),
+            "contour_error": ctx.contour_error,
             "segment_idx": self.current_segment_idx,
-            "progress": self.state[4],  # 添加进度信息
-            "jerk": self.jerk,  # 添加当前捷度指标
-            "kcm_intervention": self.kcm_intervention,  # 添加运动学约束干预程度
+            "progress": ctx.progress,
+            "jerk": self.jerk,
+            "kcm_intervention": self.kcm_intervention,
             "corridor_status": copy.deepcopy(getattr(self, "last_corridor_status", {})),
-            "p4_status": copy.deepcopy(getattr(self, "_p4_step_status", {})),
+            "p4_status": copy.deepcopy(p4_status),
             "action_policy": action_policy.copy(),
             "action_exec": np.array(safe_action, dtype=float),
-            # P5.0：gap 统一在比率空间比较，便于判断 KCM/cap 干预程度
             "action_gap_abs": np.abs(np.array([omega_u_exec, v_ratio_exec], dtype=float) - action_policy),
+            "done_reason": done_reason,
+            "turn_info": copy.deepcopy(self.turn_info)
         }
-        normalized_state = self.normalize_state(self.state)
-        obs = normalized_state if self.return_normalized_obs else np.asarray(self.state, dtype=float).copy()
-        self._p7_3_assert_finite_array(name="obs", arr=obs, p4_status=p4_status)
+        
+        # Update last status
+        self._p4_step_status = dict(p4_status)
+        
+        # Update Exit Boost
+        corner_phase_after = bool(self.turn_info.get("corner_phase", False))
+        if corner_phase_before and not corner_phase_after:
+             self._p4_exit_boost_remaining = int(getattr(self, "_p4_exit_window_steps", 0))
+        else:
+             if int(getattr(self, "_p4_exit_boost_remaining", 0)) > 0:
+                 self._p4_exit_boost_remaining -= 1
+
+        # Obs Finalization
+        obs = self.normalize_state(self.state) if self.return_normalized_obs else self.state.copy()
+        
+        # Trace
+        self.debug_collector.append_trace(self.current_step, self.current_position, ctx.progress, ctx.contour_error, p4_status)
+
         return obs, reward, done, info
     
     def normalize_state(self, state):
@@ -754,46 +739,86 @@ class Env:
                 normalized[base + 2] = state[base + 2]
         return normalized
     
-    def apply_action(self, action):
+    def _apply_action_physics(self, action):
+        """Phase 20: 仅更新物理位置"""
         theta_prime, length_prime = action
-        # Path tangent + residual steering.
         new_pos = self.calculate_new_position(theta_prime, length_prime)
         self.current_position = new_pos
         self.trajectory.append(self.current_position.copy())
+
+    def _build_observation(self):
+        """Phase 20: 构建观测向量"""
         tau_next = self.calculate_direction_deviation(self.current_position)
-        seg_idx = int(self._find_containing_segment(self.current_position))
-        if seg_idx >= 0:
-            self.current_segment_idx = int(seg_idx)
-        _proj, _seg_idx_progress, s_now, _t_hat, _n_hat = self._project_onto_progress_path(self.current_position)
-        scan = self._scan_for_next_turn(float(s_now))
-        distance_to_next_turn = float(scan.get("dist_to_turn", float("inf")))
+        
+        distance_to_next_turn = self.turn_info.get("dist_to_turn", float("inf"))
         if not math.isfinite(distance_to_next_turn):
-            distance_to_next_turn = float(getattr(self, "_progress_total_length", 0.0))
+             distance_to_next_turn = float(getattr(self, "_progress_total_length", 0.0))
+        next_angle = self.turn_info.get("turn_angle", 0.0)
+        
         overall_progress = (
             self._calculate_closed_path_progress(self.current_position)
-            if self.closed
-            else self._calculate_path_progress(self.current_position)
+            if self.closed else self._calculate_path_progress(self.current_position)
         )
-        next_angle = float(scan.get("turn_angle", 0.0))
-
+        
         lookahead_features = self._compute_lookahead_features()
-        base_state = np.array(
-            [
-                theta_prime,
-                length_prime,
-                tau_next,
-                distance_to_next_turn,
-                overall_progress,
-                next_angle,
-                self.velocity,
-                self.acceleration,
-                self.jerk,
-                self.angular_vel,
-                self.angular_acc,
-                self.angular_jerk,
-            ]
-        )
+        
+        base_state = np.array([
+            self.angular_vel, 
+            self.velocity,    
+            tau_next,
+            distance_to_next_turn,
+            overall_progress,
+            next_angle,
+            self.velocity,    
+            self.acceleration,
+            self.jerk,
+            self.angular_vel, 
+            self.angular_acc,
+            self.angular_jerk,
+        ])
         return np.concatenate([base_state, lookahead_features])
+
+    def _check_termination(self, p4_status, corner_phase_before):
+        """Phase 20: 终止条件检查 (固化 stall 逻辑)"""
+        self._p4_stall_triggered = False
+        progress_now = float(self.state[4]) if len(self.state) > 4 else 0.0
+        progress_diff = max(0.0, progress_now - float(getattr(self, "_p4_last_progress_for_stall", 0.0)))
+        self._p4_last_progress_for_stall = float(progress_now)
+        
+        if not getattr(self, "reached_target", False):
+             if bool(corner_phase_before):
+                 self._p4_stall_counter = 0
+             else:
+                 stall_progress_eps = float(getattr(self, "_p4_stall_progress_eps", 1e-4))
+                 stall_v_eps = float(getattr(self, "_p4_stall_v_eps", 0.05))
+                 cap_low = float(getattr(self, "_p7_3_stall_cap_low", 0.25))
+                 v_ratio_cap_now = float(p4_status.get("v_ratio_cap", 1.0))
+                 low_cap = bool(math.isfinite(v_ratio_cap_now) and v_ratio_cap_now < cap_low)
+                 
+                 v_ratio_exec = float(p4_status.get("v_ratio_exec", 0.0))
+                 
+                 if progress_diff < stall_progress_eps and (low_cap or v_ratio_exec < stall_v_eps):
+                     self._p4_stall_counter = int(getattr(self, "_p4_stall_counter", 0)) + 1
+                 else:
+                     self._p4_stall_counter = 0
+             
+             if int(getattr(self, "_p4_stall_counter", 0)) >= int(getattr(self, "_p4_stall_steps", 300)):
+                 self._p4_stall_triggered = True
+
+        done = False
+        reason = "running"
+        
+        if self.reached_target:
+            done = True
+            reason = "success"
+        elif self.current_step >= self.max_steps:
+            done = True
+            reason = "max_steps"
+        elif self._p4_stall_triggered:
+            done = True
+            reason = "stall"
+            
+        return done, reason
 
     def _update_segment_info(self):
         """使用缓存的线段信息"""
@@ -1236,38 +1261,7 @@ class Env:
         self._p4_stall_triggered = False
         self._p4_step_status = {}
 
-    def _init_p6_1_config(self) -> None:
-        """读取/初始化 P6.1 配置（可在 YAML 的 reward_weights.p6_1 下设置）。"""
-        cfg = {}
-        if isinstance(self.reward_weights, dict):
-            cfg = self.reward_weights.get("p6_1", {}) or {}
-        if not isinstance(cfg, dict):
-            cfg = {}
 
-        # 1) 动作变化率惩罚（reward 层面）：Δu 使用 action_policy 的 ratio 动作
-        self._p6_du_enabled = bool(cfg.get("du_enabled", True))
-        self._p6_du_weight = float(cfg.get("w_du", 0.01))
-        self._p6_du_mode = str(cfg.get("du_mode", "l1")).lower()  # l1|l2
-
-        # 2) 目标速度平滑器（env 层面）：policy v_des -> v_target -> KCM
-        self._p6_v_target_smoother_enabled = bool(cfg.get("v_target_smoother_enabled", True))
-        self._p6_v_target_mode = str(cfg.get("v_target_mode", "accel")).lower()  # lowpass|accel
-
-        # A) 一阶低通
-        self._p6_v_target_tau = float(cfg.get("v_target_tau", 0.10))
-
-        # B) a/j 限幅的目标器（推荐）
-        a_ratio = float(cfg.get("a_ref_max_ratio", 0.6))
-        j_ratio = float(cfg.get("j_ref_max_ratio", 0.6))
-        self._p6_a_ref_max = float(max(0.0, min(1.0, a_ratio))) * float(self.MAX_ACC)
-        self._p6_j_ref_max = float(max(0.0, min(1.0, j_ratio))) * float(self.MAX_JERK)
-        self._p6_j_ref_enabled = bool(cfg.get("j_ref_enabled", True))
-
-        # 运行时状态（reset 时会重置）
-        self._p6_prev_action_policy = None
-        self._p6_v_target_prev = 0.0
-        self._p6_a_ref_prev = 0.0
-        self._p6_v_target_initialized = False
 
     def _init_p7_3_config(self) -> None:
         """读取/初始化 P7.3 配置（平滑与终点可靠性）。"""
@@ -1426,137 +1420,11 @@ class Env:
         # Patch v3.6: straight_mode_ignore_geom_cap - ignore v_cap_geom in straight_mode
         self._p8_straight_mode_ignore_geom_cap = bool(cfg.get("straight_mode_ignore_geom_cap", False))
 
-    def _p7_3_compute_kappa_exec(self, *, v_exec: float, omega_exec: float) -> float:
-        """P7.3：执行曲率（奇异点保护）。"""
-        v = float(v_exec) if math.isfinite(float(v_exec)) else 0.0
-        w = float(omega_exec) if math.isfinite(float(omega_exec)) else 0.0
-        v = float(max(v, 0.0))
-        v_eps = float(getattr(self, "_p7_3_v_eps", 1e-12))
-        denom = float(v + v_eps)
-        kappa = float(abs(w) / denom) if denom > 0.0 else 0.0
-        if not math.isfinite(kappa):
-            return 0.0
-        return float(kappa)
 
-    def _p7_3_apply_kappa_smoothing(self, omega_intent: float, v_intent: float) -> float:
-        """P7.3：对曲率 kappa=|omega|/(v+eps) 做简单一阶滤波，抑制 dkappa 尖峰（KISS）。"""
-        if not bool(getattr(self, "_p7_3_kappa_smoothing_enabled", False)):
-            return float(omega_intent)
 
-        beta = float(getattr(self, "_p7_3_kappa_smoothing_beta", 0.0))
-        if not math.isfinite(beta) or beta <= 0.0:
-            return float(omega_intent)
 
-        v_eps = float(getattr(self, "_p7_3_v_eps", 1e-12))
-        v = float(v_intent) if math.isfinite(float(v_intent)) else 0.0
-        v = float(max(v, 0.0))
-        denom = float(v + v_eps)
 
-        w = float(omega_intent) if math.isfinite(float(omega_intent)) else 0.0
-        sign = 0.0
-        if w > 0.0:
-            sign = 1.0
-        elif w < 0.0:
-            sign = -1.0
 
-        kappa_des = float(abs(w) / denom) if denom > 0.0 else 0.0
-        prev = float(getattr(self, "_p7_3_kappa_filt", 0.0))
-        if not math.isfinite(prev) or prev < 0.0:
-            prev = 0.0
-
-        # 先做指数平滑，再做 dkappa 限幅（对尖峰更有效）
-        kappa_raw = float((1.0 - beta) * prev + beta * kappa_des)
-        dkappa_limit = float(getattr(self, "_p7_3_kappa_dkappa_limit", float("inf")))
-        if math.isfinite(dkappa_limit) and dkappa_limit > 0.0:
-            delta = float(np.clip(kappa_raw - prev, -dkappa_limit, dkappa_limit))
-            kappa_filt = float(prev + delta)
-        else:
-            kappa_filt = float(kappa_raw)
-        if not math.isfinite(kappa_filt) or kappa_filt < 0.0:
-            kappa_filt = 0.0
-        self._p7_3_kappa_filt = float(kappa_filt)
-
-        w_smooth = float(sign * kappa_filt * denom)
-        w_max = float(getattr(self, "MAX_ANG_VEL", 0.0))
-        if math.isfinite(w_max) and w_max > 0.0:
-            w_smooth = float(np.clip(w_smooth, -w_max, w_max))
-        return float(w_smooth)
-
-    def _p7_3_trace_append(self, *, p4_status: Dict[str, float]) -> None:
-        ring = getattr(self, "_p7_3_trace_ring", None)
-        if not isinstance(ring, list):
-            ring = []
-            self._p7_3_trace_ring = ring
-
-        try:
-            ring.append(
-                {
-                    "step": int(getattr(self, "current_step", 0)),
-                    "pos": [float(self.current_position[0]), float(self.current_position[1])],
-                    "progress": float(self.state[4]) if getattr(self, "state", None) is not None and len(self.state) > 4 else float("nan"),
-                    "contour_error": float(self.get_contour_error(self.current_position)),
-                    "v_exec": float(p4_status.get("v_exec", float("nan"))),
-                    "omega_exec": float(p4_status.get("omega_exec", float("nan"))),
-                    "v_ratio_exec": float(p4_status.get("v_ratio_exec", float("nan"))),
-                    "v_ratio_cap": float(p4_status.get("v_ratio_cap", float("nan"))),
-                    "kappa_exec": float(p4_status.get("kappa_exec", float("nan"))),
-                    "dkappa_exec": float(p4_status.get("dkappa_exec", float("nan"))),
-                    "alpha": float(p4_status.get("alpha", float("nan"))),
-                }
-            )
-        except Exception:
-            return
-
-        max_len = int(getattr(self, "_p7_3_trace_ring_size", 200))
-        if len(ring) > max_len:
-            del ring[: max(0, len(ring) - max_len)]
-
-    def _p7_3_dump_trace(self, *, reason: str, p4_status: Dict[str, float], extra: Optional[Dict[str, object]] = None) -> None:
-        """P7.3：发现 NaN/Inf 时 dump trace 到 PPO_project/out。"""
-        try:
-            ppo_root = Path(__file__).resolve().parents[2]
-            out_dir = ppo_root / "out" / "p7_3_nan_dumps"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            stamp = int(time.time() * 1000.0)
-            path = out_dir / f"dump_{stamp}_{reason}.json"
-
-            payload = {
-                "reason": str(reason),
-                "step": int(getattr(self, "current_step", 0)),
-                "p4_status": {k: float(v) for k, v in (p4_status or {}).items() if isinstance(v, (int, float, np.floating))},
-                "trace_tail": list(getattr(self, "_p7_3_trace_ring", []) or []),
-            }
-            if extra:
-                payload["extra"] = extra
-            path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        except Exception:
-            return
-
-    def _p7_3_assert_finite(self, *, name: str, value: float, p4_status: Dict[str, float]) -> None:
-        v = float(value)
-        if math.isfinite(v):
-            return
-        self._p7_3_dump_trace(reason=f"non_finite_{name}", p4_status=p4_status, extra={"value": str(value)})
-        raise AssertionError(f"[P7.3] non-finite {name}: {value}")
-
-    def _p7_3_assert_finite_array(self, *, name: str, arr: np.ndarray, p4_status: Dict[str, float]) -> None:
-        try:
-            a = np.asarray(arr, dtype=float)
-        except Exception:
-            self._p7_3_dump_trace(reason=f"non_numeric_{name}", p4_status=p4_status)
-            raise AssertionError(f"[P7.3] non-numeric {name}")
-
-        finite = np.isfinite(a)
-        if bool(np.all(finite)):
-            return
-
-        nan_count = int(a.size - int(np.count_nonzero(finite)))
-        self._p7_3_dump_trace(
-            reason=f"non_finite_{name}",
-            p4_status=p4_status,
-            extra={"shape": list(a.shape), "nan_count": int(nan_count)},
-        )
-        raise AssertionError(f"[P7.3] non-finite {name}: nan_count={nan_count}")
 
     def _wrap_angle(self, angle: float) -> float:
         return (float(angle) + math.pi) % (2 * math.pi) - math.pi

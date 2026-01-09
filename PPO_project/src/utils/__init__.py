@@ -8,7 +8,7 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
-__all__ = ["geometry", "logger", "path_generator", "rl_utils", "checkpoint", "metrics", "plotter"]
+__all__ = ["geometry", "logger", "path_generator", "rl_utils", "checkpoint", "metrics", "plotter", "debug"]
 
 
 def __getattr__(name: str) -> Any:  # pragma: no cover

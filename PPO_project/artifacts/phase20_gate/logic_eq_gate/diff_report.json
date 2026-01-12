@@ -1,0 +1,24 @@
+{
+  "status": "fail",
+  "diffs": [
+    "Length mismatch: 747 vs 1975",
+    "Column x mismatch. Max diff: 10.000464640841878",
+    "Column y mismatch. Max diff: 9.997149577016463",
+    "Column velocity mismatch. Max diff: 94.9085090658928",
+    "Column reward mismatch. Max diff: 5.988586233986495",
+    "Column progress mismatch. Max diff: 0.5898817321067868",
+    "Column done mismatch count: 1",
+    "Column corner_phase mismatch count: 451",
+    "Column turn_sign mismatch count: 746"
+  ],
+  "max_errors": {
+    "x": 10.000464640841878,
+    "y": 9.997149577016463,
+    "velocity": 94.9085090658928,
+    "reward": 5.988586233986495,
+    "progress": 0.5898817321067868,
+    "done": 1.0,
+    "corner_phase": 451.0,
+    "turn_sign": 746.0
+  }
+}

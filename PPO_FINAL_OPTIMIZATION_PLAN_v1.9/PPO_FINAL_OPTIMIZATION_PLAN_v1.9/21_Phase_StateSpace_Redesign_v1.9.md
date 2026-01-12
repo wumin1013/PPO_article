@@ -1,6 +1,6 @@
 # Phase 21：状态空间精简与指标口径（FINAL v1.9）
 版本日期：2026-01-07  
-依赖：无（首个执行Phase）  
+依赖：Phase 20 Gate PASSED（Regression Verification）  
 **阻断后续**：22/23/30 等 Phase 必须在本 Phase 通过后执行
 
 ---

@@ -228,7 +228,7 @@ def run_p0_smoke(
         float(np.nanmean(np.array(progress_finals, dtype=float))) if progress_finals else float("nan")
     )
 
-    thresholds = {"mean_return_lt": -20.0, "mean_progress_final_lt": 0.02}
+    thresholds = {"mean_return_lt": -5.0, "mean_progress_final_lt": 0.02}
     passed = (
         (not has_non_finite)
         and math.isfinite(mean_return)
@@ -457,6 +457,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser.add_argument("--deterministic", action="store_true", help="Use deterministic policy (mu) for eval")
     parser.add_argument("--seed", type=int, default=None, help="Override evaluation seed")
     parser.add_argument("--episode_set", type=str, default=None, help="Episode set label or seed list file")
+    parser.add_argument(
+        "--path_type",
+        type=str,
+        default=None,
+        help="Override config.path.type for regression (e.g. square|line|s_shape|s_shape_bspline|sharp_angle)",
+    )
     args = parser.parse_args(argv)
 
     project_root = Path(__file__).resolve().parents[1]
@@ -464,11 +470,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     config = _load_yaml(resolved_config_path)
     config["__resolved_config_path__"] = str(resolved_config_path)
 
+    if args.path_type:
+        if not isinstance(config.get("path"), dict):
+            config["path"] = {}
+        config["path"]["type"] = str(args.path_type)
+
     seed = int(config.get("seed", config.get("experiment", {}).get("seed", 42)))
     if args.seed is not None:
         seed = int(args.seed)
     _set_seed(seed)
-    per_episode_seeds = _resolve_episode_seeds(args.episode_set, episodes=args.episodes, base_seed=seed)
+
+    episode_set = args.episode_set
+    if episode_set:
+        resolved_episode_set_path = _resolve_path(episode_set, project_root=project_root)
+        if resolved_episode_set_path.exists():
+            episode_set = str(resolved_episode_set_path)
+    per_episode_seeds = _resolve_episode_seeds(episode_set, episodes=args.episodes, base_seed=seed)
 
     out_dir = _resolve_path(args.out, project_root=project_root)
     _ensure_out_dir(out_dir)

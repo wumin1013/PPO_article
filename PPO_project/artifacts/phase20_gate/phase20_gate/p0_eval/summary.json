@@ -6,7 +6,7 @@
     "model_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_gold_20251230_034122\\checkpoint.pth",
     "deterministic": true,
     "seed_eval": 42,
-    "episode_set": "episode_sets/phase20_gate_seeds.txt",
+    "episode_set": null,
     "success_rate": 1.0,
     "stall_rate": 0.0,
     "mean_progress_final": 1.0,
@@ -19,7 +19,7 @@
       "max_abs_contour_error_le": 0.75
     },
     "half_epsilon": 0.75,
-    "timestamp": "2026-01-12 14:25:35",
+    "timestamp": "2026-01-12 11:00:22",
     "config_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\configs\\p0_l2_gold.yaml"
   },
   "episodes": [

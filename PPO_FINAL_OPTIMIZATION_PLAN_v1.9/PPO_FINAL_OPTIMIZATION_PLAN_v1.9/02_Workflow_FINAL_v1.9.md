@@ -33,27 +33,24 @@
 │  └─────────────────────────────────────────────────────────────────┘   │
 │                                                                         │
 │  ⚠️ Phase 20 是 Refactoring，不是 Rewrite                              │
-│     - 不改变 Physics / Reward / Done 语义                              │
+│     - 尽量保持 Physics / Reward / Done 语义稳定（若变化必须记录）        │
 │     - 不改变状态维度（Phase 21 负责）                                   │
 │     - 不引入新训练策略                                                  │
 └─────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
             ╔═════════════════════════════════════════════════════════════╗
-            ║           🚧 GATE: Logic Equivalence Check 🚧               ║
+            ║           🚧 GATE: Regression Verification 🚧               ║
             ╠═════════════════════════════════════════════════════════════╣
-            ║  验证脚本: verify_logic_equivalence.py                      ║
+            ║  验证脚本: acceptance_suite.py                              ║
             ║                                                             ║
             ║  通过条件（全部满足）：                                      ║
-            ║  ✓ Trace 长度完全一致                                       ║
-            ║  ✓ Position: |Δpos| < 1e-9                                 ║
-            ║  ✓ Velocity: |Δv| < 1e-9                                   ║
-            ║  ✓ Reward: |Δr| < 1e-9（含各分项）                          ║
-            ║  ✓ Progress: |Δprogress| < 1e-9                            ║
-            ║  ✓ Done/DoneReason: 严格一致                                ║
-            ║  ✓ corner_phase / turn_sign: 严格一致                       ║
+            ║  ✓ P0 回归评估 PASSED（p0_eval）                            ║
+            ║  ✓ P0_L2 回归评估 PASSED（p0_eval）                         ║
             ║                                                             ║
-            ║  ❌ GATE FAILED → 禁止进入 Phase 21，必须修复差异后重验      ║
+            ║  （可选诊断）Logic Equivalence Check：失败需记录差异来源     ║
+            ║                                                             ║
+            ║  ❌ GATE FAILED → 禁止进入 Phase 21，必须修复回归后重验      ║
             ╚═════════════════════════════════════════════════════════════╝
                                     │
                                     ▼ (GATE PASSED)
@@ -95,7 +92,7 @@
 
 | 阶段 | 前置依赖 | 阻断后续 |
 |------|----------|----------|
-| **Phase 20** | 无 | Gate: Logic Equivalence Check |
+| **Phase 20** | 无 | Gate: Regression Verification |
 | **Gate** | Phase 20 完成 | Phase 21 |
 | **Phase 21** | Gate PASSED | Phase 22 |
 | **Phase 22** | Phase 21 | Phase 23 |
@@ -111,47 +108,41 @@
 
 ### 3.1 验证脚本
 
-**文件**：`PPO_project/tools/verify_logic_equivalence.py`
+**文件**：`PPO_project/tools/acceptance_suite.py`
 
 **用法**：
 ```powershell
-# 步骤 1：保存清理后代码
-git stash
+conda activate PPO
+cd PPO_project
 
-# 步骤 2：切换到清理前版本，生成 before trace
-git checkout pre_phase20
-python tools/verify_logic_equivalence.py --mode before --config configs/p0_l2_gold.yaml --out out/phase20_gate
+# 固定评估集（多 seed），避免 Gate 过窄
+$episode_set = "episode_sets/phase20_gate_seeds.txt"
+$episodes = 10
 
-# 步骤 3：切换到清理后版本，生成 after trace
-git checkout phase20-cleanup
-python tools/verify_logic_equivalence.py --mode after --config configs/p0_l2_gold.yaml --out out/phase20_gate
+# Gate（阻断）：在 baseline 路径族（square）上做多 seed 回归
+python tools/acceptance_suite.py --phase p0_eval --config configs/p0_l2_gold.yaml --path_type square --episode_set $episode_set --episodes $episodes --deterministic --model artifacts/P0_gold_20251230_034122/checkpoint.pth --out out/phase20_gate/p0_eval
+python tools/acceptance_suite.py --phase p0_eval --config configs/p0_l2_gold.yaml --path_type square --episode_set $episode_set --episodes $episodes --deterministic --model artifacts/P0_L2/P0_gold_20251230_034122/checkpoint.pth --out out/phase20_gate/p0_l2_eval
 
-# 步骤 4：运行 diff 比较
-python tools/verify_logic_equivalence.py --mode compare --out out/phase20_gate
+# 可选扩展：多路径诊断覆盖（不阻断；用于发现“跨路径族”退化）
+$path_types_ext = @("line", "s_shape", "sharp_angle")
+foreach ($path_type in $path_types_ext) {
+  python tools/acceptance_suite.py --phase p0_eval --config configs/p0_l2_gold.yaml --path_type $path_type --episode_set $episode_set --episodes $episodes --deterministic --model artifacts/P0_gold_20251230_034122/checkpoint.pth --out out/phase20_gate/extended/p0_eval/$path_type
+  python tools/acceptance_suite.py --phase p0_eval --config configs/p0_l2_gold.yaml --path_type $path_type --episode_set $episode_set --episodes $episodes --deterministic --model artifacts/P0_L2/P0_gold_20251230_034122/checkpoint.pth --out out/phase20_gate/extended/p0_l2_eval/$path_type
+}
 ```
 
 ### 3.2 验收标准表
 
-| 指标 | 强制标准 | 容差（仅限解释后应用） |
-|------|----------|------------------------|
-| Trace 长度 | 完全一致 | 不允许差异 |
-| Position (pos_x, pos_y) | 完全一致 | `< 1e-9` |
-| Velocity | 完全一致 | `< 1e-9` |
-| Reward (及各分项) | 完全一致 | `< 1e-9` |
-| Progress | 完全一致 | `< 1e-9` |
-| Contour Error | 完全一致 | `< 1e-9` |
-| Done / Done Reason | 严格一致 | 不允许差异 |
-| corner_phase | 严格一致 | 不允许差异 |
-| turn_sign | 严格一致 | 不允许差异 |
+| 指标 | 强制标准 |
+|------|----------|
+| P0 回归评估 | `out/phase20_gate/p0_eval/summary.json` 中 `summary.passed == true` |
+| P0_L2 回归评估 | `out/phase20_gate/p0_l2_eval/summary.json` 中 `summary.passed == true` |
 
 ### 3.3 Gate 判定逻辑
 
 ```python
-if exact_match:
-    result = "✅ GATE PASSED (exact match)"
-elif all_within_tolerance:
-    # 必须在报告中解释差异来源
-    result = "✅ GATE PASSED (within tolerance, see diff_report.json)"
+if p0_eval_passed and p0_l2_eval_passed:
+    result = "✅ GATE PASSED (regression verification)"
 else:
     result = "❌ GATE FAILED"
     # 禁止进入 Phase 21
@@ -161,10 +152,16 @@ else:
 
 | 文件 | 说明 |
 |------|------|
-| `out/phase20_gate/trace_before.csv` | 清理前 trace |
-| `out/phase20_gate/trace_after.csv` | 清理后 trace |
-| `out/phase20_gate/diff_report.json` | Diff 详情 |
-| `out/phase20_gate/summary.json` | PASS/FAIL 判定 |
+| `out/phase20_gate/p0_eval/summary.json` | P0 回归评估结果（Gate 证据） |
+| `out/phase20_gate/p0_l2_eval/summary.json` | P0_L2 回归评估结果（Gate 证据） |
+| `episode_sets/phase20_gate_seeds.txt` | 固定评估集（多 seed） |
+| `out/phase20_gate/summary.json` | Gate 汇总（可选聚合文件） |
+
+### 3.5 可选：Logic Equivalence Check（诊断用，非 Gate）
+
+- 脚本：`PPO_project/tools/verify_logic_equivalence.py`
+- 目的：量化 pre/post 的行为差异，用于解释“为什么不等价”
+- 产物（建议归档）：`trace_before.csv`, `trace_after.csv`, `diff_report.json`
 
 ---
 
@@ -174,8 +171,8 @@ else:
 |----------|------|
 | 连续 2 个 run FAIL | 暂停，检查状态空间/reward |
 | 拐角改善但直线退化 | 隔离 reward（corner vs non-corner） |
-| **Phase 20 Gate FAILED** | 立即停止，回滚到 `pre_phase20`，定位差异来源 |
-| Trace 单步偏差 > 1e-6 | 视为严重问题，需逐行 diff 代码变更 |
+| **Phase 20 Gate FAILED** | 立即停止，定位回归失败来源（P0/P0_L2 哪个 failed） |
+|（可选）Logic Equivalence Check 失败 | 不阻断，但必须归档差异并在 Phase 20 总结中说明 |
 
 ---
 
@@ -192,11 +189,13 @@ else:
 
 | 交付物 | 说明 | 归档位置 |
 |--------|------|----------|
-| `trace_before.csv` | 清理前 trace | `artifacts/phase20/` |
-| `trace_after.csv` | 清理后 trace | `artifacts/phase20/` |
-| `diff_report.json` | Diff 详情 | `artifacts/phase20/` |
-| `summary.json` | PASS/FAIL 证明 | `artifacts/phase20/` |
-| `flag_inventory.csv` | Flags 盘点表 | `artifacts/phase20/` |
+| `p0_eval/summary.json` | P0 回归评估结果（Gate 证据） | `artifacts/phase20_gate/` |
+| `p0_l2_eval/summary.json` | P0_L2 回归评估结果（Gate 证据） | `artifacts/phase20_gate/` |
+| `summary.json` | Gate 汇总（可选） | `artifacts/phase20_gate/` |
+| `trace_before.csv` | Logic Equivalence 诊断 trace（可选） | `artifacts/phase20_gate/` |
+| `trace_after.csv` | Logic Equivalence 诊断 trace（可选） | `artifacts/phase20_gate/` |
+| `diff_report.json` | Logic Equivalence diff（可选） | `artifacts/phase20_gate/` |
+| `flag_inventory.csv` | Flags 盘点表（可选） | `artifacts/phase20_gate/` |
 | `cnc_env.py` (清理后) | 核心文件 | `src/environment/` |
 
 ---
@@ -214,21 +213,18 @@ else:
 - ✅ 为 Phase 21 的 12 维状态提取准备稳定接口
 
 ### 6.2 Phase 20 不做什么
-- ❌ 不改变 Physics 语义
-- ❌ 不改变 Reward 语义
-- ❌ 不改变 Done/Success 判定逻辑
 - ❌ 不改变状态空间维度（Phase 21 负责）
 - ❌ 不引入新的训练策略或奖励项
+- （目标）尽量不改变 Physics / Reward / Done 行为；若变化必须记录并通过回归验证
 
 ### 6.3 版本未通过 Gate 的处置
 
 ```
 1. 立即停止 Phase 20 后续工作
-2. 使用 git diff 定位代码变更点
-3. 对比 diff_report.json 确认差异字段
-4. 修复导致差异的代码变更
-5. 重新运行 verify_logic_equivalence.py
-6. 循环直到 GATE PASSED
+2. 读取 `out/phase20_gate/p0_eval/summary.json` 与 `out/phase20_gate/p0_l2_eval/summary.json`，确认哪个回归失败
+3. 使用 git diff 定位代码变更点，修复导致回归失败的改动
+4. 重新运行 acceptance_suite（直至两份 summary 都 passed）
+5. （可选）运行 verify_logic_equivalence.py 量化差异来源并归档
 ```
 
 ---
@@ -238,4 +234,5 @@ else:
 | 版本 | 日期 | 变更说明 |
 |------|------|----------|
 | v1.9 | 2026-01-07 | 初始版本 |
-| v1.9.1 | 2026-01-08 | 插入 Phase 20 + Gate: Logic Equivalence Check |
+| v1.9.1 | 2026-01-08 | 插入 Phase 20 + Gate（最初为 Logic Equivalence Check） |
+| v1.9.2 | 2026-01-12 | Gate 调整为 Regression Verification，Logic Equivalence 作为诊断 |

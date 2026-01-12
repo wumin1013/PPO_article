@@ -56,23 +56,33 @@ class Env:
         lookahead_points: int = 5,
         return_normalized_obs: bool = True,
     ):
-        self.lookahead_points = max(1, int(lookahead_points))
-        self.lookahead_feature_size = 3
-        self.base_state_keys = [
-            "theta_prime",
-            "length_prime",
-            "tau_next",
-            "distance_to_next_turn",
-            "overall_progress",
-            "next_angle",
-            "velocity",
-            "acceleration",
-            "jerk",
-            "angular_vel",
-            "angular_acc",
-            "angular_jerk",
+        self.lookahead_points = 0  # Phase 21: 禁用lookahead
+        self.lookahead_feature_size = 0
+        
+        # Phase 21: 8维核心特征
+        self.core_keys = [
+            "contour_error_norm",    # |e| / half_ε
+            "e_n_norm",              # e_n / half_ε (带符号)
+            "heading_error_norm",    # τ / π
+            "velocity_norm",         # v / MAX_VEL
+            "acceleration_norm",     # a / MAX_ACC
+            "angular_vel_norm",      # ω / MAX_ANG_VEL
+            "overall_progress",      # [0, 1]
+            "dist_to_turn_norm",     # dist_to_turn / dist_enter
         ]
-        self.observation_dim = len(self.base_state_keys) + self.lookahead_points * self.lookahead_feature_size
+        
+        # Phase 21: 4维拐角感知特征
+        self.corner_keys = [
+            "turn_angle_norm",   # turn_angle / π
+            "turn_sign",         # +1 左转 / -1 右转 / 0 直线
+            "corner_phase",      # 1.0 在拐角期 / 0.0 否
+            "inside_signed",     # turn_sign × e_n_norm
+        ]
+        
+        # 保留base_state_keys用于兼容性
+        self.base_state_keys = self.core_keys + self.corner_keys
+        
+        self.observation_dim = len(self.core_keys) + len(self.corner_keys)  # = 12
         self.action_space_dim = 2
         self.epsilon = epsilon  # 总带宽（Pl到Pr的距离）
         self.half_epsilon = epsilon / 2  # 单侧偏移距离（Pm到Pl或Pr的距离）
@@ -212,26 +222,25 @@ class Env:
                     max_y = max(p[1] for p in polygon)
                     self.rtree_idx.insert(idx, (min_x, min_y, max_x, max_y))
         
-        # 现在缓存已经填充，可以安全地设置归一化参        
+        # Phase 21: 精简的归一化参数（12维状态已在_build_state中归一化）
+        # 保留此字典用于兼容性和normalize_state方法
         self.normalization_params = {
-            'theta_prime': self.MAX_ANG_VEL,
-            'length_prime': self.MAX_VEL,
-            'tau_next': math.pi,
-            'distance_to_next_turn': self.cache['total_path_length'] or 10.0,  # 使用缓存的总长度
-            'overall_progress': 1.0,  # 本身就是[0,1]范围
-            'next_angle': math.pi,
-            'velocity': self.MAX_VEL,
-            'acceleration': self.MAX_ACC,
-            'jerk': self.MAX_JERK,
-            'angular_vel': self.MAX_ANG_VEL,
-            'angular_acc': self.MAX_ANG_ACC,
-            'angular_jerk': self.MAX_ANG_JERK,
-            'lookahead_longitudinal': self.lookahead_longitudinal_scale,
-            'lookahead_lateral': self.lookahead_lateral_scale,
-            'lookahead_curvature_rate': self.curvature_rate_scale,
+            'contour_error_norm': 1.0,  # 已归一化
+            'e_n_norm': 1.0,            # 已归一化
+            'heading_error_norm': 1.0,  # 已归一化
+            'velocity_norm': 1.0,       # 已归一化
+            'acceleration_norm': 1.0,   # 已归一化
+            'angular_vel_norm': 1.0,    # 已归一化
+            'overall_progress': 1.0,    # [0,1]范围
+            'dist_to_turn_norm': 1.0,   # 已归一化
+            'turn_angle_norm': 1.0,     # 已归一化
+            'turn_sign': 1.0,           # {-1, 0, 1}
+            'corner_phase': 1.0,        # {0, 1}
+            'inside_signed': 1.0,       # 已归一化
         }
+        # Phase 21: 更新observation_space边界
         self.observation_space = gym.spaces.Box(
-            low=-np.inf, high=np.inf, shape=(self.observation_dim,), dtype=np.float32
+            low=-10.0, high=10.0, shape=(self.observation_dim,), dtype=np.float32
         )
 
         # 初始化走廊配置（允许通过 reward_weights.corridor 覆盖）
@@ -537,39 +546,12 @@ class Env:
         self._p6_prev_action_policy = None
 
         # 初始观测
-        _proj, _seg_idx, s_now, _t_hat, _n_hat = self._project_onto_progress_path(self.current_position)
-        
-        # Phase 20: Use _compute_turn_info
+        # Phase 21: 使用统一的12维状态构建
         self.turn_info = self._compute_turn_info()
-        distance_to_next_turn = self.turn_info["dist_to_turn"]
-        next_angle = self.turn_info["turn_angle"]
         
-        if not math.isfinite(distance_to_next_turn):
-            distance_to_next_turn = float(getattr(self, "_progress_total_length", 0.0))
-            
-        overall_progress = 0.0
-        tau_initial = 0.0
-        lookahead_features = self._compute_lookahead_features()
-
-        self.state = np.array(
-            [
-                0.0,  # 初始theta_prime
-                0.0,  # 初始length_prime
-                tau_initial,
-                distance_to_next_turn,
-                overall_progress,
-                next_angle,
-                self.velocity,
-                self.acceleration,
-                self.jerk,
-                self.angular_vel,
-                self.angular_acc,
-                self.angular_jerk,
-            ]
-        )
-        self.state = np.concatenate([self.state, lookahead_features])
-        normalized_state = self.normalize_state(self.state)
-        return normalized_state if self.return_normalized_obs else self.state.copy()
+        # Phase 21: 使用精简状态空间
+        self.state = self._build_state()
+        return self.state.copy()  # 已归一化
 
     def initialize_starting_conditions(self):
         p1 = self.Pm[0]
@@ -674,11 +656,16 @@ class Env:
         done, done_reason = self._check_termination(p4_status, corner_phase_before)
         
         # --- 5. Reward Calculation ---
+        # Phase 21: 状态索引映射
+        # [0]=contour_error_norm, [1]=e_n_norm, [2]=heading_error_norm
+        # [3]=velocity_norm, [4]=acceleration_norm, [5]=angular_vel_norm
+        # [6]=overall_progress, [7]=dist_to_turn_norm
+        # [8]=turn_angle_norm, [9]=turn_sign, [10]=corner_phase, [11]=inside_signed
         ctx = RewardContext(
             contour_error=self.get_contour_error(self.current_position),
-            progress=float(self.state[4]) if len(self.state) > 4 else 0.0,
+            progress=float(self.state[6]) if len(self.state) > 6 else 0.0,  # overall_progress
             velocity=float(self.velocity),
-            heading_error=float(self.state[0]), 
+            heading_error=float(self.state[2]) if len(self.state) > 2 else 0.0,  # heading_error_norm
             jerk=float(self.jerk),
             angular_jerk=float(self.angular_jerk),
             angular_acc=float(self.angular_acc),
@@ -688,7 +675,7 @@ class Env:
             stall_triggered=bool(getattr(self, "_p4_stall_triggered", False)),
             lap_completed=bool(getattr(self, "lap_completed", False)),
             is_closed=bool(self.closed),
-            end_distance=float(self.state[3]),
+            end_distance=float(self.state[7]) if len(self.state) > 7 else 0.0,  # dist_to_turn_norm
             p4_status=p4_status,
             corridor_status=getattr(self, "last_corridor_status", {}),
             du_theta_u=0.0,
@@ -726,7 +713,8 @@ class Env:
                  self._p4_exit_boost_remaining -= 1
 
         # Obs Finalization
-        obs = self.normalize_state(self.state) if self.return_normalized_obs else self.state.copy()
+        # Phase 21: _build_state已返回归一化状态
+        obs = self.state.copy()
         
         # Trace
         self.debug_collector.append_trace(self.current_step, self.current_position, ctx.progress, ctx.contour_error, p4_status)
@@ -734,35 +722,9 @@ class Env:
         return obs, reward, done, info
     
     def normalize_state(self, state):
-        normalized = np.zeros_like(state, dtype=float)
-        base_len = len(self.base_state_keys)
-        for i, key in enumerate(self.base_state_keys):
-            max_val = self.normalization_params[key]
-            # 特殊处理距离和进度
-            if key == 'distance_to_next_turn':
-                scaled = np.log1p(state[i]) / np.log1p(max_val)
-                normalized[i] = np.clip(scaled, 0, 1)
-            elif key == 'overall_progress':
-                normalized[i] = state[i]
-            else:
-                normalized[i] = np.clip(state[i] / max_val, -1, 1)
-
-        offset = base_len
-        for idx in range(self.lookahead_points):
-            base = offset + idx * self.lookahead_feature_size
-            if base + 2 >= len(state):
-                break
-            # s_i: 前向距离，归一化到[0,1]
-            normalized[base] = np.clip(state[base] / self.lookahead_longitudinal_scale, 0, 1)
-            # d_i: 法向距离，采用软缩放+ tanh 防饱和，左正右负
-            d_scaled = (state[base + 1] / max(self.half_epsilon, 1e-6)) / self.lookahead_lateral_soft_k
-            normalized[base + 1] = np.tanh(d_scaled)
-            # 曲率变化率（可选），压到[-1,1]
-            if self.curvature_rate_scale > 0:
-                normalized[base + 2] = np.clip(state[base + 2] / self.curvature_rate_scale, -1, 1)
-            else:
-                normalized[base + 2] = state[base + 2]
-        return normalized
+        """Phase 21: 状态已在_build_state中归一化，此方法保留用于兼容性"""
+        # Phase 21: _build_state已经返回归一化状态，直接返回拷贝
+        return state.copy()
     
     def _apply_action_physics(self, action):
         """Phase 20: 仅更新物理位置"""
@@ -772,41 +734,85 @@ class Env:
         self.trajectory.append(self.current_position.copy())
 
     def _build_observation(self):
-        """Phase 20: 构建观测向量"""
-        tau_next = self.calculate_direction_deviation(self.current_position)
+        """Phase 21: 构建12维精简状态向量（兼容旧名称）"""
+        return self._build_state()
+    
+    def _build_state(self) -> np.ndarray:
+        """Phase 21: 构建12维精简状态向量
         
-        distance_to_next_turn = self.turn_info.get("dist_to_turn", float("inf"))
-        if not math.isfinite(distance_to_next_turn):
-             distance_to_next_turn = float(getattr(self, "_progress_total_length", 0.0))
-        next_angle = self.turn_info.get("turn_angle", 0.0)
+        8维核心特征:
+            contour_error_norm, e_n_norm, heading_error_norm, velocity_norm,
+            acceleration_norm, angular_vel_norm, overall_progress, dist_to_turn_norm
+        
+        4维拐角感知特征:
+            turn_angle_norm, turn_sign, corner_phase, inside_signed
+        """
+        # 获取投影信息（用于计算e_n）
+        proj, seg_idx, s_now, t_hat, n_hat = self._project_onto_progress_path(self.current_position)
+        e_vec = self.current_position - proj
+        e_n = float(np.dot(e_vec, n_hat))  # 带符号法向误差（左正右负）
+        contour_error = float(np.linalg.norm(e_vec))  # 无符号轮廓误差
+        
+        # 归一化系数
+        half_eps = float(self.half_epsilon)
+        dist_enter = float(getattr(self, "_corridor_dist_enter", 3.0))
+        
+        # 获取turn_info
+        turn_info = getattr(self, "turn_info", {})
+        dist_to_turn = float(turn_info.get("dist_to_turn", float("inf")))
+        turn_angle = float(turn_info.get("turn_angle", 0.0))
+        turn_sign = int(turn_info.get("turn_sign", 0))
+        corner_phase = bool(turn_info.get("corner_phase", False))
+        
+        # 8维核心特征
+        contour_error_norm = np.clip(contour_error / half_eps, 0.0, 2.0)
+        e_n_norm = np.clip(e_n / half_eps, -2.0, 2.0)
+        heading_error_norm = self.calculate_direction_deviation(self.current_position) / math.pi
+        velocity_norm = float(self.velocity) / float(self.MAX_VEL)
+        acceleration_norm = float(self.acceleration) / float(self.MAX_ACC)
+        angular_vel_norm = float(self.angular_vel) / float(self.MAX_ANG_VEL)
         
         overall_progress = (
             self._calculate_closed_path_progress(self.current_position)
             if self.closed else self._calculate_path_progress(self.current_position)
         )
         
-        lookahead_features = self._compute_lookahead_features()
+        # dist_to_turn归一化：使用clip压缩
+        if math.isfinite(dist_to_turn):
+            dist_to_turn_norm = np.clip(dist_to_turn / max(dist_enter, 1.0), 0.0, 10.0) / 10.0
+        else:
+            dist_to_turn_norm = 1.0
         
-        base_state = np.array([
-            self.angular_vel, 
-            self.velocity,    
-            tau_next,
-            distance_to_next_turn,
-            overall_progress,
-            next_angle,
-            self.velocity,    
-            self.acceleration,
-            self.jerk,
-            self.angular_vel, 
-            self.angular_acc,
-            self.angular_jerk,
-        ])
-        return np.concatenate([base_state, lookahead_features])
+        # 4维拐角感知特征
+        turn_angle_norm = np.clip(turn_angle / math.pi, -1.0, 1.0)
+        corner_phase_val = 1.0 if corner_phase else 0.0
+        inside_signed = float(turn_sign) * e_n_norm
+        
+        # 组装12维状态
+        state = np.array([
+            # 8维核心特征
+            float(contour_error_norm),
+            float(e_n_norm),
+            float(heading_error_norm),
+            float(velocity_norm),
+            float(acceleration_norm),
+            float(angular_vel_norm),
+            float(overall_progress),
+            float(dist_to_turn_norm),
+            # 4维拐角感知特征
+            float(turn_angle_norm),
+            float(turn_sign),
+            float(corner_phase_val),
+            float(inside_signed),
+        ], dtype=np.float32)
+        
+        return state
 
     def _check_termination(self, p4_status, corner_phase_before):
-        """Phase 20: 终止条件检查 (固化 stall 逻辑)"""
+        """Phase 21: 终止条件检查 (固化 stall 逻辑)"""
         self._p4_stall_triggered = False
-        progress_now = float(self.state[4]) if len(self.state) > 4 else 0.0
+        # Phase 21: overall_progress现在位于索引6
+        progress_now = float(self.state[6]) if len(self.state) > 6 else 0.0
         progress_diff = max(0.0, progress_now - float(getattr(self, "_p4_last_progress_for_stall", 0.0)))
         self._p4_last_progress_for_stall = float(progress_now)
         

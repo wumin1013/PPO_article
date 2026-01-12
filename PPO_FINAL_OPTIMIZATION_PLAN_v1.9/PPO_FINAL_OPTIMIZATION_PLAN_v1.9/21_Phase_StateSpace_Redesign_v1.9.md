@@ -83,19 +83,15 @@ self.observation_dim = 12
 ## 4) 验收标准
 
 ### 4.1 状态空间验证
-- [ ] `env.observation_space.shape[0] == 12`
-- [ ] `turn_sign` 在拐角期非零
-- [ ] `inside_signed` 有正/负变化
+- [x] `env.observation_space.shape[0] == 12`
+- [x] `turn_sign` 在拐角期非零
+- [x] `inside_signed` 有正/负变化
 
 ### 4.2 快检脚本
 ```powershell
-conda activate PPO
-python -c "
-from src.environment import Env
-env = Env(...)
-state = env.reset()
-print(f'State dim: {len(state)}')  # 期望: 12
-"
+cd PPO_project
+conda run -n PPO python -c "import yaml; from src.utils.path_generator import get_path_by_name; from src.environment import create_environment_from_config; cfg=yaml.safe_load(open('configs/default.yaml','r',encoding='utf-8')); p=cfg['path']; extra={k:v for k,v in p.items() if k not in {'type','scale','num_points'}}; Pm=get_path_by_name(str(p['type']), scale=float(p.get('scale',10.0)), num_points=int(p.get('num_points',200)), **extra); env=create_environment_from_config(cfg, Pm, device=None); s=env.reset(); print('State dim:', len(s))"
+# 期望输出：State dim: 12
 ```
 
 ---

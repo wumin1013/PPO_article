@@ -1,0 +1,59 @@
+{
+  "meta": {
+    "run_id": "P0_12d_gold_20260114_174552",
+    "timestamp": "2026-01-14T17:57:31",
+    "git_hash": "3f7abb3569cb69d85ccb83dded937ecf2436952e",
+    "config_hash": "239c847dfbc61a638a1d7f039d1c4b832d805c565c9a780295dd80d1c2aa7d18",
+    "checkpoint_hash": "4c2c807a95fa047924304935264cabbea6bce3096e159e7e3769c5bdbc0e0af6",
+    "seed_eval": 42,
+    "seed_source": "patched_config_eval.yaml",
+    "env_hash": "unknown",
+    "baseline_ref": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_12d_gold_20260114_174552",
+    "episode_set": null,
+    "episode_set_source": "config"
+  },
+  "global": {
+    "phase": "p0_eval",
+    "passed": true,
+    "episodes": 20,
+    "deterministic": true,
+    "model_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_12d_gold_20260114_174552\\checkpoint.pth",
+    "seed_eval": 42,
+    "episode_set": null,
+    "success_rate": 1.0,
+    "stall_rate": 0.0,
+    "mean_progress_final": 1.0,
+    "max_abs_contour_error": 0.06144312853800393,
+    "mean_return": null,
+    "has_non_finite": false,
+    "half_epsilon": 0.75,
+    "thresholds": {
+      "success_rate_ge": 0.8,
+      "stall_rate_le": 0.05,
+      "mean_progress_final_ge": 0.95,
+      "max_abs_contour_error_le": 0.75
+    },
+    "timestamp": "2026-01-14 17:57:30",
+    "config_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\PPO_project\\artifacts\\P0_L2\\P0_12d_gold_20260114_174552\\config_eval.yaml"
+  },
+  "segment": {},
+  "smoothness": {},
+  "raw_keys": [
+    "config_path",
+    "deterministic",
+    "episode_set",
+    "episodes",
+    "half_epsilon",
+    "has_non_finite",
+    "max_abs_contour_error",
+    "mean_progress_final",
+    "model_path",
+    "passed",
+    "phase",
+    "seed_eval",
+    "stall_rate",
+    "success_rate",
+    "thresholds",
+    "timestamp"
+  ]
+}

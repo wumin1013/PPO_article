@@ -1,0 +1,78 @@
+{
+  "run_id": "P0_12d_gold_20260114_174552",
+  "selected_seed": 42,
+  "seeds": [
+    42
+  ],
+  "selection_metrics": {
+    "42": {
+      "phase": "p0_eval",
+      "passed": true,
+      "episodes": 20,
+      "model_path": "D:\\\u8f68\u8ff9\u5e73\u6ed1\\\u57fa\u4e8e\u5f3a\u5316\u5b66\u4e60\u7684\u8f68\u8ff9\u5e73\u6ed1\\PPO_project\\saved_models\\train\\20260113_163252\\checkpoints\\best_model.pth",
+      "deterministic": true,
+      "seed_eval": 42,
+      "episode_set": null,
+      "success_rate": 1.0,
+      "stall_rate": 0.0,
+      "mean_progress_final": 1.0,
+      "max_abs_contour_error": 0.06144312853800393,
+      "has_non_finite": false,
+      "thresholds": {
+        "success_rate_ge": 0.8,
+        "stall_rate_le": 0.05,
+        "mean_progress_final_ge": 0.95,
+        "max_abs_contour_error_le": 0.75
+      },
+      "half_epsilon": 0.75,
+      "timestamp": "2026-01-14 17:22:23",
+      "config_path": "D:\\\u8f68\u8ff9\u5e73\u6ed1\\\u57fa\u4e8e\u5f3a\u5316\u5b66\u4e60\u7684\u8f68\u8ff9\u5e73\u6ed1\\PPO_project\\configs\\train_square_p0_12d.yaml"
+    }
+  },
+  "training": {
+    "seed": 42,
+    "num_episodes": 1000,
+    "max_steps": 4000
+  },
+  "evaluation": {
+    "seed_eval": 42,
+    "episodes": 20,
+    "episode_set": null,
+    "deterministic": true
+  },
+  "eval": {
+    "phase": "p0_eval",
+    "command": "\"D:/Enviroment/Anaconda3/envs/PPO/python.exe\" \"PPO_project/tools/acceptance_suite.py\" --phase p0_eval --config PPO_project/configs/train_square_p0_12d.yaml --model PPO_project/artifacts/P0_12d_gold_20260114_174552/checkpoint.pth --episodes 20 --deterministic --out PPO_project/artifacts/P0_12d/eval",
+    "episodes": 20,
+    "deterministic": true,
+    "seed_eval": 42,
+    "episode_set": null
+  },
+  "rollout_det": {
+    "command": "internal: p0_gold_pipeline.rollout_trace",
+    "deterministic": true
+  },
+  "env_params_hash": "f41ac4840c33e0d7d2266d258b78d596cf36fb336b54d30daf11850af705aedf",
+  "config_sha256": "239c847dfbc61a638a1d7f039d1c4b832d805c565c9a780295dd80d1c2aa7d18",
+  "git": {
+    "commit": "3f7abb3569cb69d85ccb83dded937ecf2436952e",
+    "dirty": true
+  },
+  "files": {
+    "checkpoint": "checkpoint.pth",
+    "config": "config.yaml",
+    "summary": "summary.json",
+    "trace": "trace.csv",
+    "overlay": "overlay.png",
+    "v_t": "v_t.png",
+    "e_n_t": "e_n_t.png"
+  },
+  "source": {
+    "model_path": "PPO_project/saved_models/train/20260113_163252/checkpoints/best_model.pth",
+    "config_path": "PPO_project/saved_models/train/20260113_163252/config.yaml",
+    "eval_summary_path": "PPO_project/artifacts/P0_12d/eval/summary.json"
+  },
+  "config_hash": "239c847dfbc61a638a1d7f039d1c4b832d805c565c9a780295dd80d1c2aa7d18",
+  "checkpoint_hash": "4c2c807a95fa047924304935264cabbea6bce3096e159e7e3769c5bdbc0e0af6",
+  "trace_hash": "fd79fe21dfd16c3014a10ac41abe9f11a40c4146e5f7b1854ba386b2fd6e8cea"
+}

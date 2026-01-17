@@ -66,6 +66,59 @@ class RewardCalculator:
         self.last_progress = 0.0
 
     def calculate_reward(self, ctx: RewardContext) -> Tuple[float, Dict[str, float]]:
+        """Dispatch to minimal or legacy reward calculation."""
+        # v2.0: Check minimal mode flag
+        if self.weights.get("minimal_mode", False):
+            return self._calculate_minimal_reward(ctx)
+        return self._calculate_legacy_reward(ctx)
+
+    def _calculate_minimal_reward(self, ctx: RewardContext) -> Tuple[float, Dict[str, float]]:
+        """v2.0 Minimal reward: only progress, boundary, time, completion."""
+        w_s = float(self.weights.get("w_s", 20.0))
+        p4_cfg = self.weights.get("p4", {})
+        time_penalty = float(p4_cfg.get("time_penalty", -0.02))
+        stall_penalty = float(p4_cfg.get("stall_penalty", -8.0))
+        boundary_cfg = self.weights.get("boundary", {})
+        completion_cfg = self.weights.get("completion", {})
+
+        # 1. Progress reward (only positive incentive)
+        progress_now = float(ctx.progress)
+        progress_diff = max(0.0, progress_now - float(self.last_progress))
+        r_progress = w_s * progress_diff
+
+        # 2. Boundary penalty (hard constraint)
+        r_boundary = 0.0
+        if boundary_cfg.get("enabled", False):
+            if abs(float(ctx.contour_error)) > float(self.half_epsilon):
+                r_boundary = float(boundary_cfg.get("penalty", -100.0))
+
+        # 3. Time penalty (efficiency pressure)
+        r_time = time_penalty
+
+        # 4. Completion reward
+        r_completion = 0.0
+        if completion_cfg.get("enabled", False) and ctx.lap_completed:
+            r_completion = float(completion_cfg.get("reward", 50.0))
+
+        # 5. Stall penalty (prevent stuck)
+        r_stall = 0.0
+        if ctx.stall_triggered:
+            r_stall = stall_penalty
+
+        total = r_progress + r_boundary + r_time + r_completion + r_stall
+        self.last_progress = progress_now
+
+        return total, {
+            "progress_diff": float(progress_diff),
+            "r_progress": float(r_progress),
+            "r_boundary": float(r_boundary),
+            "r_time": float(r_time),
+            "r_completion": float(r_completion),
+            "r_stall": float(r_stall),
+            "total": float(total),
+        }
+
+    def _calculate_legacy_reward(self, ctx: RewardContext) -> Tuple[float, Dict[str, float]]:
         """P0: progress-dominant reward with pure penalties."""
         # Unpack weights
         w_s = abs(float(self.weights.get("w_s", 20.0)))

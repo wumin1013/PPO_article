@@ -1,8 +1,0 @@
-Flag,File,Line,Default,YAML_Value,Decision
-_p1_corner_phase_enabled,cnc_env.py,1179,False(auto-enable),N/A,Solidify
-_p4_exit_boost_enabled,cnc_env.py,1203,True,true,Solidify
-_p4_stall_enabled,cnc_env.py,1211,True,true,Solidify
-_p4_speed_cap_enabled,cnc_env.py,1218,True,false,Solidify(use brake envelope)
-_p6_v_target_smoother_enabled,cnc_env.py,N/A,False,false,Delete(dead code)
-_p6_speed_cap_use_wdot,cnc_env.py,1251,True,true,Keep
-_p6_speed_cap_use_wddot,cnc_env.py,1252,True,true,Keep

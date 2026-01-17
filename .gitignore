@@ -1,2 +1,7 @@
 # Ignore large step-level training logs
 PPO_project/saved_models/**/logs/step_metrics_*.csv
+# Ignore local run artifacts
+PPO_project.zip
+PPO_project/artifacts/
+PPO_project/out/
+artifacts/

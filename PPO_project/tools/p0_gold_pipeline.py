@@ -120,6 +120,7 @@ def _build_env(config: dict, *, device: torch.device) -> Env:
         max_steps=env_cfg["max_steps"],
         lookahead_points=env_cfg.get("lookahead_points", 5),
         reward_weights=reward_weights,
+        curvature_observation=env_cfg.get("curvature_observation"),
         return_normalized_obs=not use_obs_normalizer,
     )
     return env

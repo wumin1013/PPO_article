@@ -47,6 +47,7 @@ def build_env_from_config(cfg):
         max_steps=env_cfg["max_steps"],
         lookahead_points=env_cfg.get("lookahead_points", 5),
         reward_weights=reward_weights,
+        curvature_observation=env_cfg.get("curvature_observation"),
         return_normalized_obs=True,
     )
     return env

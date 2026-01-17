@@ -182,6 +182,7 @@ def _build_env_from_config(config: dict, device: torch.device = torch.device("cp
         max_steps=env_cfg["max_steps"],
         lookahead_points=env_cfg.get("lookahead_points", 5),
         reward_weights=reward_weights,
+        curvature_observation=env_cfg.get("curvature_observation"),
     )
 
 

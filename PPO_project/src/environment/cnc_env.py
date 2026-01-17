@@ -55,6 +55,7 @@ class Env:
         reward_weights: Optional[Dict[str, float]] = None,
         lookahead_points: int = 5,
         return_normalized_obs: bool = True,
+        curvature_observation: Optional[Dict[str, float]] = None,
     ):
         self.lookahead_points = 0  # Phase 21: 禁用lookahead
         self.lookahead_feature_size = 0
@@ -78,15 +79,31 @@ class Env:
             "corner_phase",      # 1.0 在拐角期 / 0.0 否
             "inside_signed",     # turn_sign × e_n_norm
         ]
-        
+
+        # v2.1: 曲率感知特征（可选）
+        if curvature_observation is None and isinstance(reward_weights, dict):
+            curvature_observation = reward_weights.get("curvature_observation")
+        self.curvature_cfg = curvature_observation if isinstance(curvature_observation, dict) else {}
+        self.enable_curvature_obs = bool(self.curvature_cfg.get("enabled", False))
+        self.curvature_keys = ["kappa_norm", "dkappa_ds_norm"] if self.enable_curvature_obs else []
+
         # 保留base_state_keys用于兼容性
-        self.base_state_keys = self.core_keys + self.corner_keys
-        
-        self.observation_dim = len(self.core_keys) + len(self.corner_keys)  # = 12
+        self.base_state_keys = self.core_keys + self.corner_keys + self.curvature_keys
+
+        self.observation_dim = len(self.base_state_keys)  # = 12 (or 14 with curvature)
         self.action_space_dim = 2
         self.epsilon = epsilon  # 总带宽（Pl到Pr的距离）
         self.half_epsilon = epsilon / 2  # 单侧偏移距离（Pm到Pl或Pr的距离）
         self.rmax = 3 * epsilon
+        if self.enable_curvature_obs:
+            half_eps = max(self.half_epsilon, 1e-6)
+            self.curvature_kappa_max = float(self.curvature_cfg.get("kappa_max", 1.0 / half_eps))
+            self.curvature_dkappa_max = float(
+                self.curvature_cfg.get("dkappa_max", self.curvature_kappa_max / half_eps)
+            )
+        else:
+            self.curvature_kappa_max = 1.0
+            self.curvature_dkappa_max = 1.0
         self.device = device
         self.max_steps = max_steps
         self.interpolation_period = float(
@@ -222,7 +239,7 @@ class Env:
                     max_y = max(p[1] for p in polygon)
                     self.rtree_idx.insert(idx, (min_x, min_y, max_x, max_y))
         
-        # Phase 21: 精简的归一化参数（12维状态已在_build_state中归一化）
+        # Phase 21: 精简的归一化参数（12/14维状态已在_build_state中归一化）
         # 保留此字典用于兼容性和normalize_state方法
         self.normalization_params = {
             'contour_error_norm': 1.0,  # 已归一化
@@ -238,6 +255,11 @@ class Env:
             'corner_phase': 1.0,        # {0, 1}
             'inside_signed': 1.0,       # 已归一化
         }
+        if self.enable_curvature_obs:
+            self.normalization_params.update({
+                "kappa_norm": 1.0,
+                "dkappa_ds_norm": 1.0,
+            })
         # Phase 21: 更新observation_space边界
         self.observation_space = gym.spaces.Box(
             low=-10.0, high=10.0, shape=(self.observation_dim,), dtype=np.float32
@@ -497,6 +519,7 @@ class Env:
         self._theta_ref_delta = 0.0
         self._p1_los_last = {}
         self.trajectory = [self.current_position.copy()]
+        self._curvature_prev_kappa = None
         self._episode_summary_printed = False
         self.in_corner_phase = False
         # P7.3：kappa 执行量（奇异点保护）与平滑状态（每回合重置）
@@ -661,6 +684,7 @@ class Env:
         # [3]=velocity_norm, [4]=acceleration_norm, [5]=angular_vel_norm
         # [6]=overall_progress, [7]=dist_to_turn_norm
         # [8]=turn_angle_norm, [9]=turn_sign, [10]=corner_phase, [11]=inside_signed
+        # [12]=kappa_norm, [13]=dkappa_ds_norm (if enabled)
         ctx = RewardContext(
             contour_error=self.get_contour_error(self.current_position),
             progress=float(self.state[6]) if len(self.state) > 6 else 0.0,  # overall_progress
@@ -734,11 +758,45 @@ class Env:
         self.trajectory.append(self.current_position.copy())
 
     def _build_observation(self):
-        """Phase 21: 构建12维精简状态向量（兼容旧名称）"""
+        """Phase 21: 构建12/14维精简状态向量（兼容旧名称）"""
         return self._build_state()
+
+    def compute_curvature_features(self) -> Tuple[float, float]:
+        """基于最近三点轨迹的曲率与曲率变化率特征。"""
+        if len(self.trajectory) < 3:
+            return 0.0, 0.0
+
+        p0 = np.asarray(self.trajectory[-3], dtype=float)
+        p1 = np.asarray(self.trajectory[-2], dtype=float)
+        p2 = np.asarray(self.trajectory[-1], dtype=float)
+
+        v1 = p1 - p0
+        v2 = p2 - p1
+        cross = abs(v1[0] * v2[1] - v1[1] * v2[0])
+        chord = float(np.linalg.norm(p2 - p0))
+        denom = float(np.linalg.norm(v1) * np.linalg.norm(v2) * chord)
+        if denom <= 1e-9:
+            kappa = 0.0
+        else:
+            kappa = 2.0 * cross / (denom + 1e-9)
+
+        dkappa_ds = 0.0
+        prev_kappa = getattr(self, "_curvature_prev_kappa", None)
+        if prev_kappa is not None:
+            ds = float(np.linalg.norm(v2))
+            if ds > 1e-9:
+                dkappa_ds = (kappa - float(prev_kappa)) / ds
+        self._curvature_prev_kappa = float(kappa)
+
+        kappa_norm = kappa / float(self.curvature_kappa_max)
+        dkappa_norm = dkappa_ds / float(self.curvature_dkappa_max)
+        return (
+            float(np.clip(kappa_norm, -1.0, 1.0)),
+            float(np.clip(dkappa_norm, -1.0, 1.0)),
+        )
     
     def _build_state(self) -> np.ndarray:
-        """Phase 21: 构建12维精简状态向量
+        """Phase 21: 构建12/14维精简状态向量
         
         8维核心特征:
             contour_error_norm, e_n_norm, heading_error_norm, velocity_norm,
@@ -746,6 +804,9 @@ class Env:
         
         4维拐角感知特征:
             turn_angle_norm, turn_sign, corner_phase, inside_signed
+
+        2维曲率感知特征（可选）:
+            kappa_norm, dkappa_ds_norm
         """
         # 获取投影信息（用于计算e_n）
         proj, seg_idx, s_now, t_hat, n_hat = self._project_onto_progress_path(self.current_position)
@@ -788,8 +849,8 @@ class Env:
         corner_phase_val = 1.0 if corner_phase else 0.0
         inside_signed = float(turn_sign) * e_n_norm
         
-        # 组装12维状态
-        state = np.array([
+        # 组装12/14维状态
+        state_values = [
             # 8维核心特征
             float(contour_error_norm),
             float(e_n_norm),
@@ -804,9 +865,13 @@ class Env:
             float(turn_sign),
             float(corner_phase_val),
             float(inside_signed),
-        ], dtype=np.float32)
-        
-        return state
+        ]
+
+        if self.enable_curvature_obs:
+            kappa_norm, dkappa_norm = self.compute_curvature_features()
+            state_values.extend([kappa_norm, dkappa_norm])
+
+        return np.array(state_values, dtype=np.float32)
 
     def _check_termination(self, p4_status, corner_phase_before):
         """Phase 21: 终止条件检查 (固化 stall 逻辑)"""
@@ -2884,6 +2949,7 @@ def create_environment_from_config(config: Dict, path_points: Iterable, device=N
     kcm_cfg = config["kinematic_constraints"]
     Pm = [np.array(pt) for pt in path_points]
     reward_weights = config.get("reward_weights", {})
+    curvature_observation = env_cfg.get("curvature_observation") if isinstance(env_cfg, dict) else None
 
     return Env(
         device=device or env_cfg.get("device"),
@@ -2899,6 +2965,7 @@ def create_environment_from_config(config: Dict, path_points: Iterable, device=N
         max_steps=env_cfg["max_steps"],
         lookahead_points=env_cfg.get("lookahead_points", 5),
         reward_weights=reward_weights,
+        curvature_observation=curvature_observation,
     )
 
 

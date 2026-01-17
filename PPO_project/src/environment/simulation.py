@@ -147,6 +147,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         max_steps=env_cfg.get("max_steps", 3000),
         lookahead_points=env_cfg.get("lookahead_points", 5),
         reward_weights=reward_weights,
+        curvature_observation=env_cfg.get("curvature_observation"),
     )
 
     # 兼容可视化所需的 Pl/Pr

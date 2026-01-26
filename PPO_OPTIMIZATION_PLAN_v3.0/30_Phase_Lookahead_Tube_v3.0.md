@@ -166,9 +166,9 @@ kinematic_constraints:
   MAX_VEL: 100.0
   MAX_ACC: 2000.0
   MAX_JERK: 20000.0
-  MAX_ANG_VEL: 6.283185307179586
-  MAX_ANG_ACC: 100.0
-  MAX_ANG_JERK: 1000.0
+  MAX_ANG_VEL: 31.41592653589793  # 10 * pi (~1.8 deg/step)
+  MAX_ANG_ACC: 500.0               # increased from 100
+  MAX_ANG_JERK: 5000.0             # increased from 1000
 
 reward_weights:
   minimal_mode: true

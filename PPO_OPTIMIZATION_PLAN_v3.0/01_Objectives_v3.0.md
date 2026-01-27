@@ -137,21 +137,27 @@ curvature_keys = [
 
 ---
 
-## 5) Phase 设计（v3.0）
+## 5) Phase 设计（v3.0 → v3.1）
 
 ```
-Phase 30: 前瞻+管道基线训练
-    ├─ 参考方向：前瞻向量
+Phase 30: 前瞻+管道基线训练（v3.0）
+    ├─ 参考方向：前瞻向量（指令式）
     ├─ 奖励函数：管道 + 极简
     └─ 验收：success_rate ≥ 0.95, corner_peak_ω < 0.8×MAX
+
+Phase 31: 前瞻作为观测（v3.1）← 学术改进
+    ├─ 参考方向：路径切线（客观几何）
+    ├─ 前瞻信息：作为状态观测（16维）
+    ├─ 核心改变：策略自主学习如何利用前瞻信号
+    └─ 验收：success_rate ≥ 0.95, 观察 lookahead_utilization
 
 Phase 32: 多路径验证
     └─ 验证策略在不同路径上的泛化
 
 Phase 33: 消融分析
     ├─ A: 无前瞻（对比）
-    ├─ B: 无管道（对比）
-    └─ C: 完整方案
+    ├─ B: 前瞻作为指令 v3.0（对比）
+    └─ C: 前瞻作为观测 v3.1（主方案）
 
 Phase 40: 论文输出
 ```
@@ -183,12 +189,12 @@ Phase 40: 论文输出
 ### 创新点
 
 1. **KCM Shielding**：运动学约束的安全保证
-2. **前瞻参考设计**：Preview Control 在 RL 轨迹规划中的应用
+2. **前瞻作为观测**：Preview information 作为状态特征，策略自主学习利用（v3.1）
 3. **管道奖励**：Constraint Relaxation 释放几何自由度
 
 ### 论文话术
 
-> "To address the discontinuity of the reference path tangent at sharp corners, we introduce a **lookahead observation mechanism**. Combined with a **tolerance-based reward function**, this enables the agent to autonomously discover smooth cornering strategies within the manufacturing tolerance band, while KCM shielding guarantees kinematic feasibility."
+> "Rather than prescribing lookahead as the reference direction, we provide it as **state observations**, enabling the agent to autonomously discover **when** to anticipate turns and **how** to adjust its behavior proactively. Combined with a **tolerance-based reward function**, this design preserves the RL paradigm of learning from experience while benefiting from predictive geometric information."
 
 ---
 
@@ -199,4 +205,5 @@ Phase 40: 论文输出
 | v1.9 | 2026-01-06 | 规则引导路线 |
 | v2.0 | 2026-01-17 | 极简端到端路线 |
 | v2.1 | 2026-01-17 | 曲率感知 + 极简奖励 |
-| **v3.0** | **2026-01-18** | **前瞻引导 + 管道奖励** |
+| v3.0 | 2026-01-18 | 前瞻引导 + 管道奖励（前瞻作为指令） |
+| **v3.1** | **2026-01-28** | **前瞻作为观测（策略自主学习利用）** |

@@ -73,7 +73,7 @@ class RewardCalculator:
         return self._calculate_legacy_reward(ctx)
 
     def _calculate_minimal_reward(self, ctx: RewardContext) -> Tuple[float, Dict[str, float]]:
-        """v2.0 Minimal reward: only progress, boundary, time, completion."""
+        """v3.0 Minimal reward: progress + tube reward + boundary/time/completion."""
         w_s = float(self.weights.get("w_s", 20.0))
         p4_cfg = self.weights.get("p4", {})
         time_penalty = float(p4_cfg.get("time_penalty", -0.02))
@@ -81,36 +81,52 @@ class RewardCalculator:
         boundary_cfg = self.weights.get("boundary", {})
         completion_cfg = self.weights.get("completion", {})
 
-        # 1. Progress reward (only positive incentive)
+        tube_cfg = self.weights.get("tube", {})
+        tube_enabled = bool(tube_cfg.get("enabled", True))
+        tube_ratio = float(tube_cfg.get("ratio", 0.5))
+        tube_tolerance = tube_ratio * self.half_epsilon
+
+        # 1. Progress reward
         progress_now = float(ctx.progress)
         progress_diff = max(0.0, progress_now - float(self.last_progress))
         r_progress = w_s * progress_diff
 
-        # 2. Boundary penalty (hard constraint)
+        # 2. Contour penalty (tube reward)
+        r_contour = 0.0
+        contour_error = abs(float(ctx.contour_error))
+        if tube_enabled:
+            if contour_error < tube_tolerance:
+                r_contour = 0.0
+            else:
+                excess = contour_error - tube_tolerance
+                r_contour = -10.0 * (excess / self.half_epsilon) ** 2
+
+        # 3. Boundary penalty (hard constraint)
         r_boundary = 0.0
         if boundary_cfg.get("enabled", False):
-            if abs(float(ctx.contour_error)) > float(self.half_epsilon):
+            if contour_error > float(self.half_epsilon):
                 r_boundary = float(boundary_cfg.get("penalty", -100.0))
 
-        # 3. Time penalty (efficiency pressure)
+        # 4. Time penalty
         r_time = time_penalty
 
-        # 4. Completion reward
+        # 5. Completion reward
         r_completion = 0.0
         if completion_cfg.get("enabled", False) and ctx.lap_completed:
             r_completion = float(completion_cfg.get("reward", 50.0))
 
-        # 5. Stall penalty (prevent stuck)
+        # 6. Stall penalty
         r_stall = 0.0
         if ctx.stall_triggered:
             r_stall = stall_penalty
 
-        total = r_progress + r_boundary + r_time + r_completion + r_stall
+        total = r_progress + r_contour + r_boundary + r_time + r_completion + r_stall
         self.last_progress = progress_now
 
         return total, {
             "progress_diff": float(progress_diff),
             "r_progress": float(r_progress),
+            "r_contour": float(r_contour),
             "r_boundary": float(r_boundary),
             "r_time": float(r_time),
             "r_completion": float(r_completion),

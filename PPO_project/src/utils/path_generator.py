@@ -32,6 +32,7 @@ def generate_square_path(
     side_length: float = 10.0,
     num_points: int = 200,
     closed: bool = True,
+    start_offset_ratio: float = 0.0,
 ) -> List[np.ndarray]:
     """
     生成从(0,0)出发、逆时针的正方形路径。
@@ -45,6 +46,7 @@ def generate_square_path(
             - closed=True：包含起点重复以闭合路径，需≥5。
             - closed=False：不包含闭合点，需≥4。
         closed: 是否闭合。
+        start_offset_ratio: 闭合路径起点沿首边的偏移比例（0~1），0表示顶点起点。
     """
     if closed and num_points < 5:
         raise ValueError("num_points must be at least 5 to form a closed square path.")
@@ -67,6 +69,38 @@ def generate_square_path(
     ]
     if closed:
         vertices.append(np.array([0.0, 0.0]))
+
+    if closed:
+        ratio = float(np.clip(start_offset_ratio, 0.0, 1.0))
+        offset = ratio * side_length
+        if 1e-9 < offset < (side_length - 1e-9):
+            start = vertices[0] + (offset / side_length) * (vertices[1] - vertices[0])
+            nodes = [start, vertices[1], vertices[2], vertices[3], vertices[0], start]
+            segments = []
+            cumulative = [0.0]
+            for i in range(len(nodes) - 1):
+                p1 = np.array(nodes[i])
+                p2 = np.array(nodes[i + 1])
+                seg_len = float(np.linalg.norm(p2 - p1))
+                segments.append((p1, p2, seg_len))
+                cumulative.append(cumulative[-1] + seg_len)
+            total_len = cumulative[-1]
+            if total_len > 1e-9:
+                distances = np.linspace(0.0, total_len, num_points)
+                path_points: List[np.ndarray] = []
+                for s in distances:
+                    idx = int(np.searchsorted(cumulative, s, side="right") - 1)
+                    idx = int(np.clip(idx, 0, len(segments) - 1))
+                    p1, p2, seg_len = segments[idx]
+                    if seg_len <= 1e-12:
+                        point = p1.copy()
+                    else:
+                        t = float((s - cumulative[idx]) / seg_len)
+                        point = p1 + t * (p2 - p1)
+                    path_points.append(np.array(point))
+                if not np.allclose(path_points[-1], path_points[0]):
+                    path_points[-1] = path_points[0].copy()
+                return [np.array(p) for p in path_points]
 
     path_points: List[np.ndarray] = [vertices[0]]
     for edge_idx in range(edges):
@@ -195,7 +229,12 @@ def get_path_by_name(
     if path_name == "line":
         return generator(length=scale, num_points=num_points, angle=kwargs.get("angle", 0.0))
     if path_name == "square":
-        return generator(side_length=scale, num_points=num_points, closed=bool(kwargs.get("closed", True)))
+        return generator(
+            side_length=scale,
+            num_points=num_points,
+            closed=bool(kwargs.get("closed", True)),
+            start_offset_ratio=float(kwargs.get("start_offset_ratio", 0.0)),
+        )
     if path_name == "s_shape":
         return generator(
             scale=scale,

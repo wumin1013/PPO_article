@@ -110,6 +110,16 @@ class Env:
             interpolation_period if interpolation_period is not None else LEGACY_INTERPOLATION_PERIOD
         )
         self.reward_weights = reward_weights or {}
+        completion_cfg = self.reward_weights.get("completion", {}) if isinstance(self.reward_weights, dict) else {}
+        if not isinstance(completion_cfg, dict):
+            completion_cfg = {}
+        self._lap_progress_tol = float(completion_cfg.get("lap_progress_tol", 0.02))
+        self._lap_start_tol_ratio = float(completion_cfg.get("lap_start_tol_ratio", 0.6))
+        lookahead_cfg = self.reward_weights.get("lookahead", {}) if isinstance(self.reward_weights, dict) else {}
+        if not isinstance(lookahead_cfg, dict):
+            lookahead_cfg = {}
+        self.lookahead_enabled = bool(lookahead_cfg.get("enabled", True))
+        self.lookahead_dist = float(lookahead_cfg.get("distance", 3.0 * self.epsilon))
         # 确保所有约束参数都是浮点数
         self.MAX_VEL = float(MAX_VEL if MAX_VEL is not None else LEGACY_KINEMATICS["MAX_VEL"])
         self.MAX_ACC = float(MAX_ACC if MAX_ACC is not None else LEGACY_KINEMATICS["MAX_ACC"])
@@ -548,8 +558,10 @@ class Env:
         self._rebuild_progress_cache()
         self.lap_completed = False
         self.s_travelled = 0.0
-        self._progress_s_prev = 0.0
-        self._progress_s_max = 0.0
+        # Initialize progress baseline at the current position to avoid closed-path wrap jump.
+        _proj, _seg_idx, s_start, _t_hat, _n_hat = self._project_onto_progress_path(self.current_position)
+        self._progress_s_prev = s_start
+        self._progress_s_max = s_start
 
         # 重置误差与成功标记
         self.error_history = []
@@ -913,6 +925,14 @@ class Env:
         elif self._p4_stall_triggered:
             done = True
             reason = "stall"
+        else:
+            # v3.0: 边界违规终止（超出允差带）
+            boundary_cfg = self.reward_weights.get("boundary", {}) if isinstance(self.reward_weights, dict) else {}
+            if boundary_cfg.get("enabled", False):
+                contour_error = abs(self.get_contour_error(self.current_position))
+                if contour_error > self.half_epsilon:
+                    done = True
+                    reason = "boundary"
             
         return done, reason
 
@@ -966,6 +986,19 @@ class Env:
         s_current = float(self._progress_cumulative_lengths[seg_idx] + t * self._progress_segment_lengths[seg_idx])
 
         s_prev = float(getattr(self, "_progress_s_prev", 0.0))
+        dist_to_start = float(np.linalg.norm(pt - np.array(self.Pm[0])))
+        # Closed path unwrap: choose the arc-length closest to previous s to avoid start/end ambiguity.
+        if self.closed and total_length > 1e-9:
+            candidates = [s_current, s_current - total_length, s_current + total_length]
+            s_current = min(candidates, key=lambda s: abs(s - s_prev))
+        if (
+            dist_to_start < 0.6 * self.half_epsilon
+            and s_current > 0.5 * total_length
+            and s_prev < 0.5 * total_length
+            and float(getattr(self, "s_travelled", 0.0)) < 0.1 * total_length
+        ):
+            s_current = 0.0
+
         delta_s = s_current - s_prev
         # 过起点时 s 会从接近 total 跳到接近 0：解包裹为正增量
         if delta_s < -0.5 * total_length:
@@ -978,9 +1011,9 @@ class Env:
         self._progress_s_prev = s_current
         self._progress_s_max = max(float(getattr(self, "_progress_s_max", 0.0)), s_current)
 
-        tol = 0.02
-        start_tol = 0.6 * self.half_epsilon
-        dist_to_start = float(np.linalg.norm(pt - np.array(self.Pm[0])))
+        tol = float(getattr(self, "_lap_progress_tol", 0.02))
+        start_tol_ratio = float(getattr(self, "_lap_start_tol_ratio", 0.6))
+        start_tol = start_tol_ratio * self.half_epsilon
         threshold = (1.0 - tol) * total_length
 
         if self.s_travelled >= threshold and self._progress_s_max >= threshold and dist_to_start < start_tol:
@@ -988,7 +1021,7 @@ class Env:
             self.reached_target = True
             return 1.0
 
-        progress = self.s_travelled / total_length
+        progress = self._progress_s_max / total_length
         return float(np.clip(progress, 0.0, 0.99))
     
     def calculate_new_position(self, theta_prime_action, length_prime_action):
@@ -1131,7 +1164,11 @@ class Env:
     def _interpolate_point_at_s(self, s_value: float) -> tuple[np.ndarray, int, float]:
         """按弧长获取路径点，返回坐标、段索引、局部t。"""
         total = self.cache['total_path_length'] or 1.0
-        s_clamped = np.clip(s_value, 0.0, total)
+        # v3.0 Fix: 闭合路径弧长环绕
+        if self.closed and total > 1e-9:
+            s_clamped = s_value % total
+        else:
+            s_clamped = np.clip(s_value, 0.0, total)
         cumulative = self.cache.get('cumulative_lengths') or []
         if not cumulative or len(cumulative) < 2:
             return np.array(self.Pm[0]), 0, 0.0
@@ -2320,7 +2357,31 @@ class Env:
         return status
 
     def _get_path_direction(self, pt, v_exec: float | None = None, record: bool = False):
-        """Use cached segment tangent; allow a small lookahead near segment end for sharp corners."""
+        """v3.0: Lookahead reference direction."""
+        if not getattr(self, "lookahead_enabled", False):
+            return self._get_path_direction_legacy(pt, v_exec=v_exec, record=record)
+
+        s_current = self._get_current_arc_length()
+        lookahead_dist = float(getattr(self, "lookahead_dist", 4.5))
+        s_target = s_current + lookahead_dist
+        target_point, _, _ = self._interpolate_point_at_s(s_target)
+
+        dx = float(target_point[0] - pt[0])
+        dy = float(target_point[1] - pt[1])
+        dist = math.sqrt(dx * dx + dy * dy)
+        # v3.0 Fix: 距离过小时使用当前弧长切线（避免方向抖动）
+        if dist < 0.1 * self.half_epsilon:
+            theta_lookahead = self._tangent_angle_at_s(s_current)
+        else:
+            theta_lookahead = math.atan2(dy, dx)
+
+        if record:
+            self._theta_ref_last = float(theta_lookahead)
+
+        return float(theta_lookahead)
+
+    def _get_path_direction_legacy(self, pt, v_exec: float | None = None, record: bool = False):
+        """Legacy tangent direction with a small lookahead near segment end."""
         seg_dirs = self.cache.get("segment_directions") if isinstance(getattr(self, "cache", None), dict) else None
         if not isinstance(seg_dirs, list) or not seg_dirs:
             return self._current_direction_angle

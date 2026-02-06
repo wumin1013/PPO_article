@@ -33,6 +33,54 @@ r_direction = -w * abs(heading_error)                 # 惩罚偏离
 + v3.1: 前瞻信息 → 作为状态观测 → 策略自主决定是否/如何利用
 ```
 
+### 稳定落地建议（护栏版，推荐执行顺序）
+
+你当前工程基线已经很强（PPO + KCM + corridor/turn_info + fixed lookahead LOS），因此 v3.1 的落地目标不是“推倒重来”，而是**在不破坏稳定性的前提下**逐步去除人工规则依赖，让贡献归因更清晰、论文叙事更硬。
+
+**推荐执行顺序（1→4）**
+1. **恢复前瞻观测**（lookahead as observation），但保持**观测维度固定**，便于做消融与复现实验。
+2. **保留 corridor 做检测上下文**（cornerness / turn_info），先把 corridor 的“强惩罚/强引导”降级（权重→0），避免一刀切导致训练早期发散。
+3. 引入 **cornerness 自适应权重**：弯道更偏平滑，直线更偏精度（权重连续变化 + 下限/上限）。
+4. 做消融并固化结论：`corridor(惩罚) on/off`、`cornerness-adaptive on/off`、`lookahead-obs on/off`。
+
+---
+
+### 护栏 A：corridor 不要删，先“降级为检测”
+
+当前代码里 `corridor.enabled` 同时承担了两类职责：
+- **检测/上下文**：提供 `corner_phase / turn_sign / dist_to_turn ...`（用于 state/日志/可解释性）。
+- **奖励塑形**：通过 outside/barrier/center/dir_pref 等项“硬拉”策略。
+
+论文路线建议：先把（2）逐步退出，而不是砍掉（1）。
+
+**最小改动方案（优先推荐）**：保持 `reward_weights.corridor.enabled: true`，但将塑形权重置 0（仍保留 corner 检测与日志字段）。
+- `outside_penalty_weight: 0.0`
+- `barrier_weight: 0.0`
+- `center_weight: 0.0`
+- `dir_pref_weight: 0.0`
+
+这样做的好处：训练稳定性不掉（仍有上下文），同时避免审稿人质疑“靠手工规则惩罚跑出来”。
+
+---
+
+### 护栏 B：cornerness 信号必须“归一化 + 裁剪 + 平滑”
+
+方形路径的拐角曲率本质是冲击，直接用数值曲率容易抖动，PPO 很容易不稳定。推荐用**前瞻角度变化**构造 cornerness（更鲁棒）。
+
+建议定义（示意）：
+- `c_raw = |wrap(theta_far - theta_now)| / theta0`
+- `c = clip(EMA(c_raw), 0, 1)`
+
+参数建议：
+- `theta0` 取 20°~45°（代表“明显需要转弯”的归一化阈值）
+- EMA 时间常数 5~20 steps（按你的 `dt` 与角速度动态调）
+
+并设置权重上下界（防止“弯道过度放松导致飞出管道/边界”）：
+- 跟踪惩罚 `w_e_eff >= w_e_floor`
+- 平滑惩罚 `w_smooth_eff <= w_smooth_cap`
+
+---
+
 ### 设计原理
 
 | 维度 | v3.0 (指令引导) | v3.1 (观测引导) |
@@ -48,25 +96,30 @@ r_direction = -w * abs(heading_error)                 # 惩罚偏离
 
 ---
 
-## 2) 状态空间扩展（14 → 16 维）
+## 2) 状态空间扩展（固定维度，支持消融）
 
-### 新增 2 维前瞻观测特征
+### 原则：观测维度固定，关闭时置 0（而不是改网络结构）
+
+为了让消融实验更干净（不换网络结构、不换 checkpoint 格式），建议将 lookahead 观测**固定为 N 个尺度**（推荐 3 个：near/mid/far），当 `lookahead_obs=false` 时将这些特征置 0。
+
+推荐尺度（示例）：以 `lookahead.distance` 为 base，设置 `obs_scales=[0.5, 1.0, 2.0]`，分别对应近/中/远的前瞻信息。
+
+### 新增观测特征（示例：每个尺度 2 维）
 
 ```python
-# 新增观测（添加到 _build_state 末尾）
+# 示例：3 个尺度 → 6 维前瞻观测（添加到 _build_state 末尾）
 lookahead_keys = [
-    "lookahead_angle_diff",   # θ_lookahead - θ_tangent（前瞻与切线之差）
-    "lookahead_dist_ratio",   # 到前瞻点的距离 / lookahead_dist（归一化）
+    "la1_angle_diff", "la1_dist_ratio",
+    "la2_angle_diff", "la2_dist_ratio",
+    "la3_angle_diff", "la3_dist_ratio",
 ]
-
-# 总计：12 核心 + 2 曲率（可选） + 2 前瞻 = 14/16 维
 ```
 
 ### 特征计算逻辑
 
 ```python
 def _compute_lookahead_observation(self) -> Tuple[float, float]:
-    """v3.1: 计算前瞻观测特征（而非参考方向）"""
+    """v3.1: 计算单尺度前瞻观测特征（而非参考方向）"""
     # 1. 获取当前位置的路径切线方向（客观几何参考）
     s_current = self._get_current_arc_length()
     theta_tangent = self._tangent_angle_at_s(s_current)
@@ -106,6 +159,8 @@ def _compute_lookahead_observation(self) -> Tuple[float, float]:
 - 直线段：`angle_diff ≈ 0` → 无需提前调整
 - 接近拐角：`angle_diff ≠ 0` → 信号来了，但策略**自主决定**是否/如何响应
 
+> 说明：如果采用多尺度观测（推荐），你会得到 near/mid/far 三组 `angle_diff/dist_ratio`。论文可解释为一种“几何注意力”的输入基础：直线更关注 near，拐角前更关注 far。
+
 ---
 
 ## 3) 奖励函数修改
@@ -127,6 +182,18 @@ def _calculate_minimal_reward(self, ctx: RewardContext) -> Tuple[float, Dict]:
 ```
 
 **效果**：奖励函数不直接使用前瞻信息，策略需要从观测中**自主学习**利用前瞻信号的价值。
+
+### v3.1（护栏版）建议：cornerness 自适应权重（连续分段，而非硬阈值）
+
+目标：直线段更重视跟踪精度，拐角段更重视平滑（同时保留跟踪惩罚下限，避免飞出边界）。
+
+建议按 `cornerness c∈[0,1]` 连续插值（示意）：
+- `w_e_eff = lerp(w_e_straight, w_e_corner, c)` 且 `w_e_eff >= w_e_floor`
+- `w_smooth_eff = lerp(w_smooth_straight, w_smooth_corner, c)` 且 `w_smooth_eff <= w_smooth_cap`
+
+说明：
+- `cornerness` 推荐来自“前瞻角度变化”的平滑信号（见护栏 B），而不是直接数值曲率。
+- corridor 可以先保留用于检测/可解释性；塑形惩罚先置 0，避免“参数工程”质疑。
 
 ---
 
@@ -213,7 +280,9 @@ def _get_path_direction(self, pt, v_exec=None, record=False):
 ```python
 # __init__ 中
 if self.lookahead_as_observation:
-    self.observation_dim += 2  # 14 → 16 (或 12 → 14)
+    # 每个尺度 2 维（angle_diff, dist_ratio）
+    # obs_dim = base_dim(12/14) + 2 * N_scales
+    self.observation_dim += 2 * N_scales  # 例如 N_scales=3: 12→18 / 14→20
 ```
 
 ---
@@ -319,12 +388,13 @@ experiment:
 ```powershell
 conda activate PPO
 cd PPO_project
-python main.py --config configs/train_square_v31.yaml --mode train --episodes 5
+# 将 configs/train_square_v31.yaml 里 training.num_episodes 临时改小（例如 5），再运行训练入口
+python main.py --config configs/train_square_v31.yaml --mode train
 ```
 
 验证：
-- `env.observation_space.shape[0] == 16` (或 14 如无曲率)
-- `lookahead_angle_diff` 在拐角前非零、直线段接近零
+- `env.observation_space.shape[0] == base_dim(12/14) + 2 * N_scales`
+- `la*_angle_diff` 在拐角前非零、直线段接近零（near/mid/far 任一尺度可观测）
 - 奖励使用切线参考（非前瞻）
 
 ### Step 3：训练（2-3小时）
@@ -353,7 +423,7 @@ python tools/acceptance_suite.py `
 |------|------|
 | success_rate | ≥ 0.95 |
 | max_abs_e_n | ≤ 0.75mm |
-| observation_dim | 16 (含曲率) / 14 (无曲率) |
+| observation_dim | `base_dim(12/14) + 2 * N_scales` |
 
 ### 涌现项（OBSERVE）
 

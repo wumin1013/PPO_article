@@ -69,3 +69,7 @@ saved_models/
 wandb/
 logs/
 *.log
+
+# Temporary configs
+configs/tmp_*.yaml
+configs/tmp_*.yml

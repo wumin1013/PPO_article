@@ -1,4 +1,4 @@
-# Default training config (P7 recommended): Square (open)
+# Default training config (P7 recommended): Square (closed)
 seed: 42
 
 environment:
@@ -16,6 +16,9 @@ kinematic_constraints:
   MAX_ANG_JERK: 314.1592653589793
 
 reward_weights:
+  lookahead:
+    enabled: true
+    distance: 2.5  # direct override
   corridor:
     enabled: true
     theta_enter_deg: 12.0
@@ -103,7 +106,7 @@ training:
 
 path:
   type: square
-  closed: false
+  closed: true
   scale: 10.0
   num_points: 200
   square: {}

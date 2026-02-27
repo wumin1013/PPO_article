@@ -111,6 +111,8 @@ def _build_env(config: dict, *, device: torch.device) -> Tuple[Env, float]:
         Pm=path_points,
         max_steps=env_cfg["max_steps"],
         lookahead_points=env_cfg.get("lookahead_points", 5),
+        lookahead_obs_enabled=env_cfg.get("lookahead_obs_enabled", True),
+        lookahead_obs_scales=env_cfg.get("lookahead_obs_scales", [1.0]),
         reward_weights=reward_weights,
         curvature_observation=env_cfg.get("curvature_observation"),
         return_normalized_obs=not use_obs_normalizer,

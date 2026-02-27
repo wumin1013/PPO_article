@@ -57,51 +57,95 @@ class PolicyNetContinuous(nn.Module):
     
     def __init__(self, state_dim: int, hidden_dim: int, action_dim: int):
         super().__init__()
-        # 共享基础层
-        self.shared_fc1 = nn.Linear(state_dim, hidden_dim)
-        self.shared_fc2 = nn.Linear(hidden_dim, hidden_dim//2)
-        
-        # 角速度控制分支
-        self.angle_fc = nn.Linear(hidden_dim//2, hidden_dim//4)
-        self.angle_mu = nn.Linear(hidden_dim//4, 1)
-        self.angle_std = nn.Linear(hidden_dim//4, 1)
-        
-        # 线速度控制分支
-        self.speed_fc = nn.Linear(hidden_dim//2, hidden_dim//4)
-        self.speed_mu = nn.Linear(hidden_dim//4, 1)
-        self.speed_std = nn.Linear(hidden_dim//4, 1)
-        
-        # 层归一化
-        self.ln1 = nn.LayerNorm(hidden_dim)
-        self.ln2 = nn.LayerNorm(hidden_dim//2)
+        if action_dim <= 0:
+            raise ValueError(f"action_dim must be positive, got {action_dim}")
+        self.action_dim = int(action_dim)
+        self._legacy_two_dim = self.action_dim == 2
+        if self._legacy_two_dim:
+            # 兼容历史 2D checkpoint 的结构与参数命名
+            self.shared_fc1 = nn.Linear(state_dim, hidden_dim)
+            self.shared_fc2 = nn.Linear(hidden_dim, hidden_dim//2)
+
+            # 角速度控制分支
+            self.angle_fc = nn.Linear(hidden_dim//2, hidden_dim//4)
+            self.angle_mu = nn.Linear(hidden_dim//4, 1)
+            self.angle_std = nn.Linear(hidden_dim//4, 1)
+
+            # 线速度控制分支
+            self.speed_fc = nn.Linear(hidden_dim//2, hidden_dim//4)
+            self.speed_mu = nn.Linear(hidden_dim//4, 1)
+            self.speed_std = nn.Linear(hidden_dim//4, 1)
+
+            # 层归一化
+            self.ln1 = nn.LayerNorm(hidden_dim)
+            self.ln2 = nn.LayerNorm(hidden_dim//2)
+        else:
+            # 可变动作维度网络（用于 3D: 角速度+线速度+前瞻控制）
+            self.shared_fc1 = nn.Linear(state_dim, hidden_dim)
+            self.shared_fc2 = nn.Linear(hidden_dim, hidden_dim // 2)
+            self.shared_fc3 = nn.Linear(hidden_dim // 2, hidden_dim // 4)
+            self.mu_head = nn.Linear(hidden_dim // 4, self.action_dim)
+            self.std_head = nn.Linear(hidden_dim // 4, self.action_dim)
+
+            # 层归一化
+            self.ln1 = nn.LayerNorm(hidden_dim)
+            self.ln2 = nn.LayerNorm(hidden_dim // 2)
+            self.ln3 = nn.LayerNorm(hidden_dim // 4)
         
         self._initialize_weights()
 
     def _initialize_weights(self):
-        nn.init.xavier_uniform_(self.angle_mu.weight)
-        nn.init.xavier_uniform_(self.speed_mu.weight)
-        nn.init.constant_(self.angle_std.bias, 0.3)
-        nn.init.constant_(self.speed_std.bias, 0.3)
+        if self._legacy_two_dim:
+            nn.init.xavier_uniform_(self.angle_mu.weight)
+            nn.init.xavier_uniform_(self.speed_mu.weight)
+            nn.init.constant_(self.angle_std.bias, 0.3)
+            nn.init.constant_(self.speed_std.bias, 0.3)
+        else:
+            nn.init.xavier_uniform_(self.mu_head.weight)
+            nn.init.xavier_uniform_(self.std_head.weight)
+            if self.mu_head.bias is not None:
+                nn.init.constant_(self.mu_head.bias, 0.0)
+            if self.std_head.bias is not None:
+                nn.init.constant_(self.std_head.bias, 0.3)
 
     def forward(self, x):
+        if self._legacy_two_dim:
+            x = F.elu(self.shared_fc1(x))
+            x = self.ln1(x)
+            x = F.elu(self.shared_fc2(x))
+            x = self.ln2(x)
+
+            # 角速度分支
+            angle_feat = F.selu(self.angle_fc(x))
+            angle_mu = torch.tanh(self.angle_mu(angle_feat))
+            angle_std = F.softplus(self.angle_std(angle_feat)) + 1e-3
+
+            # 线速度分支
+            speed_feat = F.selu(self.speed_fc(x))
+            speed_mu = torch.sigmoid(self.speed_mu(speed_feat))
+            speed_std = F.softplus(self.speed_std(speed_feat)) + 1e-3
+
+            mu = torch.cat([angle_mu, speed_mu], dim=1)
+            std = torch.cat([angle_std, speed_std], dim=1)
+            return mu, std
+
         x = F.elu(self.shared_fc1(x))
         x = self.ln1(x)
         x = F.elu(self.shared_fc2(x))
         x = self.ln2(x)
-        
-        # 角速度分支
-        angle_feat = F.selu(self.angle_fc(x))
-        angle_mu = torch.tanh(self.angle_mu(angle_feat))
-        angle_std = F.softplus(self.angle_std(angle_feat)) + 1e-3
-        
-        # 线速度分支
-        speed_feat = F.selu(self.speed_fc(x))
-        speed_mu = torch.sigmoid(self.speed_mu(speed_feat))
-        speed_std = F.softplus(self.speed_std(speed_feat)) + 1e-3
-        
-        mu = torch.cat([angle_mu, speed_mu], dim=1)
-        std = torch.cat([angle_std, speed_std], dim=1)
-        
+        x = F.elu(self.shared_fc3(x))
+        x = self.ln3(x)
+
+        raw_mu = self.mu_head(x)
+        std = F.softplus(self.std_head(x)) + 1e-3
+
+        # 维度语义：
+        #   dim0: 角速度归一化动作，范围 [-1, 1]
+        #   dim1..: 线速度/其他门控动作，范围 [0, 1]
+        mu = torch.zeros_like(raw_mu)
+        mu[:, 0:1] = torch.tanh(raw_mu[:, 0:1])
+        if self.action_dim > 1:
+            mu[:, 1:] = torch.sigmoid(raw_mu[:, 1:])
         return mu, std
 
 

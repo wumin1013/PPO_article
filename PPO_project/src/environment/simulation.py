@@ -146,6 +146,8 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
         Pm=path_points,
         max_steps=env_cfg.get("max_steps", 3000),
         lookahead_points=env_cfg.get("lookahead_points", 5),
+        lookahead_obs_enabled=env_cfg.get("lookahead_obs_enabled", True),
+        lookahead_obs_scales=env_cfg.get("lookahead_obs_scales", [1.0]),
         reward_weights=reward_weights,
         curvature_observation=env_cfg.get("curvature_observation"),
     )

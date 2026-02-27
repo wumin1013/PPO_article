@@ -119,6 +119,8 @@ def _build_env(config: dict, *, device: torch.device) -> Env:
         Pm=path_points,
         max_steps=env_cfg["max_steps"],
         lookahead_points=env_cfg.get("lookahead_points", 5),
+        lookahead_obs_enabled=env_cfg.get("lookahead_obs_enabled", True),
+        lookahead_obs_scales=env_cfg.get("lookahead_obs_scales", [1.0]),
         reward_weights=reward_weights,
         curvature_observation=env_cfg.get("curvature_observation"),
         return_normalized_obs=not use_obs_normalizer,
@@ -210,9 +212,16 @@ def _rollout_trace(config: dict, model_path: Path, *, deterministic: bool) -> Li
             dist_to_corner = p4_status.get("dist_to_turn", corridor_status.get("dist_to_turn", float("inf")))
             if dist_to_corner is None:
                 dist_to_corner = float("inf")
+            e_n = corridor_status.get("e_n", None)
+            if e_n is None:
+                e_n = float(env.state[1]) * float(getattr(env, "half_epsilon", 1.0)) if len(env.state) > 1 else 0.0
+            cornerness = info.get("cornerness", p4_status.get("cornerness", 0.0))
             recovery_active = bool(float(p4_status.get("recovery_cap_active", 0.0)) >= 0.5)
             mode_proxy = 2.0 if recovery_active else (1.0 if corner_mask >= 0.5 else 0.0)
             mode_label = "recovery" if recovery_active else ("corner" if corner_mask >= 0.5 else "normal")
+            control_status = info.get("control_status", {})
+            if not isinstance(control_status, dict):
+                control_status = {}
             trace_rows.append(
                 {
                     "timestamp": float(step_idx * dt),
@@ -227,9 +236,17 @@ def _rollout_trace(config: dict, model_path: Path, *, deterministic: bool) -> Li
                     "domega": float(getattr(env, "angular_acc", 0.0)),
                     "jerk_proxy": float(getattr(env, "angular_jerk", 0.0)),
                     "contour_error": float(info.get("contour_error", 0.0)),
+                    "e_n": float(e_n),
+                    "progress": float(info.get("progress", float(env.state[6]) if len(env.state) > 6 else 0.0)),
                     "kcm_intervention": float(info.get("kcm_intervention", 0.0)),
                     "corner_mask": float(corner_mask),
+                    "corner_phase": 1.0 if corner_phase else 0.0,
+                    "cornerness": float(cornerness),
                     "dist_to_corner": float(dist_to_corner),
+                    "lookahead_dist": float(control_status.get("lookahead_dist", p4_status.get("lookahead_dist_active", float("nan")))),
+                    "lookahead_region_weight": float(control_status.get("lookahead_region_weight", p4_status.get("lookahead_region_weight", float("nan")))),
+                    "lookahead_u": float(control_status.get("lookahead_u", p4_status.get("lookahead_u_exec", float("nan")))),
+                    "corridor_enabled": 1.0 if bool(corridor_status.get("enabled", False)) else 0.0,
                     "mode": mode_label,
                     "mode_proxy": float(mode_proxy),
                 }

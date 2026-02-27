@@ -374,6 +374,8 @@ def train(
         Pm=Pm,
         max_steps=env_config["max_steps"],
         lookahead_points=env_config.get("lookahead_points", 5),
+        lookahead_obs_enabled=env_config.get("lookahead_obs_enabled", True),
+        lookahead_obs_scales=env_config.get("lookahead_obs_scales", [1.0]),
         reward_weights=reward_weights,
         curvature_observation=env_config.get("curvature_observation"),
         return_normalized_obs=not use_obs_normalizer,
@@ -831,6 +833,8 @@ def test(
         Pm=Pm,
         max_steps=env_config["max_steps"],
         lookahead_points=env_config.get("lookahead_points", 5),
+        lookahead_obs_enabled=env_config.get("lookahead_obs_enabled", True),
+        lookahead_obs_scales=env_config.get("lookahead_obs_scales", [1.0]),
         reward_weights=reward_weights,
         curvature_observation=env_config.get("curvature_observation"),
     )

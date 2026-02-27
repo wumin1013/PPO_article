@@ -54,11 +54,12 @@ class Env:
         max_steps,
         reward_weights: Optional[Dict[str, float]] = None,
         lookahead_points: int = 5,
+        lookahead_obs_enabled: bool = True,
+        lookahead_obs_scales: Optional[List[float]] = None,
         return_normalized_obs: bool = True,
         curvature_observation: Optional[Dict[str, float]] = None,
     ):
-        self.lookahead_points = 0  # Phase 21: 禁用lookahead
-        self.lookahead_feature_size = 0
+        self.lookahead_points = int(max(0, int(lookahead_points)))
         
         # Phase 21: 8维核心特征
         self.core_keys = [
@@ -87,10 +88,40 @@ class Env:
         self.enable_curvature_obs = bool(self.curvature_cfg.get("enabled", False))
         self.curvature_keys = ["kappa_norm", "dkappa_ds_norm"] if self.enable_curvature_obs else []
 
+        scales_raw = lookahead_obs_scales if isinstance(lookahead_obs_scales, list) else [1.0]
+        scales_clean: List[float] = []
+        for val in scales_raw:
+            try:
+                s = float(val)
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(s) and s > 0.0:
+                scales_clean.append(s)
+        if not scales_clean:
+            scales_clean = [1.0]
+        self.lookahead_obs_enabled = bool(lookahead_obs_enabled)
+        self.lookahead_obs_scales = scales_clean
+        self.lookahead_obs_dim = 2 * len(self.lookahead_obs_scales)
+        self.lookahead_feature_size = self.lookahead_obs_dim  # 兼容历史字段
+        self.lookahead_obs_keys: List[str] = []
+        for idx, _scale in enumerate(self.lookahead_obs_scales):
+            self.lookahead_obs_keys.extend(
+                [
+                    f"lookahead_angle_diff_s{idx}",
+                    f"lookahead_dist_ratio_s{idx}",
+                ]
+            )
+        self._lookahead_obs_last: Dict[str, float] = {
+            "theta_tangent": 0.0,
+            "theta_far": 0.0,
+            "delta_theta_far": 0.0,
+        }
+
         # 保留base_state_keys用于兼容性
         self.base_state_keys = self.core_keys + self.corner_keys + self.curvature_keys
+        self.state_keys = self.base_state_keys + self.lookahead_obs_keys
 
-        self.observation_dim = len(self.base_state_keys)  # = 12 (or 14 with curvature)
+        self.observation_dim = len(self.state_keys)  # base + 2 * N_scales
         self.action_space_dim = 2
         self.epsilon = epsilon  # 总带宽（Pl到Pr的距离）
         self.half_epsilon = epsilon / 2  # 单侧偏移距离（Pm到Pl或Pr的距离）
@@ -120,6 +151,112 @@ class Env:
             lookahead_cfg = {}
         self.lookahead_enabled = bool(lookahead_cfg.get("enabled", True))
         self.lookahead_dist = float(lookahead_cfg.get("distance", 3.0 * self.epsilon))
+        # 默认保持 Phase31 行为：前瞻仅用于观测，不直接进入控制参考方向。
+        self.lookahead_ref_in_control = bool(lookahead_cfg.get("ref_in_control", False))
+
+        # Learnable lookahead control:
+        # - 基础策略：直线短前瞻，拐角长前瞻（region-aware）
+        # - 可选第三维动作 a_lookahead∈[0,1] 参与调节
+        lookahead_ctrl_cfg = self.reward_weights.get("lookahead_control", {}) if isinstance(self.reward_weights, dict) else {}
+        if not isinstance(lookahead_ctrl_cfg, dict):
+            lookahead_ctrl_cfg = {}
+        self.lookahead_control_enabled = bool(lookahead_ctrl_cfg.get("enabled", False))
+        self.lookahead_control_policy_action = bool(lookahead_ctrl_cfg.get("policy_action", self.lookahead_control_enabled))
+        if not self.lookahead_control_enabled:
+            self.lookahead_control_policy_action = False
+
+        direction_mode = str(lookahead_ctrl_cfg.get("direction_mode", "los")).strip().lower()
+        if direction_mode not in {"los", "tangent"}:
+            direction_mode = "los"
+        self.lookahead_control_direction_mode = direction_mode
+
+        region_source = str(lookahead_ctrl_cfg.get("region_source", "turn")).strip().lower()
+        if region_source not in {"turn", "corner_phase", "cornerness"}:
+            region_source = "turn"
+        self.lookahead_control_region_source = region_source
+
+        default_min = max(0.25 * self.half_epsilon, 1e-3)
+        default_max = max(4.0 * self.epsilon, default_min + 1e-3)
+        try:
+            min_dist = float(lookahead_ctrl_cfg.get("min_dist", default_min))
+        except Exception:
+            min_dist = default_min
+        try:
+            max_dist = float(lookahead_ctrl_cfg.get("max_dist", default_max))
+        except Exception:
+            max_dist = default_max
+        if not math.isfinite(min_dist):
+            min_dist = default_min
+        if not math.isfinite(max_dist):
+            max_dist = default_max
+        min_dist = max(min_dist, 1e-3)
+        if max_dist <= min_dist:
+            max_dist = min_dist + 1e-3
+        self.lookahead_control_min_dist = float(min_dist)
+        self.lookahead_control_max_dist = float(max_dist)
+
+        try:
+            straight_dist = float(lookahead_ctrl_cfg.get("straight_dist", self.lookahead_dist))
+        except Exception:
+            straight_dist = float(self.lookahead_dist)
+        try:
+            corner_dist = float(lookahead_ctrl_cfg.get("corner_dist", self.lookahead_dist))
+        except Exception:
+            corner_dist = float(self.lookahead_dist)
+        self.lookahead_control_straight_dist = float(np.clip(straight_dist, self.lookahead_control_min_dist, self.lookahead_control_max_dist))
+        self.lookahead_control_corner_dist = float(np.clip(corner_dist, self.lookahead_control_min_dist, self.lookahead_control_max_dist))
+
+        mix_gain = float(lookahead_ctrl_cfg.get("mix_gain", 1.0))
+        if not math.isfinite(mix_gain):
+            mix_gain = 1.0
+        self.lookahead_control_mix_gain = float(np.clip(mix_gain, 0.0, 1.0))
+
+        default_u = float(lookahead_ctrl_cfg.get("action_default", 0.5))
+        if not math.isfinite(default_u):
+            default_u = 0.5
+        self.lookahead_control_u_default = float(np.clip(default_u, 0.0, 1.0))
+
+        low_deg = float(lookahead_ctrl_cfg.get("cornerness_low_deg", 5.0))
+        high_deg = float(lookahead_ctrl_cfg.get("cornerness_high_deg", 30.0))
+        if not math.isfinite(low_deg):
+            low_deg = 5.0
+        if not math.isfinite(high_deg):
+            high_deg = 30.0
+        if high_deg <= low_deg:
+            high_deg = low_deg + 1.0
+        self.lookahead_control_cornerness_low = float(math.radians(low_deg))
+        self.lookahead_control_cornerness_high = float(math.radians(high_deg))
+        self._lookahead_action_u = float(self.lookahead_control_u_default)
+        self._lookahead_region_weight = 0.0
+        self._lookahead_dist_active = float(np.clip(self.lookahead_dist, self.lookahead_control_min_dist, self.lookahead_control_max_dist))
+        self._lookahead_control_last: Dict[str, float] = {}
+        if self.lookahead_control_enabled:
+            # 启用学习前瞻时，默认打开前瞻参考方向链路。
+            self.lookahead_ref_in_control = True
+
+        control_cfg = self.reward_weights.get("control_authority", {}) if isinstance(self.reward_weights, dict) else {}
+        if not isinstance(control_cfg, dict):
+            control_cfg = {}
+        mode = str(control_cfg.get("mode", "legacy")).strip().lower()
+        if mode not in {"legacy", "integrated", "blend"}:
+            mode = "legacy"
+        self.control_authority_mode = mode
+        self.control_tangent_blend = float(np.clip(float(control_cfg.get("tangent_blend", 0.0)), 0.0, 1.0))
+        self.control_blend_schedule = str(control_cfg.get("blend_schedule", "linear")).strip().lower()
+        if self.control_blend_schedule not in {"none", "linear", "cosine"}:
+            self.control_blend_schedule = "linear"
+        self.control_warmup_episodes = int(max(0, int(control_cfg.get("warmup_episodes", 0))))
+        warmup_blend_default = max(self.control_tangent_blend, 0.20)
+        self.control_warmup_blend = float(
+            np.clip(float(control_cfg.get("warmup_blend", warmup_blend_default)), 0.0, 1.0)
+        )
+        self.control_tangent_blend_active = float(self.control_tangent_blend)
+        max_corr_deg = float(control_cfg.get("max_correction_deg", 45.0))
+        if not math.isfinite(max_corr_deg) or max_corr_deg <= 0.0:
+            max_corr_deg = 45.0
+        self.control_max_correction_rad = float(math.radians(max_corr_deg))
+        self._control_last: Dict[str, float] = {}
+        self._episode_index = -1
         # 确保所有约束参数都是浮点数
         self.MAX_VEL = float(MAX_VEL if MAX_VEL is not None else LEGACY_KINEMATICS["MAX_VEL"])
         self.MAX_ACC = float(MAX_ACC if MAX_ACC is not None else LEGACY_KINEMATICS["MAX_ACC"])
@@ -141,15 +278,19 @@ class Env:
         self.return_normalized_obs = bool(return_normalized_obs)
         self.trajectory = []
         self.trajectory_states = []
-        self.action_space = gym.spaces.Box(
-            low=np.array([-1.0, 0.0], dtype=np.float32),
-            high=np.array([1.0, 1.0], dtype=np.float32),
-            dtype=np.float32,
-        )
+        if self.lookahead_control_enabled and self.lookahead_control_policy_action:
+            action_low = np.array([-1.0, 0.0, 0.0], dtype=np.float32)
+            action_high = np.array([1.0, 1.0, 1.0], dtype=np.float32)
+        else:
+            action_low = np.array([-1.0, 0.0], dtype=np.float32)
+            action_high = np.array([1.0, 1.0], dtype=np.float32)
+        self.action_space_dim = int(action_low.shape[0])
+        self.action_space = gym.spaces.Box(low=action_low, high=action_high, dtype=np.float32)
 
         self.reward_calculator = RewardCalculator(
             weights=self.reward_weights,
             max_vel=self.MAX_VEL,
+            max_ang_vel=self.MAX_ANG_VEL,
             half_epsilon=self.half_epsilon,
             max_jerk=self.MAX_JERK,
             max_ang_acc=self.MAX_ANG_ACC,
@@ -249,7 +390,7 @@ class Env:
                     max_y = max(p[1] for p in polygon)
                     self.rtree_idx.insert(idx, (min_x, min_y, max_x, max_y))
         
-        # Phase 21: 精简的归一化参数（12/14维状态已在_build_state中归一化）
+        # 归一化参数（状态已在 _build_state 中完成归一化）
         # 保留此字典用于兼容性和normalize_state方法
         self.normalization_params = {
             'contour_error_norm': 1.0,  # 已归一化
@@ -270,6 +411,8 @@ class Env:
                 "kappa_norm": 1.0,
                 "dkappa_ds_norm": 1.0,
             })
+        for key in self.lookahead_obs_keys:
+            self.normalization_params[key] = 1.0
         # Phase 21: 更新observation_space边界
         self.observation_space = gym.spaces.Box(
             low=-10.0, high=10.0, shape=(self.observation_dim,), dtype=np.float32
@@ -301,6 +444,143 @@ class Env:
             f"  MAX_VEL={self.MAX_VEL}, MAX_ACC={self.MAX_ACC}, MAX_JERK={self.MAX_JERK}, "
             f"MAX_ANG_VEL={self.MAX_ANG_VEL}, MAX_ANG_ACC={self.MAX_ANG_ACC}, MAX_ANG_JERK={self.MAX_ANG_JERK}"
         )
+        print(
+            f"  control_authority: mode={self.control_authority_mode}, "
+            f"tangent_blend={self.control_tangent_blend:.3f}, "
+            f"max_correction_deg={math.degrees(self.control_max_correction_rad):.1f}"
+        )
+        print(
+            f"  lookahead: obs_enabled={self.lookahead_obs_enabled}, "
+            f"ref_in_control={self.lookahead_ref_in_control}, distance={self.lookahead_dist:.3f}"
+        )
+        if self.control_authority_mode == "blend":
+            print(
+                f"  blend_schedule={self.control_blend_schedule}, warmup_episodes={self.control_warmup_episodes}, "
+                f"warmup_blend={self.control_warmup_blend:.3f}"
+            )
+        if bool(getattr(self, "lookahead_control_enabled", False)):
+            print(
+                "  lookahead_control: "
+                f"policy_action={self.lookahead_control_policy_action}, "
+                f"direction_mode={self.lookahead_control_direction_mode}, "
+                f"region_source={self.lookahead_control_region_source}, "
+                f"straight={self.lookahead_control_straight_dist:.3f}, "
+                f"corner={self.lookahead_control_corner_dist:.3f}, "
+                f"range=[{self.lookahead_control_min_dist:.3f}, {self.lookahead_control_max_dist:.3f}], "
+                f"mix_gain={self.lookahead_control_mix_gain:.3f}"
+            )
+
+    def _update_control_authority_schedule(self) -> None:
+        """根据当前回合更新 blend 控制权，前期更保守、后期更依赖策略。"""
+        target = float(getattr(self, "control_tangent_blend", 0.0))
+        active = target
+        if str(getattr(self, "control_authority_mode", "legacy")) == "blend":
+            warm_eps = int(max(0, int(getattr(self, "control_warmup_episodes", 0))))
+            warm_blend = float(getattr(self, "control_warmup_blend", target))
+            if warm_eps > 0:
+                ep = float(max(0, int(getattr(self, "_episode_index", 0))))
+                ratio = float(np.clip(ep / float(warm_eps), 0.0, 1.0))
+                sched = str(getattr(self, "control_blend_schedule", "linear"))
+                if sched == "cosine":
+                    alpha = 0.5 - 0.5 * math.cos(math.pi * ratio)
+                elif sched == "none":
+                    alpha = 1.0
+                else:
+                    alpha = ratio
+                active = float(warm_blend + (target - warm_blend) * alpha)
+        self.control_tangent_blend_active = float(np.clip(active, 0.0, 1.0))
+
+    def _compute_lookahead_region_weight(self) -> float:
+        """估计当前处于拐角区域的连续权重（0=直线，1=拐角）。"""
+        source = str(getattr(self, "lookahead_control_region_source", "turn")).lower()
+        turn_info = getattr(self, "turn_info", {}) or {}
+        if not isinstance(turn_info, dict):
+            turn_info = {}
+
+        corner_phase_w = 1.0 if bool(turn_info.get("corner_phase", getattr(self, "in_corner_phase", False))) else 0.0
+
+        dist_to_turn = turn_info.get("dist_to_turn", float("inf"))
+        try:
+            dist_to_turn = float(dist_to_turn)
+        except Exception:
+            dist_to_turn = float("inf")
+        try:
+            turn_angle = abs(float(turn_info.get("turn_angle", 0.0)))
+        except Exception:
+            turn_angle = 0.0
+
+        theta_ref = max(float(getattr(self, "_corridor_theta_enter", math.radians(15.0))), 1e-6)
+        dist_ref = max(float(getattr(self, "_corridor_dist_enter", max(self.lookahead_dist, 1.0))), 1e-6)
+        angle_ratio = float(np.clip(turn_angle / theta_ref, 0.0, 1.0))
+        near_ratio = float(np.clip(1.0 - dist_to_turn / dist_ref, 0.0, 1.0)) if math.isfinite(dist_to_turn) else 0.0
+        turn_weight = float(angle_ratio * near_ratio)
+
+        delta_theta = abs(float(getattr(self, "_lookahead_obs_last", {}).get("delta_theta_far", 0.0)))
+        c_low = float(getattr(self, "lookahead_control_cornerness_low", math.radians(5.0)))
+        c_high = float(getattr(self, "lookahead_control_cornerness_high", math.radians(30.0)))
+        c_span = max(c_high - c_low, 1e-6)
+        cornerness_weight = float(np.clip((delta_theta - c_low) / c_span, 0.0, 1.0))
+
+        if source == "corner_phase":
+            return float(corner_phase_w)
+        if source == "cornerness":
+            return float(np.clip(max(cornerness_weight, turn_weight), 0.0, 1.0))
+        return float(np.clip(max(turn_weight, corner_phase_w), 0.0, 1.0))
+
+    def _resolve_active_lookahead_dist(self) -> float:
+        """根据区域与策略动作得到本步生效前瞻距离。"""
+        min_dist = float(getattr(self, "lookahead_control_min_dist", max(0.25 * self.half_epsilon, 1e-3)))
+        max_dist = float(getattr(self, "lookahead_control_max_dist", max(min_dist + 1e-3, self.lookahead_dist)))
+        if max_dist <= min_dist:
+            max_dist = min_dist + 1e-3
+
+        if not bool(getattr(self, "lookahead_control_enabled", False)):
+            active = float(np.clip(float(getattr(self, "lookahead_dist", min_dist)), min_dist, max_dist))
+            self._lookahead_region_weight = 0.0
+            self._lookahead_dist_active = active
+            self._lookahead_control_last = {
+                "enabled": 0.0,
+                "region_weight": 0.0,
+                "lookahead_dist": float(active),
+                "lookahead_u": float(getattr(self, "_lookahead_action_u", 0.5)),
+            }
+            return float(active)
+
+        region_weight = float(np.clip(self._compute_lookahead_region_weight(), 0.0, 1.0))
+        straight_dist = float(np.clip(float(getattr(self, "lookahead_control_straight_dist", self.lookahead_dist)), min_dist, max_dist))
+        corner_dist = float(np.clip(float(getattr(self, "lookahead_control_corner_dist", self.lookahead_dist)), min_dist, max_dist))
+        base_dist = float(straight_dist + region_weight * (corner_dist - straight_dist))
+
+        policy_u = float(np.clip(float(getattr(self, "_lookahead_action_u", getattr(self, "lookahead_control_u_default", 0.5))), 0.0, 1.0))
+        self._lookahead_action_u = policy_u
+
+        if bool(getattr(self, "lookahead_control_policy_action", False)):
+            policy_dist = float(min_dist + policy_u * (max_dist - min_dist))
+            mix_gain = float(np.clip(float(getattr(self, "lookahead_control_mix_gain", 1.0)), 0.0, 1.0))
+            active = float((1.0 - mix_gain) * base_dist + mix_gain * policy_dist)
+        else:
+            policy_dist = float(base_dist)
+            active = float(base_dist)
+
+        active = float(np.clip(active, min_dist, max_dist))
+        self._lookahead_region_weight = float(region_weight)
+        self._lookahead_dist_active = float(active)
+        self._lookahead_control_last = {
+            "enabled": 1.0,
+            "region_weight": float(region_weight),
+            "base_dist": float(base_dist),
+            "policy_dist": float(policy_dist),
+            "lookahead_dist": float(active),
+            "lookahead_u": float(policy_u),
+            "mix_gain": float(getattr(self, "lookahead_control_mix_gain", 1.0)),
+        }
+        return float(active)
+
+    def _get_active_lookahead_norm(self) -> float:
+        min_dist = float(getattr(self, "lookahead_control_min_dist", max(0.25 * self.half_epsilon, 1e-3)))
+        max_dist = float(getattr(self, "lookahead_control_max_dist", max(min_dist + 1e-3, self.lookahead_dist)))
+        span = max(max_dist - min_dist, 1e-6)
+        return float(np.clip((float(getattr(self, "_lookahead_dist_active", self.lookahead_dist)) - min_dist) / span, 0.0, 1.0))
     
     def _create_trig_lookup_table(self):
         """Create trig lookup table for fast trig computation"""
@@ -515,6 +795,8 @@ class Env:
         }
 
     def reset(self, random_start: bool = False):
+        self._episode_index = int(getattr(self, "_episode_index", -1)) + 1
+        self._update_control_authority_schedule()
         self.current_step = 0
         self.trajectory_states = []
         # 强制从路径起点开始，忽略外部的 random_start 请求
@@ -527,6 +809,12 @@ class Env:
         self._theta_ref_prev = None
         self._theta_ref_last = float(self._current_direction_angle)
         self._theta_ref_delta = 0.0
+        self._lookahead_obs_last = {"theta_tangent": 0.0, "theta_far": 0.0, "delta_theta_far": 0.0}
+        self._lookahead_action_u = float(getattr(self, "lookahead_control_u_default", 0.5))
+        self._lookahead_region_weight = 0.0
+        self._lookahead_dist_active = float(np.clip(float(getattr(self, "lookahead_dist", self.half_epsilon)), float(getattr(self, "lookahead_control_min_dist", 1e-3)), float(getattr(self, "lookahead_control_max_dist", max(self.lookahead_dist, 1e-3)))))
+        self._lookahead_control_last = {}
+        self._control_last = {}
         self._p1_los_last = {}
         self.trajectory = [self.current_position.copy()]
         self._curvature_prev_kappa = None
@@ -581,8 +869,10 @@ class Env:
         self._p6_prev_action_policy = None
 
         # 初始观测
-        # Phase 21: 使用统一的12维状态构建
+        # 使用统一状态构建（base + lookahead obs）
         self.turn_info = self._compute_turn_info()
+        self.last_corridor_status = self._compute_corridor_status()
+        self._resolve_active_lookahead_dist()
         
         # Phase 21: 使用精简状态空间
         self.state = self._build_state()
@@ -609,11 +899,20 @@ class Env:
         policy_action = np.array(action, dtype=float).flatten()
         policy_theta = float(policy_action[0]) if policy_action.size > 0 else 0.0
         policy_length = float(policy_action[1]) if policy_action.size > 1 else 0.0
+        policy_lookahead_u = float(getattr(self, "_lookahead_action_u", getattr(self, "lookahead_control_u_default", 0.5)))
+        if bool(getattr(self, "lookahead_control_enabled", False)) and bool(getattr(self, "lookahead_control_policy_action", False)):
+            if policy_action.size > 2:
+                policy_lookahead_u = float(policy_action[2])
+            policy_lookahead_u = float(np.clip(policy_lookahead_u, 0.0, 1.0))
+        self._lookahead_action_u = float(policy_lookahead_u)
 
         # Clip action
         policy_theta = np.clip(policy_theta, -1.0, 1.0)
         policy_length = np.clip(policy_length, 0.0, 1.0)
-        action_policy = np.array([policy_theta, policy_length], dtype=float)
+        if bool(getattr(self, "lookahead_control_enabled", False)) and bool(getattr(self, "lookahead_control_policy_action", False)):
+            action_policy = np.array([policy_theta, policy_length, self._lookahead_action_u], dtype=float)
+        else:
+            action_policy = np.array([policy_theta, policy_length], dtype=float)
 
         corner_phase_before = bool(getattr(self, "in_corner_phase", False))
         exit_boost_before = int(getattr(self, "_p4_exit_boost_remaining", 0))
@@ -623,6 +922,7 @@ class Env:
         v_u_policy = float(policy_length)
         omega_u_policy = float(policy_theta)
         p4_status["v_ratio_policy"] = float(v_u_policy)
+        p4_status["lookahead_u_policy"] = float(self._lookahead_action_u)
         p4_status["exit_boost_remaining"] = float(exit_boost_before)
 
         # Solidify: Always apply caps if logic is active (checked inside compute_p4 or via config)
@@ -684,8 +984,12 @@ class Env:
         
         # --- 3. Perception Update ---
         self.turn_info = self._compute_turn_info()
+        self.last_corridor_status = self._compute_corridor_status()
         self._update_segment_info()
         self.state = self._build_observation()
+        p4_status["lookahead_u_exec"] = float(getattr(self, "_lookahead_action_u", 0.0))
+        p4_status["lookahead_region_weight"] = float(getattr(self, "_lookahead_region_weight", 0.0))
+        p4_status["lookahead_dist_active"] = float(getattr(self, "_lookahead_dist_active", self.lookahead_dist))
         
         # --- 4. Termination Check ---
         done, done_reason = self._check_termination(p4_status, corner_phase_before)
@@ -697,6 +1001,7 @@ class Env:
         # [6]=overall_progress, [7]=dist_to_turn_norm
         # [8]=turn_angle_norm, [9]=turn_sign, [10]=corner_phase, [11]=inside_signed
         # [12]=kappa_norm, [13]=dkappa_ds_norm (if enabled)
+        # [..]=lookahead_obs (2 * N_scales, 固定维度)
         ctx = RewardContext(
             contour_error=self.get_contour_error(self.current_position),
             progress=float(self.state[6]) if len(self.state) > 6 else 0.0,  # overall_progress
@@ -716,10 +1021,24 @@ class Env:
             corridor_status=getattr(self, "last_corridor_status", {}),
             du_theta_u=0.0,
             du_v_u=0.0,
+            lookahead_delta_theta=float(getattr(self, "_lookahead_obs_last", {}).get("delta_theta_far", 0.0)),
+            lookahead_dist=float(getattr(self, "_lookahead_dist_active", self.lookahead_dist)),
+            lookahead_dist_norm=float(self._get_active_lookahead_norm()),
+            region_weight=float(getattr(self, "_lookahead_region_weight", 0.0)),
         )
         reward, components = self.reward_calculator.calculate_reward(ctx)
-        
+        p4_status["cornerness"] = float(components.get("cornerness", 0.0))
+        p4_status["cornerness_raw"] = float(components.get("cornerness_raw", 0.0))
+        p4_status["w_track_dyn"] = float(components.get("w_track_dyn", 0.0))
+        p4_status["w_smooth_dyn"] = float(components.get("w_smooth_dyn", 0.0))
+
         # --- 6. Info ---
+        action_exec_norm = [float(omega_u_exec), float(v_ratio_exec)]
+        action_exec_phys = [float(self.angular_vel), float(self.velocity)]
+        if bool(getattr(self, "lookahead_control_enabled", False)) and bool(getattr(self, "lookahead_control_policy_action", False)):
+            action_exec_norm.append(float(getattr(self, "_lookahead_action_u", 0.0)))
+            action_exec_phys.append(float(getattr(self, "_lookahead_action_u", 0.0)))
+
         info = {
             "position": self.current_position.copy(),
             "step": self.current_step,
@@ -731,10 +1050,13 @@ class Env:
             "corridor_status": copy.deepcopy(getattr(self, "last_corridor_status", {})),
             "p4_status": copy.deepcopy(p4_status),
             "action_policy": action_policy.copy(),
-            "action_exec": np.array(safe_action, dtype=float),
-            "action_gap_abs": np.abs(np.array([omega_u_exec, v_ratio_exec], dtype=float) - action_policy),
+            "action_exec": np.asarray(action_exec_phys, dtype=float),
+            "action_gap_abs": np.abs(np.asarray(action_exec_norm, dtype=float) - action_policy),
             "done_reason": done_reason,
-            "turn_info": copy.deepcopy(self.turn_info)
+            "turn_info": copy.deepcopy(self.turn_info),
+            "cornerness": float(components.get("cornerness", 0.0)),
+            "reward_components": copy.deepcopy(components),
+            "control_status": copy.deepcopy(getattr(self, "_control_last", {})),
         }
         
         # Update last status
@@ -770,7 +1092,7 @@ class Env:
         self.trajectory.append(self.current_position.copy())
 
     def _build_observation(self):
-        """Phase 21: 构建12/14维精简状态向量（兼容旧名称）"""
+        """构建状态向量（兼容旧名称）。"""
         return self._build_state()
 
     def compute_curvature_features(self) -> Tuple[float, float]:
@@ -808,7 +1130,7 @@ class Env:
         )
     
     def _build_state(self) -> np.ndarray:
-        """Phase 21: 构建12/14维精简状态向量
+        """构建状态向量（base + 可选曲率 + 固定维度多尺度前瞻观测）。
         
         8维核心特征:
             contour_error_norm, e_n_norm, heading_error_norm, velocity_norm,
@@ -840,7 +1162,8 @@ class Env:
         # 8维核心特征
         contour_error_norm = np.clip(contour_error / half_eps, 0.0, 2.0)
         e_n_norm = np.clip(e_n / half_eps, -2.0, 2.0)
-        heading_error_norm = self.calculate_direction_deviation(self.current_position) / math.pi
+        theta_tangent = float(self._tangent_angle_at_s(float(s_now)))
+        heading_error_norm = self._wrap_angle(float(self._current_direction_angle) - theta_tangent) / math.pi
         velocity_norm = float(self.velocity) / float(self.MAX_VEL)
         acceleration_norm = float(self.acceleration) / float(self.MAX_ACC)
         angular_vel_norm = float(self.angular_vel) / float(self.MAX_ANG_VEL)
@@ -861,7 +1184,7 @@ class Env:
         corner_phase_val = 1.0 if corner_phase else 0.0
         inside_signed = float(turn_sign) * e_n_norm
         
-        # 组装12/14维状态
+        # 组装 base 状态
         state_values = [
             # 8维核心特征
             float(contour_error_norm),
@@ -882,6 +1205,9 @@ class Env:
         if self.enable_curvature_obs:
             kappa_norm, dkappa_norm = self.compute_curvature_features()
             state_values.extend([kappa_norm, dkappa_norm])
+
+        lookahead_obs = self._compute_lookahead_observation(s_now=float(s_now), theta_tangent=theta_tangent)
+        state_values.extend([float(v) for v in lookahead_obs])
 
         return np.array(state_values, dtype=np.float32)
 
@@ -1025,14 +1351,46 @@ class Env:
         return float(np.clip(progress, 0.0, 0.99))
     
     def calculate_new_position(self, theta_prime_action, length_prime_action):
-        # Residual control: follow path tangent with a small angular residual.
+        # Phase 31 control-authority modes:
+        # - legacy: heading = theta_ref + omega*dt (strong handcrafted guidance)
+        # - integrated: heading = heading + omega*dt (pure policy authority)
+        # - blend: integrated heading with bounded tangent correction
         dt = float(self.interpolation_period)
         omega_exec = float(theta_prime_action)
         v_exec = float(length_prime_action)
         theta_ref = float(self._get_path_direction(self.current_position, v_exec=v_exec, record=True))
+        heading_pred = float(self._wrap_angle(float(getattr(self, "heading", self._current_direction_angle)) + omega_exec * dt))
+        mode = str(getattr(self, "control_authority_mode", "legacy"))
 
-        effective = float(self._wrap_angle(theta_ref + omega_exec * dt))
-        # Keep heading for diagnostics; dynamics follow path tangent + residual.
+        if mode == "integrated":
+            effective = float(heading_pred)
+            heading_corr = 0.0
+        elif mode == "blend":
+            heading_corr = float(self._wrap_angle(theta_ref - heading_pred))
+            max_corr = float(getattr(self, "control_max_correction_rad", 0.0))
+            if max_corr > 0.0:
+                heading_corr = float(np.clip(heading_corr, -max_corr, max_corr))
+            blend = float(getattr(self, "control_tangent_blend_active", getattr(self, "control_tangent_blend", 0.0)))
+            effective = float(self._wrap_angle(heading_pred + blend * heading_corr))
+        else:
+            # Backward-compatible behavior.
+            effective = float(self._wrap_angle(theta_ref + omega_exec * dt))
+            heading_corr = float(self._wrap_angle(theta_ref - heading_pred))
+
+        self._control_last = {
+            "mode": 0.0 if mode == "legacy" else (1.0 if mode == "integrated" else 2.0),
+            "theta_ref": float(theta_ref),
+            "heading_pred": float(heading_pred),
+            "heading_corr": float(heading_corr),
+            "heading_effective": float(effective),
+            "blend_active": float(getattr(self, "control_tangent_blend_active", 0.0)),
+            "lookahead_dist": float(getattr(self, "_lookahead_dist_active", self.lookahead_dist)),
+            "lookahead_region_weight": float(getattr(self, "_lookahead_region_weight", 0.0)),
+            "lookahead_u": float(getattr(self, "_lookahead_action_u", 0.0)),
+            "episode_index": float(getattr(self, "_episode_index", 0)),
+        }
+
+        # Keep heading for diagnostics and next-step integration.
         self.heading = float(effective)
         self._current_direction_angle = float(effective)
 
@@ -1194,6 +1552,58 @@ class Env:
             pt, seg_idx, _ = self._interpolate_point_at_s(s_target)
             targets.append((pt, seg_idx))
         return targets
+
+    def _compute_lookahead_observation(
+        self,
+        *,
+        s_now: float | None = None,
+        theta_tangent: float | None = None,
+    ) -> np.ndarray:
+        """Phase 31(v3.2): 多尺度前瞻观测，每个尺度输出 [angle_diff_norm, dist_ratio]。"""
+        dim = int(getattr(self, "lookahead_obs_dim", 0))
+        if dim <= 0:
+            self._lookahead_obs_last = {"theta_tangent": 0.0, "theta_far": 0.0, "delta_theta_far": 0.0}
+            return np.zeros((0,), dtype=np.float32)
+
+        if s_now is None or not math.isfinite(float(s_now)):
+            _proj, _seg_idx, s_proj, _t_hat, _n_hat = self._project_onto_progress_path(self.current_position)
+            s_now = float(s_proj)
+        else:
+            s_now = float(s_now)
+
+        if theta_tangent is None or not math.isfinite(float(theta_tangent)):
+            theta_tangent = float(self._tangent_angle_at_s(float(s_now)))
+        else:
+            theta_tangent = float(theta_tangent)
+
+        base_lookahead = float(max(getattr(self, "_lookahead_dist_active", getattr(self, "lookahead_dist", self.half_epsilon)), 1e-6))
+        obs: List[float] = []
+        theta_far = theta_tangent
+
+        for idx, scale in enumerate(self.lookahead_obs_scales):
+            L = float(max(base_lookahead * float(scale), 1e-6))
+            s_target = float(s_now + L)
+            target_point = np.asarray(self._interpolate_progress_point_at_s(s_target), dtype=float)
+            delta_vec = target_point - np.asarray(self.current_position, dtype=float)
+            dist_to_target = float(np.linalg.norm(delta_vec))
+
+            theta_L = float(self._tangent_angle_at_s(s_target))
+            angle_diff_norm = float(self._wrap_angle(theta_L - theta_tangent) / math.pi)
+            dist_ratio = float(np.clip(dist_to_target / L, 0.0, 1.0))
+            obs.extend([angle_diff_norm, dist_ratio])
+            if idx == len(self.lookahead_obs_scales) - 1:
+                theta_far = theta_L
+
+        delta_theta_far = float(self._wrap_angle(theta_far - theta_tangent))
+        self._lookahead_obs_last = {
+            "theta_tangent": float(theta_tangent),
+            "theta_far": float(theta_far),
+            "delta_theta_far": float(delta_theta_far),
+        }
+
+        if not bool(getattr(self, "lookahead_obs_enabled", True)):
+            return np.zeros((dim,), dtype=np.float32)
+        return np.asarray(obs, dtype=np.float32)
 
     def _compute_lookahead_features(self):
         """使用路径切向坐标系的前瞻特征: [s_i, d_i, curvature_rate]."""
@@ -2356,29 +2766,51 @@ class Env:
         self.last_corridor_status = status
         return status
 
+    def _get_tangent_direction(self, pt, record: bool = False) -> float:
+        """Phase 31(v3.2): 参考方向只使用路径切线。"""
+        pt_arr = np.asarray(pt, dtype=float)
+        _proj, _seg_idx, s_now, _t_hat, _n_hat = self._project_onto_progress_path(pt_arr)
+        theta_tangent = float(self._tangent_angle_at_s(float(s_now)))
+        if record:
+            self._theta_ref_last = float(theta_tangent)
+        return float(theta_tangent)
+
+    def get_tangent_direction(self, pt, record: bool = False) -> float:
+        """公共接口：返回切线参考方向（用于 θ_ref）。"""
+        return float(self._get_tangent_direction(pt, record=record))
+
+    def get_lookahead_observation(self) -> np.ndarray:
+        """公共接口：返回多尺度前瞻观测（用于 obs）。"""
+        return self._compute_lookahead_observation()
+
     def _get_path_direction(self, pt, v_exec: float | None = None, record: bool = False):
-        """v3.0: Lookahead reference direction."""
-        if not getattr(self, "lookahead_enabled", False):
-            return self._get_path_direction_legacy(pt, v_exec=v_exec, record=record)
+        """参考方向：支持固定/区域自适应/策略可学习前瞻。"""
+        _ = v_exec
+        pt_arr = np.asarray(pt, dtype=float)
+        _proj, _seg_idx, s_now, _t_hat, _n_hat = self._project_onto_progress_path(pt_arr)
+        theta_tangent = float(self._tangent_angle_at_s(float(s_now)))
 
-        s_current = self._get_current_arc_length()
-        lookahead_dist = float(getattr(self, "lookahead_dist", 4.5))
-        s_target = s_current + lookahead_dist
-        target_point, _, _ = self._interpolate_point_at_s(s_target)
+        lookahead_active = float(self._resolve_active_lookahead_dist())
+        use_lookahead_ref = bool(getattr(self, "lookahead_ref_in_control", False))
 
-        dx = float(target_point[0] - pt[0])
-        dy = float(target_point[1] - pt[1])
-        dist = math.sqrt(dx * dx + dy * dy)
-        # v3.0 Fix: 距离过小时使用当前弧长切线（避免方向抖动）
-        if dist < 0.1 * self.half_epsilon:
-            theta_lookahead = self._tangent_angle_at_s(s_current)
-        else:
-            theta_lookahead = math.atan2(dy, dx)
+        theta_ref = float(theta_tangent)
+        if use_lookahead_ref and lookahead_active > 1e-6:
+            s_target = float(s_now + lookahead_active)
+            direction_mode = str(getattr(self, "lookahead_control_direction_mode", "los")).lower()
+            if direction_mode == "tangent":
+                theta_ref = float(self._tangent_angle_at_s(float(s_target)))
+            else:
+                target_point = np.asarray(self._interpolate_progress_point_at_s(float(s_target)), dtype=float)
+                vec = target_point - pt_arr
+                norm = float(np.linalg.norm(vec))
+                if norm > 1e-9:
+                    theta_ref = float(math.atan2(float(vec[1]), float(vec[0])))
+                else:
+                    theta_ref = float(theta_tangent)
 
         if record:
-            self._theta_ref_last = float(theta_lookahead)
-
-        return float(theta_lookahead)
+            self._theta_ref_last = float(theta_ref)
+        return float(theta_ref)
 
     def _get_path_direction_legacy(self, pt, v_exec: float | None = None, record: bool = False):
         """Legacy tangent direction with a small lookahead near segment end."""
@@ -2419,91 +2851,41 @@ class Env:
         return tau
     
     def calculate_reward(self):
-        contour_error = self.get_contour_error(self.current_position)
-        progress = float(self.state[4]) if len(self.state) > 4 else 0.0
-        heading_error = abs(self.state[2]) if len(self.state) > 2 else abs(self.calculate_direction_deviation(self.current_position))
-        end_point = np.array(self.Pm[-1])
-        end_distance = float(np.linalg.norm(self.current_position - end_point))
-        lap_done = self.lap_completed or getattr(self, "reached_target", False)
-        corridor_status = self._compute_corridor_status()
-        corridor_corner_phase = bool(corridor_status.get("corner_phase"))
-        turn_sign = int(corridor_status.get("turn_sign", 0))
-        exit_timer = int(corridor_status.get("exit_timer", -1))
-        exit_steps = int(corridor_status.get("exit_ramp_steps", 0))
-        exit_active = bool(exit_timer >= 0 and exit_steps > 0 and exit_timer <= exit_steps)
-        corridor_active = bool(corridor_status.get("enabled")) and bool(corridor_corner_phase or exit_active)
-        corridor_e_n = float(corridor_status.get("e_n", 0.0))
-        corridor_target_error = abs(corridor_e_n - float(corridor_status.get("e_target", 0.0)))
-        corridor_heading_cos = float(corridor_status.get("heading_cos", 0.0))
-        corridor_margin_to_edge = corridor_status.get("margin_to_edge", float("nan"))
-        corridor_margin_to_edge = float(corridor_margin_to_edge) if corridor_margin_to_edge is not None else float("nan")
-        w_center = float(corridor_status.get("w_center", 0.0))
-
+        """兼容接口：按当前环境状态构建 RewardContext 并返回奖励。"""
         p4_status = getattr(self, "_p4_step_status", {}) or {}
         if not isinstance(p4_status, dict):
             p4_status = {}
-        speed_target = p4_status.get("speed_target", None)
-        speed_target = float(speed_target) if speed_target is not None else None
-        corner_mode = float(p4_status.get("corner_mode", 0.0))
-        corner_mask = bool(corner_mode >= 0.5 or corridor_corner_phase)
-        v_ratio_exec = p4_status.get("v_ratio_exec", None)
-        v_ratio_exec = float(v_ratio_exec) if v_ratio_exec is not None else None
-        progress_multiplier = float(p4_status.get("progress_multiplier", 1.0))
-        time_penalty = float(p4_status.get("time_penalty", getattr(self, "_p4_time_penalty", 0.0)))
-        du_theta_u = float(p4_status.get("du_theta_u", 0.0))
-        du_v_u = float(p4_status.get("du_v_u", 0.0))
+        corridor_status = getattr(self, "last_corridor_status", {}) or {}
+        if not isinstance(corridor_status, dict):
+            corridor_status = {}
 
-        reward, components = self.reward_calculator.calculate_reward(
-            contour_error=contour_error,
-            progress=progress,
-            velocity=self.velocity,
-            heading_error=heading_error,
-            kcm_intervention=self.kcm_intervention,
-            end_distance=end_distance,
-            jerk=self.jerk,
-            angular_jerk=self.angular_jerk,
-            angular_acc=self.angular_acc,
-            du_theta_u=float(du_theta_u),
-            du_v_u=float(du_v_u),
-            du_enabled=bool(getattr(self, "_p6_du_enabled", False)),
-            du_weight=float(getattr(self, "_p6_du_weight", 0.0)),
-            du_mode=str(getattr(self, "_p6_du_mode", "l1")),
-            lap_completed=lap_done,
-            is_closed=self.closed,
-            corner_mask=corner_mask,
-            v_ratio_exec=v_ratio_exec,
-            speed_target=speed_target,
-            speed_weight=float(getattr(self, "_p4_speed_weight", 6.0)),
-            time_penalty=time_penalty,
-            progress_multiplier=progress_multiplier,
+        ctx = RewardContext(
+            contour_error=float(self.get_contour_error(self.current_position)),
+            progress=float(self.state[6]) if len(self.state) > 6 else 0.0,
+            velocity=float(self.velocity),
+            heading_error=float(self.state[2]) if len(self.state) > 2 else 0.0,
+            jerk=float(self.jerk),
+            angular_jerk=float(self.angular_jerk),
+            angular_acc=float(self.angular_acc),
+            kcm_intervention=float(self.kcm_intervention),
+            corner_mask=bool(self.turn_info.get("corner_phase", False)),
+            turn_sign=int(self.turn_info.get("turn_sign", 0)),
             stall_triggered=bool(getattr(self, "_p4_stall_triggered", False)),
-            stall_penalty=float(getattr(self, "_p4_stall_penalty", 0.0)),
-            corridor_enabled=bool(corridor_status.get("enabled", False)),
-            corridor_active=corridor_active,
-            corridor_in_corridor=bool(corridor_status.get("in_corridor", False)),
-            corridor_target_error=float(corridor_target_error),
-            corridor_outside_distance=float(corridor_status.get("dist_to_interval", 0.0)),
-            corridor_e_n=float(corridor_e_n),
-            corridor_margin_to_edge=float(corridor_margin_to_edge),
-            corridor_safe_margin=float(getattr(self, "_corridor_safe_margin", 0.0)),
-            corridor_barrier_scale=float(getattr(self, "_corridor_barrier_scale", 0.0)),
-            corridor_barrier_weight=float(getattr(self, "_corridor_barrier_weight", 0.0)),
-            corridor_center_weight=float(w_center),
-            corridor_center_power=float(getattr(self, "_corridor_center_power", 2.0)),
-            corridor_heading_cos=float(corridor_heading_cos),
-            corridor_heading_weight=float(self._corridor_heading_weight),
-            corridor_outside_penalty_weight=float(self._corridor_outside_penalty_weight),
-            corridor_corner_phase=bool(corridor_corner_phase),
-            corridor_turn_sign=int(turn_sign),
-            corridor_dir_pref_weight=float(getattr(self, "_corridor_dir_pref_weight", 0.0)),
-            corridor_dir_pref_beta=float(getattr(self, "_corridor_dir_pref_beta", 2.0)),
+            lap_completed=bool(getattr(self, "lap_completed", False) or getattr(self, "reached_target", False)),
+            is_closed=bool(self.closed),
+            end_distance=float(self.state[7]) if len(self.state) > 7 else 0.0,
+            p4_status=p4_status,
+            corridor_status=corridor_status,
+            du_theta_u=float(p4_status.get("du_theta_u", 0.0)),
+            du_v_u=float(p4_status.get("du_v_u", 0.0)),
+            lookahead_delta_theta=float(getattr(self, "_lookahead_obs_last", {}).get("delta_theta_far", 0.0)),
+            lookahead_dist=float(getattr(self, "_lookahead_dist_active", self.lookahead_dist)),
+            lookahead_dist_norm=float(self._get_active_lookahead_norm()),
+            region_weight=float(getattr(self, "_lookahead_region_weight", 0.0)),
         )
-
-        if isinstance(corridor_status, dict):
-            corridor_status["barrier_penalty"] = float(components.get("corridor_barrier_penalty", 0.0))
-
-        self.last_reward_components = components
-        return reward
+        reward, components = self.reward_calculator.calculate_reward(ctx)
+        self.last_reward_components = dict(components)
+        return float(reward)
 
     def _calculate_segment_adaptive_reward(self):
         """根据路径段类型计算自适应奖励，加强直线段跟踪精度"""
@@ -3025,6 +3407,8 @@ def create_environment_from_config(config: Dict, path_points: Iterable, device=N
         Pm=Pm,
         max_steps=env_cfg["max_steps"],
         lookahead_points=env_cfg.get("lookahead_points", 5),
+        lookahead_obs_enabled=env_cfg.get("lookahead_obs_enabled", True),
+        lookahead_obs_scales=env_cfg.get("lookahead_obs_scales", [1.0]),
         reward_weights=reward_weights,
         curvature_observation=curvature_observation,
     )

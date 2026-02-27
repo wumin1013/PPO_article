@@ -71,7 +71,7 @@ class NNCAgent(PPOContinuous):
         选择动作（跳过KCM约束）
         
         Returns:
-            动作元组 (angular_velocity, linear_velocity)
+            动作向量（dim0=-1~1，其余维度0~1）
         """
         if not hasattr(self, 'state_tensor'):
             self.state_tensor = torch.empty((1, len(state)), dtype=torch.float, device=self.device)
@@ -80,12 +80,15 @@ class NNCAgent(PPOContinuous):
         mu, sigma = self.actor(self.state_tensor)
         action_dist = torch.distributions.Normal(mu, sigma)
         action = action_dist.sample()
-        
-        # 仅进行基础裁剪（不使用KCM的捷度约束），输出保持归一化量纲
-        ang_vel = np.clip(float(action[0, 0].cpu().numpy()), -1.0, 1.0)
-        lin_vel = np.clip(float(action[0, 1].cpu().numpy()), 0.0, 1.0)
 
-        return [ang_vel, lin_vel]
+        action_np = action.squeeze(0).detach().cpu().numpy().astype(float, copy=False)
+        if action_np.ndim == 0:
+            action_np = np.asarray([float(action_np)], dtype=float)
+        if action_np.size >= 1:
+            action_np[0] = np.clip(action_np[0], -1.0, 1.0)
+        if action_np.size >= 2:
+            action_np[1:] = np.clip(action_np[1:], 0.0, 1.0)
+        return action_np.tolist()
 
 
 class SCurvePlanner:

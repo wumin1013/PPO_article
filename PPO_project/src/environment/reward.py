@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from typing import Dict, Tuple, Any, List
 from dataclasses import dataclass, field
+import math
+
+import numpy as np
 
 @dataclass
 class RewardContext:
@@ -40,6 +43,13 @@ class RewardContext:
     # Corridor (Legacy P3.1/P5.2 compat)
     corridor_status: Dict[str, Any] = field(default_factory=dict)
 
+    # Phase 31(v3.2): far-scale lookahead geometry (rad)
+    lookahead_delta_theta: float = 0.0
+    # Learnable lookahead control status
+    lookahead_dist: float = 0.0
+    lookahead_dist_norm: float = 0.0
+    region_weight: float = 0.0
+
 
 class RewardCalculator:
     """P0 reward: progress-dominant with tracking/heading/time penalties."""
@@ -48,6 +58,7 @@ class RewardCalculator:
         self,
         weights: Dict[str, float],
         max_vel: float,
+        max_ang_vel: float | None,
         half_epsilon: float,
         max_jerk: float,
         max_ang_jerk: float,
@@ -56,14 +67,49 @@ class RewardCalculator:
     ):
         self.weights = weights or {}
         self.max_vel = max_vel
+        self.max_ang_vel = max_ang_vel
         self.max_ang_acc = max_ang_acc
         self.max_jerk = max_jerk
         self.max_ang_jerk = max_ang_jerk
         self.half_epsilon = max(half_epsilon, 1e-6)
         self.last_progress = 0.0
+        self._cornerness_ema = 0.0
 
     def reset(self) -> None:
         self.last_progress = 0.0
+        self._cornerness_ema = 0.0
+
+    @staticmethod
+    def _safe_abs(value: Any, *, fallback: float = 0.0) -> float:
+        try:
+            v = float(value)
+        except (TypeError, ValueError):
+            return float(fallback)
+        if not math.isfinite(v):
+            return float(fallback)
+        return abs(v)
+
+    def _get_cornerness_cfg(self) -> Dict[str, Any]:
+        cfg = self.weights.get("cornerness", {})
+        return cfg if isinstance(cfg, dict) else {}
+
+    def _compute_cornerness(self, ctx: RewardContext) -> Tuple[float, float]:
+        cfg = self._get_cornerness_cfg()
+        if not bool(cfg.get("enabled", False)):
+            self._cornerness_ema = 0.0
+            return 0.0, 0.0
+
+        theta0_deg = float(cfg.get("theta0_deg", 30.0))
+        theta0 = max(math.radians(theta0_deg), 1e-6)
+        ema_tau_steps = float(cfg.get("ema_tau_steps", 10.0))
+        ema_tau_steps = max(1.0, ema_tau_steps)
+        alpha = 1.0 / ema_tau_steps
+
+        delta_theta = self._safe_abs(ctx.lookahead_delta_theta, fallback=0.0)
+        c_raw = float(delta_theta / theta0)
+        self._cornerness_ema = float((1.0 - alpha) * float(self._cornerness_ema) + alpha * c_raw)
+        c = float(np.clip(self._cornerness_ema, 0.0, 1.0))
+        return c, c_raw
 
     def calculate_reward(self, ctx: RewardContext) -> Tuple[float, Dict[str, float]]:
         """Dispatch to minimal or legacy reward calculation."""
@@ -181,6 +227,44 @@ class RewardCalculator:
         progress_now = float(ctx.progress)
         progress_diff = max(0.0, progress_now - float(self.last_progress))
 
+        cornerness_cfg = self._get_cornerness_cfg()
+        cornerness_enabled = bool(cornerness_cfg.get("enabled", False))
+        cornerness, cornerness_raw = self._compute_cornerness(ctx)
+        cornerness_power = float(cornerness_cfg.get("power", 2.0))
+        if not math.isfinite(cornerness_power) or cornerness_power <= 0.0:
+            cornerness_power = 2.0
+
+        w_track_eff = float(w_e)
+        w_smooth_dyn = 0.0
+        smooth_term = 0.0
+        r_corner_smooth = 0.0
+        if cornerness_enabled:
+            w_track0 = self._safe_abs(cornerness_cfg.get("w_track0", w_e), fallback=w_e)
+            w_track_min = self._safe_abs(cornerness_cfg.get("w_track_min", 0.2 * w_e), fallback=0.2 * w_e)
+            w_track_min = max(w_track_min, 1e-6)
+            w_track_eff = float(w_track0 * ((1.0 - cornerness) ** cornerness_power) + w_track_min)
+
+            w_smooth0_default = max(float(w_smooth), float(w_ang_acc), 0.0)
+            w_smooth0 = self._safe_abs(cornerness_cfg.get("w_smooth0", w_smooth0_default), fallback=w_smooth0_default)
+            w_smooth_dyn = float(w_smooth0 * (cornerness ** cornerness_power))
+
+            smooth_source = str(cornerness_cfg.get("smooth_source", "omega")).lower()
+            if smooth_source == "domega":
+                smooth_term = self._safe_abs(ctx.angular_acc) / max(float(self.max_ang_acc or 1.0), 1e-6)
+            elif smooth_source == "jerk":
+                smooth_term = self._safe_abs(ctx.jerk) / max(float(self.max_jerk), 1e-6)
+            elif smooth_source in {"ang_jerk", "omega_jerk"}:
+                smooth_term = self._safe_abs(ctx.angular_jerk) / max(float(self.max_ang_jerk), 1e-6)
+            else:
+                omega_exec = 0.0
+                if isinstance(ctx.p4_status, dict):
+                    omega_exec = float(ctx.p4_status.get("omega_exec", 0.0))
+                smooth_term = self._safe_abs(omega_exec) / max(float(self.max_ang_vel or 1.0), 1e-6)
+            smooth_power = float(cornerness_cfg.get("smooth_power", 2.0))
+            if not math.isfinite(smooth_power) or smooth_power <= 0.0:
+                smooth_power = 2.0
+            r_corner_smooth = -w_smooth_dyn * (smooth_term**smooth_power)
+
         error_abs = abs(float(ctx.contour_error))
         error_ratio = error_abs / max(float(self.half_epsilon), 1e-6)
         tau = abs(float(ctx.heading_error))
@@ -196,11 +280,11 @@ class RewardCalculator:
             elif error_abs <= float(self.half_epsilon):
                 denom = max(float(self.half_epsilon) - deadzone, 1e-6)
                 scaled = (error_abs - deadzone) / denom
-                r_track = -w_e * (scaled**2)
+                r_track = -w_track_eff * (scaled**2)
             else:
-                r_track = -w_e * (error_ratio**2) * track_outside_weight
+                r_track = -w_track_eff * (error_ratio**2) * track_outside_weight
         else:
-            r_track = -w_e * (error_ratio**2)
+            r_track = -w_track_eff * (error_ratio**2)
 
         # 3. Direction Penalty
         w_tau_eff = w_tau * (corner_w_tau_scale if bool(ctx.corner_mask) else 1.0)
@@ -211,13 +295,17 @@ class RewardCalculator:
 
         # 5. Smoothness Penalty
         r_smooth = 0.0
-        if w_smooth > 0.0 and (not smooth_corner_only or bool(ctx.corner_mask)):
-            jerk_ratio = abs(float(ctx.jerk)) / max(float(self.max_jerk), 1e-6)
-            ang_jerk_ratio = abs(float(ctx.angular_jerk)) / max(float(self.max_ang_jerk), 1e-6)
-            r_smooth = -w_smooth * (jerk_ratio**2 + ang_jerk_ratio**2)
-        if bool(ctx.corner_mask) and w_ang_acc > 0.0 and self.max_ang_acc is not None:
-            ang_acc_ratio = abs(float(ctx.angular_acc)) / max(float(self.max_ang_acc), 1e-6)
-            r_smooth += -w_ang_acc * (ang_acc_ratio**2)
+        keep_legacy_smooth = bool(cornerness_cfg.get("keep_legacy_smooth", False))
+        if (not cornerness_enabled) or keep_legacy_smooth:
+            if w_smooth > 0.0 and (not smooth_corner_only or bool(ctx.corner_mask)):
+                jerk_ratio = abs(float(ctx.jerk)) / max(float(self.max_jerk), 1e-6)
+                ang_jerk_ratio = abs(float(ctx.angular_jerk)) / max(float(self.max_ang_jerk), 1e-6)
+                r_smooth = -w_smooth * (jerk_ratio**2 + ang_jerk_ratio**2)
+            if bool(ctx.corner_mask) and w_ang_acc > 0.0 and self.max_ang_acc is not None:
+                ang_acc_ratio = abs(float(ctx.angular_acc)) / max(float(self.max_ang_acc), 1e-6)
+                r_smooth += -w_ang_acc * (ang_acc_ratio**2)
+        if cornerness_enabled:
+            r_smooth += float(r_corner_smooth)
 
         # 6. Du Penalty (Legacy P6.1)
         # If enabled in weights, use du values from ctx (assume they are set if needed)
@@ -262,8 +350,27 @@ class RewardCalculator:
         if corridor_dir_pref_w > 0.0 and "turn_sign" in ctx.corridor_status:
              # Implementation skipped for cleanup unless strictly needed
              pass
+        
+        # 9. Learnable Lookahead Reward (corner/straight region-aware)
+        r_lookahead = 0.0
+        lookahead_cfg = self.weights.get("lookahead_reward", {})
+        if isinstance(lookahead_cfg, dict) and bool(lookahead_cfg.get("enabled", False)):
+            region = float(np.clip(float(ctx.region_weight), 0.0, 1.0))
+            la_norm = float(np.clip(float(ctx.lookahead_dist_norm), 0.0, 1.0))
+            p = float(lookahead_cfg.get("power", 2.0))
+            if not math.isfinite(p) or p <= 0.0:
+                p = 2.0
 
-        total = float(r_progress + r_track + r_dir + r_time + r_smooth + r_du + r_stall + r_corridor)
+            straight_target = float(np.clip(float(lookahead_cfg.get("straight_target", 0.25)), 0.0, 1.0))
+            corner_target = float(np.clip(float(lookahead_cfg.get("corner_target", 0.80)), 0.0, 1.0))
+            w_straight = self._safe_abs(lookahead_cfg.get("w_straight", 0.5), fallback=0.5)
+            w_corner = self._safe_abs(lookahead_cfg.get("w_corner", 1.0), fallback=1.0)
+
+            err_straight = abs(la_norm - straight_target)
+            err_corner = abs(la_norm - corner_target)
+            r_lookahead = -((1.0 - region) * w_straight * (err_straight**p) + region * w_corner * (err_corner**p))
+
+        total = float(r_progress + r_track + r_dir + r_time + r_smooth + r_du + r_stall + r_corridor + r_lookahead)
 
         self.last_progress = progress_now
 
@@ -277,6 +384,15 @@ class RewardCalculator:
             "r_du": float(r_du),
             "r_stall": float(r_stall),
             "r_corridor": float(r_corridor),
+            "r_lookahead": float(r_lookahead),
+            "cornerness": float(cornerness),
+            "cornerness_raw": float(cornerness_raw),
+            "w_track_dyn": float(w_track_eff),
+            "w_smooth_dyn": float(w_smooth_dyn),
+            "smooth_term": float(smooth_term),
+            "lookahead_dist": float(ctx.lookahead_dist),
+            "lookahead_dist_norm": float(ctx.lookahead_dist_norm),
+            "region_weight": float(ctx.region_weight),
             "total": float(total),
         }
         return total, components

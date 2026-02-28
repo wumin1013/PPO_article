@@ -17,7 +17,7 @@ kinematic_constraints:
   MAX_ANG_JERK: 314.1592653589793
 
 reward_weights:
-  w_s: 20.0
+  w_s: 40.0
   w_e: 5.0
   w_tau: 2.0
   w_smooth: 0.0
@@ -41,7 +41,7 @@ reward_weights:
     policy_action: true
     direction_mode: los
     region_source: cornerness
-    min_dist: 0.8
+    min_dist: 1.5
     max_dist: 4.0
     straight_dist: 1.2
     corner_dist: 2.8
@@ -51,7 +51,7 @@ reward_weights:
     cornerness_high_deg: 30.0
 
   lookahead_reward:
-    enabled: true
+    enabled: false           # 折中：不给前瞻奖励，靠跟踪效果间接涌现
     straight_target: 0.20
     corner_target: 0.80
     w_straight: 0.6
@@ -93,7 +93,7 @@ reward_weights:
     dir_pref_beta: 2.0
 
   p4:
-    time_penalty: -0.01
+    time_penalty: -0.05
     v_max: 1.0
     v_min: 0.35
     theta_max_deg: 90.0
@@ -107,7 +107,7 @@ reward_weights:
     stall_steps: 300
     stall_progress_eps: 1e-4
     stall_v_eps: 0.05
-    stall_penalty: -8.0
+    stall_penalty: -15.0
     speed_cap_enabled: true
     speed_cap_eps: 1e-12
     speed_cap_k: 4
@@ -138,7 +138,7 @@ reward_weights:
     trace_ring_size: 200
 
 ppo:
-  actor_lr: 2.0e-05
+  actor_lr: 3.0e-04
   critic_lr: 0.0001
   hidden_dim: 256
   gamma: 0.99
@@ -146,33 +146,34 @@ ppo:
   epochs: 10
   eps: 0.1
   batch_size: null
-  ent_coef: 0.002
+  ent_coef: 0.005
 
 training:
   use_obs_normalizer: false
-  num_episodes: 800
+  num_episodes: 5
   smoothing_factor: 0.9
-  save_interval: 100
-  log_interval: 50
+  save_interval: 30
+  log_interval: 1
   checkpoint_interval_steps: 2048
   step_log_interval_steps: 10
   traj_write_interval_steps: 50
   traj_write_max_points: 2000
   enable_latest_trajectory: true
   enable_best_trajectory_snapshot: true
-  enable_final_visualization: true
+  enable_final_visualization: false
 
 path:
   type: square
   closed: true
   scale: 10.0
   num_points: 200
-  square: {}
+  square:
+    start_offset_ratio: 0.5
 
 experiment:
   mode: train
   category: phase31
-  name: phase31_learnable_lookahead
+  name: phase31_emergent
   baseline_type: null
   enable_kcm: true
   model_path: null

@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.12.2)  4 DEC 2025 16:21
+This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.12.10)  28 FEB 2026 14:34
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -83,7 +83,7 @@ File: xetex.def 2022/09/22 v5.0n Graphics/color driver for xetex
 \@enLab=\toks19
 \@sep=\skip51
 \@@sep=\skip52
- (./融合捷度约束的端到端强化学习运动规划方法.spl) (d:/texlive/2025/texmf-dist/tex/latex/natbib/natbib.sty
+ (d:/texlive/2025/texmf-dist/tex/latex/natbib/natbib.sty
 Package: natbib 2010/09/13 8.31b (PWD, AO)
 \bibhang=\skip53
 \bibsep=\skip54
@@ -527,7 +527,8 @@ Document Style algorithmicx 1.2 - a greatly improved `algorithmic' style
 \ALG@tmplength=\skip69
 )
 Document Style - pseudocode environments for use with the `algorithmicx' style
-) (./融合捷度约束的端到端强化学习运动规划方法.aux)
+)
+No file 融合捷度约束的端到端强化学习运动规划方法.aux.
 \openout1 = `融合捷度约束的端到端强化学习运动规划方法.aux'.
 
 LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 29.
@@ -607,7 +608,6 @@ LaTeX Font Info:    Overwriting math alphabet `\mathsf' in version `bold'
 (Font)                  OT1/cmss/bx/n --> TU/lmss/b/n on input line 29.
 LaTeX Font Info:    Overwriting math alphabet `\mathtt' in version `bold'
 (Font)                  OT1/cmtt/m/n --> TU/lmtt/b/n on input line 29.
-
 *geometry* driver: auto-detecting
 *geometry* detected driver: xetex
 *geometry* verbose mode - [ preamble ] result:
@@ -647,11 +647,15 @@ Package hyperref Info: Link coloring OFF on input line 29.
 \@outlinefile=\write4
 \openout4 = `融合捷度约束的端到端强化学习运动规划方法.out'.
 
+
+
+Package hyperref Warning: Rerun to get /PageLabels entry.
+
 Package caption Info: Begin \AtBeginDocument code.
 Package caption Info: float package is loaded.
 Package caption Info: End \AtBeginDocument code.
 LaTeX Font Info:    Trying to load font information for U+msa on input line 54.
- (d:/texlive/2025/texmf-dist/tex/latex/amsfonts/umsa.fd
+(d:/texlive/2025/texmf-dist/tex/latex/amsfonts/umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 )
 LaTeX Font Info:    Trying to load font information for U+msb on input line 54.
@@ -671,7 +675,15 @@ File: ./figures/fig1.pdf Graphic file (type pdf)
 
 [3]
 
+Package natbib Warning: Citation `Li2020' on page 4 undefined on input line 142.
+
+
+
 [4]
+
+LaTeX Warning: Reference `alg:kcm' on page 5 undefined on input line 151.
+
+
 Overfull \hbox (2.20114pt too wide) in paragraph at lines 154--155
 []\TU/SimSun(0)/b/n/12 第 二 阶 段：|  自 底 向 上 \TU/lmr/bx/n/12 (Bottom-up) \TU/SimSun(0)/b/n/12 反 算 状 态\TU/SimSun(0)/m/n/12 。|  模 块 以 第 一 阶 段 得 到 的 $\OML/cmm/m/it/12 jerk[]$
  []
@@ -685,6 +697,13 @@ Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on inp
 
 [7]
 
+LaTeX Warning: Reference `tab:hyperparams' on page 8 undefined on input line 237.
+
+
+Package natbib Warning: Citation `Li2020' on page 8 undefined on input line 271.
+
+
+
 [8]
 
 [9]
@@ -692,6 +711,13 @@ Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on inp
 [10]
 
 [11]
+
+LaTeX Warning: Reference `tab:results' on page 12 undefined on input line 322.
+
+
+LaTeX Warning: Reference `tab:ablation' on page 12 undefined on input line 355.
+
+
 
 [12]
 Overfull \hbox (66.11983pt too wide) in paragraph at lines 361--370
@@ -702,49 +728,40 @@ Overfull \hbox (66.11983pt too wide) in paragraph at lines 361--370
 
 [13]
 
-[14] (./融合捷度约束的端到端强化学习运动规划方法.bbl
+[14]
+No file 融合捷度约束的端到端强化学习运动规划方法.bbl.
 
-Package fontspec Info: 
-(fontspec)             Could not resolve font "FangSong/BI" (it probably
-(fontspec)             doesn't exist).
-
-
-Package fontspec Info: 
-(fontspec)             Could not resolve font "FangSong/B" (it probably
-(fontspec)             doesn't exist).
+Package natbib Warning: There were undefined citations.
 
 
-Package fontspec Info: 
-(fontspec)             Could not resolve font "FangSong/I" (it probably
-(fontspec)             doesn't exist).
-
-
-Package fontspec Info: 
-(fontspec)             Font family 'FangSong(0)' created for font 'FangSong'
-(fontspec)             with options [Script={CJK}].
-(fontspec)              
-(fontspec)              This font family consists of the following NFSS
-(fontspec)             series/shapes:
-(fontspec)              
-(fontspec)             - 'normal' (m/n) with NFSS spec.:
-(fontspec)             <->"FangSong/OT:script=hani;language=dflt;"
-
-)
 
 [15] (./融合捷度约束的端到端强化学习运动规划方法.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2022/07/14>
  ***********
-Package rerunfilecheck Info: File `融合捷度约束的端到端强化学习运动规划方法.out' has not changed.
-(rerunfilecheck)             Checksum: A53A113D918AA45C110080801A669551;2892.
+
+
+LaTeX Warning: There were undefined references.
+
+
+LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
+
+
+Package rerunfilecheck Warning: File `融合捷度约束的端到端强化学习运动规划方法.out' has changed.
+(rerunfilecheck)                Rerun to get outlines right
+(rerunfilecheck)                or use package `bookmark'.
+
+Package rerunfilecheck Info: Checksums for `融合捷度约束的端到端强化学习运动规划方法.out':
+(rerunfilecheck)             Before: B51A0E6530A260743EB5DE06560C2CB7;2914
+(rerunfilecheck)             After:  A53A113D918AA45C110080801A669551;2892.
  ) 
 Here is how much of TeX's memory you used:
- 18258 strings out of 473832
- 380370 string characters out of 5733158
- 799753 words of memory out of 5000000
- 41044 multiletter control sequences out of 15000+600000
- 573420 words of font info for 98 fonts, out of 8000000 for 9000
+ 18224 strings out of 473832
+ 379609 string characters out of 5733157
+ 798752 words of memory out of 5000000
+ 41027 multiletter control sequences out of 15000+600000
+ 573380 words of font info for 93 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
  93i,10n,111p,384b,538s stack positions out of 10000i,1000n,20000p,200000b,200000s
 

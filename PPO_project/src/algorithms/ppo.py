@@ -211,11 +211,9 @@ class PPOContinuous:
         self.max_grad_norm = 0.5
         self.ent_coef = ent_coef
         
-        # 学习率调度器
-        self.actor_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.actor_optimizer, mode='min', factor=0.5, patience=10)
-        self.critic_scheduler = optim.lr_scheduler.ReduceLROnPlateau(
-            self.critic_optimizer, mode='min', factor=0.5, patience=5)
+        # 学习率调度器已移除：ReduceLROnPlateau 在 RL 训练中会过早
+        # 将学习率降到极低值，导致策略在前几个 episode 后即固化。
+        # PPO 的 clip 机制本身已对更新幅度做了限制，无需额外衰减。
     
     def take_action(self, state):
         """根据当前状态选择动作"""
@@ -262,7 +260,7 @@ class PPOContinuous:
         # 多轮更新
         for _ in range(self.epochs):
             mu, std = self.actor(states)
-            std = torch.clamp(std, min=1e-4, max=1.0)
+            std = torch.clamp(std, min=0.01, max=2.0)
             action_dists = torch.distributions.Normal(mu, std)
             log_probs = action_dists.log_prob(actions)
             
@@ -281,7 +279,6 @@ class PPOContinuous:
             # Actor损失
             policy_loss = -torch.min(surr1, surr2).mean()
             actor_loss = policy_loss - entropy_bonus
-            actor_loss = torch.clamp(actor_loss, min=-10.0, max=10.0)
             
             # Critic损失
             critic_loss = F.smooth_l1_loss(self.critic(states), td_target.detach())
@@ -297,9 +294,6 @@ class PPOContinuous:
             torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.max_grad_norm)
             self.actor_optimizer.step()
             self.critic_optimizer.step()
-            
-        # 更新学习率
-        self.actor_scheduler.step(abs(actor_loss.item()))
-        self.critic_scheduler.step(critic_loss.item())
+
         
         return actor_loss.item(), critic_loss.item()

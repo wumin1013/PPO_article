@@ -36,14 +36,9 @@ SAVED_MODELS_DIR = BASE_DIR / "saved_models"
 MAIN_SCRIPT = BASE_DIR / "main.py"
 
 SCENARIOS: Dict[str, Path] = {
-    "Line (直线)": CONFIG_DIR / "train_line.yaml",
-    "Square (正方形)": CONFIG_DIR / "train_square.yaml",
-    "S-shape (S形)": CONFIG_DIR / "train_s_shape.yaml",
-}
-SCENARIO_SUFFIX: Dict[str, str] = {
-    "Line (直线)": "line",
-    "Square (正方形)": "square",
-    "S-shape (S形)": "s_shape",
+    "Current Method (Learnable Lookahead)": CONFIG_DIR / "default.yaml",
+    "P0 Baseline": CONFIG_DIR / "train_square_p0.yaml",
+    "P0_gold Baseline": CONFIG_DIR / "p0_l2_gold.yaml",
 }
 
 PATH_TYPES: List[str] = ["line", "square", "s_shape"]
@@ -293,14 +288,9 @@ def _terminate_process(pid: int) -> None:
 
 
 def _resolve_config_for_mode(scenario_key: str, mode: str) -> Path:
-    """根据场景和模式选取合适的配置文件；若未找到则回落到训练配置。"""
-    suffix = SCENARIO_SUFFIX.get(scenario_key, "line")
-    if mode in {"baseline_nnc", "baseline_s_curve", "ablation_no_kcm", "ablation_no_reward", "train"}:
-        candidate = CONFIG_DIR / f"{mode}_{suffix}.yaml"
-        if candidate.exists():
-            return candidate
-    # 测试或未知模式回退到默认训练配置
-    return SCENARIOS.get(scenario_key, CONFIG_DIR / f"train_{suffix}.yaml")
+    """根据面板预设返回配置路径。"""
+    _ = mode
+    return SCENARIOS.get(scenario_key, CONFIG_DIR / "default.yaml")
 
 
 def _find_latest_log_dir() -> Optional[Path]:
@@ -675,6 +665,73 @@ def _build_kinematics_fig(
     return fig
 
 
+def _build_adaptive_control_fig(
+    step_df: pd.DataFrame,
+    stride_steps: int = 10,
+    max_points: int = 1500,
+) -> go.Figure:
+    """构建前瞻控制与分区奖励监控图。"""
+    fig = make_subplots(
+        rows=3,
+        cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.08,
+        subplot_titles=("Lookahead Distance", "Cornerness/Region", "Reward Components"),
+    )
+
+    if step_df.empty or "env_step" not in step_df.columns:
+        fig.update_layout(height=560, margin=dict(l=10, r=10, t=30, b=10), showlegend=False)
+        return fig
+
+    view_df = step_df.copy()
+    if "episode_idx" in view_df.columns and not view_df.empty:
+        episode_numeric = pd.to_numeric(view_df["episode_idx"], errors="coerce")
+        if episode_numeric.notna().any():
+            latest_episode = float(episode_numeric.max())
+            view_df = view_df.loc[episode_numeric == latest_episode].copy()
+
+    stride_steps = max(1, int(stride_steps))
+    max_points = max(10, int(max_points))
+    window = max_points * stride_steps
+    if len(view_df) > window:
+        view_df = view_df.tail(window)
+    if stride_steps > 1 and not view_df.empty:
+        view_df = view_df.iloc[::stride_steps].copy()
+
+    x = pd.to_numeric(view_df["env_step"], errors="coerce")
+
+    def _add_trace_if_exists(column: str, *, row: int, color: str, name: str, dash: Optional[str] = None) -> None:
+        if column not in view_df.columns:
+            return
+        y = pd.to_numeric(view_df[column], errors="coerce")
+        if y.notna().sum() <= 0:
+            return
+        line = dict(color=color)
+        if dash:
+            line["dash"] = dash
+        fig.add_trace(go.Scatter(x=x, y=y, name=name, line=line), row=row, col=1)
+
+    _add_trace_if_exists("lookahead_dist_active", row=1, color="#1f77b4", name="lookahead_dist_active")
+    _add_trace_if_exists("lookahead_dist_norm", row=1, color="#0b7285", name="lookahead_dist_norm", dash="dot")
+    _add_trace_if_exists("lookahead_u_policy", row=1, color="#f59f00", name="lookahead_u_policy", dash="dash")
+    _add_trace_if_exists("lookahead_u_exec", row=1, color="#e03131", name="lookahead_u_exec")
+
+    _add_trace_if_exists("cornerness", row=2, color="#7b2cbf", name="cornerness")
+    _add_trace_if_exists("lookahead_region_weight", row=2, color="#2b8a3e", name="lookahead_region_weight", dash="dash")
+
+    _add_trace_if_exists("r_lookahead", row=3, color="#e8590c", name="r_lookahead")
+    _add_trace_if_exists("r_track", row=3, color="#1971c2", name="r_track")
+    _add_trace_if_exists("r_smooth", row=3, color="#495057", name="r_smooth", dash="dot")
+
+    fig.update_layout(
+        height=560,
+        margin=dict(l=10, r=10, t=30, b=10),
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+    )
+    fig.update_xaxes(title_text="Step", row=3, col=1)
+    return fig
+
+
 def load_live_data(log_dir: Optional[Path], config_path: Path, path_override: Optional[dict] = None) -> Dict[str, object]:
     if log_dir is None:
         return {
@@ -718,7 +775,7 @@ def render_saved_models_sidebar() -> Dict[str, object]:
     exp_dirs = _list_saved_experiment_dirs()
     if not exp_dirs:
         st.sidebar.warning("未找到 saved_models 下包含 logs 的实验目录。")
-        return {"log_dir": None, "config_path": CONFIG_DIR / "train_line.yaml"}
+        return {"log_dir": None, "config_path": CONFIG_DIR / "default.yaml"}
 
     exp_labels = [str(p.relative_to(BASE_DIR)) for p in exp_dirs]
     default_exp_label = exp_labels[0]
@@ -743,7 +800,7 @@ def render_saved_models_sidebar() -> Dict[str, object]:
     run_dirs = _list_saved_run_dirs(saved_exp_dir)
     if not run_dirs:
         st.sidebar.warning("该实验目录下未找到包含 logs 的运行目录。")
-        return {"log_dir": None, "config_path": CONFIG_DIR / "train_line.yaml"}
+        return {"log_dir": None, "config_path": CONFIG_DIR / "default.yaml"}
 
     run_labels = [str(p.relative_to(BASE_DIR)) for p in run_dirs]
     default_run_label = run_labels[0]
@@ -768,7 +825,7 @@ def render_saved_models_sidebar() -> Dict[str, object]:
     log_dir = saved_run_dir / "logs"
     st.sidebar.caption(f"日志目录: {log_dir}")
 
-    fallback_config = CONFIG_DIR / "train_line.yaml"
+    fallback_config = CONFIG_DIR / "default.yaml"
     if not fallback_config.exists() and SCENARIOS:
         fallback_config = next(iter(SCENARIOS.values()))
     return {"log_dir": log_dir, "config_path": fallback_config}
@@ -783,7 +840,18 @@ def render_saved_models_view() -> None:
     training_df: pd.DataFrame = data["training"]
     paper_df: pd.DataFrame = data["paper"]
     traj_df: pd.DataFrame = data["trajectory"]
+    step_df: pd.DataFrame = data.get("step", pd.DataFrame())
     geom = data["geom"]
+
+    kcm_cfg: Dict[str, object] = {}
+    if log_dir:
+        config_copy = log_dir.parent / "config.yaml"
+        try:
+            source_cfg = config_copy if config_copy.exists() else config_path
+            loaded_cfg, _ = load_config(str(source_cfg))
+            kcm_cfg = loaded_cfg.get("kinematic_constraints", {})
+        except Exception:
+            kcm_cfg = {}
 
     current_episode = "-"
     if not training_df.empty and "episode_idx" in training_df.columns:
@@ -824,6 +892,14 @@ def render_saved_models_view() -> None:
             elif traj_df.empty:
                 st.info("轨迹暂无数据，等待首回合输出...")
 
+    st.markdown("#### Kinematics Monitor")
+    kinematics_fig = _build_kinematics_fig(step_df, kcm_cfg, stride_steps=10, max_points=1500)
+    st.plotly_chart(kinematics_fig, width='stretch')
+
+    st.markdown("#### Learnable Lookahead Monitor")
+    adaptive_fig = _build_adaptive_control_fig(step_df, stride_steps=10, max_points=1500)
+    st.plotly_chart(adaptive_fig, width='stretch')
+
 
 def render_training_sidebar() -> Dict[str, object]:
     st.sidebar.markdown("### 训练监控 · Training Ops")
@@ -831,18 +907,15 @@ def render_training_sidebar() -> Dict[str, object]:
     scenario = st.sidebar.selectbox("场景选择", list(SCENARIOS.keys()))
     mode_choice = st.sidebar.selectbox(
         "运行模式",
-        ["train", "ablation_no_kcm", "ablation_no_reward", "baseline_nnc", "baseline_s_curve", "test"],
+        ["train", "test"],
         index=0,
     )
     config_path = _resolve_config_for_mode(scenario, mode_choice)
-    path_type_map = {
-        "Line (直线)": "line",
-        "Square (正方形)": "square",
-        "S-shape (S形)": "s_shape",
-    }
-    selected_path_type = path_type_map.get(scenario, "line")
 
     config, _ = load_config(str(config_path))
+    selected_path_type = str(config.get("path", {}).get("type", "square"))
+    if selected_path_type not in PATH_TYPES:
+        selected_path_type = "square"
     default_name = st.session_state.get("experiment_name") or _latest_experiment_name(config_path)
     experiment_name = st.sidebar.text_input("实验名称", value=default_name)
     if not experiment_name.strip():
@@ -1191,6 +1264,22 @@ def render_training_view() -> None:
     m2.metric("Last Reward", last_reward)
     m3.metric("Mean Error (RMSE)", mean_error)
 
+    latest_step = step_df.iloc[-1] if not step_df.empty else None
+
+    def _latest_metric_value(column: str) -> str:
+        if latest_step is None or column not in step_df.columns:
+            return "-"
+        val = pd.to_numeric(pd.Series([latest_step[column]]), errors="coerce").iloc[0]
+        if pd.isna(val):
+            return "-"
+        return f"{float(val):.4f}"
+
+    a1, a2, a3, a4 = st.columns(4)
+    a1.metric("Cornerness", _latest_metric_value("cornerness"))
+    a2.metric("Lookahead Dist", _latest_metric_value("lookahead_dist_active"))
+    a3.metric("Lookahead Norm", _latest_metric_value("lookahead_dist_norm"))
+    a4.metric("r_lookahead", _latest_metric_value("r_lookahead"))
+
     col_left, col_right = st.columns([1, 2])
     with col_left:
         st.markdown("#### Reward & Loss")
@@ -1232,6 +1321,10 @@ def render_training_view() -> None:
         elif step_df.empty:
             st.info("运动学监控暂无数据，等待 step_metrics 输出...")
 
+    st.markdown("#### Learnable Lookahead Monitor")
+    adaptive_fig = _build_adaptive_control_fig(step_df, stride_steps=plot_stride_steps, max_points=plot_max_points)
+    st.plotly_chart(adaptive_fig, width='stretch')
+
     if st.session_state.get("is_training"):
         time.sleep(1)
         rerun = getattr(st, "rerun", None) or getattr(st, "experimental_rerun", None)
@@ -1257,8 +1350,8 @@ def _load_effective_config(model_path: Path) -> Tuple[dict, Path]:
     candidate = model_path.parent.parent / "config.yaml"
     if candidate.exists():
         return load_config(str(candidate))[0], candidate
-    fallback = CONFIG_DIR / "s_shape.yaml"
-    st.warning("未找到模型同目录下的 config.yaml，已回退到 s_shape.yaml。")
+    fallback = CONFIG_DIR / "default.yaml"
+    st.warning("未找到模型同目录下的 config.yaml，已回退到 default.yaml。")
     return load_config(str(fallback))[0], fallback
 
 

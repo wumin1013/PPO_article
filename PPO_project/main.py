@@ -190,7 +190,28 @@ def _init_loggers(manager: ExperimentManager, log_tag: str) -> tuple[CSVLogger, 
     """构建所需的原子化CSV日志记录器。"""
     step_logger = manager.create_logger(
         f"step_metrics_{log_tag}.csv",
-        ["episode_idx", "env_step", "reward", "contour_error", "velocity", "acceleration", "jerk", "kcm_intervention"],
+        [
+            "episode_idx",
+            "env_step",
+            "reward",
+            "contour_error",
+            "velocity",
+            "acceleration",
+            "jerk",
+            "omega",
+            "angular_acc",
+            "angular_jerk",
+            "kcm_intervention",
+            "cornerness",
+            "lookahead_dist_active",
+            "lookahead_dist_norm",
+            "lookahead_region_weight",
+            "lookahead_u_policy",
+            "lookahead_u_exec",
+            "r_lookahead",
+            "r_track",
+            "r_smooth",
+        ],
     )
     episode_logger = manager.create_logger(
         f"episode_metrics_{log_tag}.csv",
@@ -595,6 +616,12 @@ def train(
                     step_index = global_step
 
                 if step_log_interval_steps > 0 and step_index % step_log_interval_steps == 0:
+                    p4_status = info.get("p4_status", {})
+                    if not isinstance(p4_status, dict):
+                        p4_status = {}
+                    reward_components = info.get("reward_components", {})
+                    if not isinstance(reward_components, dict):
+                        reward_components = {}
                     step_logger.log_step(
                         episode_idx=episode,
                         env_step=info["step"],
@@ -603,7 +630,19 @@ def train(
                         velocity=float(getattr(env, "velocity", 0.0)),
                         acceleration=float(getattr(env, "acceleration", 0.0)),
                         jerk=info["jerk"],
+                        omega=float(getattr(env, "angular_vel", 0.0)),
+                        angular_acc=float(getattr(env, "angular_acc", 0.0)),
+                        angular_jerk=float(getattr(env, "angular_jerk", 0.0)),
                         kcm_intervention=info["kcm_intervention"],
+                        cornerness=float(info.get("cornerness", reward_components.get("cornerness", 0.0))),
+                        lookahead_dist_active=float(p4_status.get("lookahead_dist_active", 0.0)),
+                        lookahead_dist_norm=float(reward_components.get("lookahead_dist_norm", 0.0)),
+                        lookahead_region_weight=float(p4_status.get("lookahead_region_weight", reward_components.get("region_weight", 0.0))),
+                        lookahead_u_policy=float(p4_status.get("lookahead_u_policy", 0.0)),
+                        lookahead_u_exec=float(p4_status.get("lookahead_u_exec", 0.0)),
+                        r_lookahead=float(reward_components.get("r_lookahead", 0.0)),
+                        r_track=float(reward_components.get("r_track", 0.0)),
+                        r_smooth=float(reward_components.get("r_smooth", 0.0)),
                     )
 
                 # 每隔 N 步覆盖写入 latest_trajectory.csv，供 Streamlit 面板近实时显示。

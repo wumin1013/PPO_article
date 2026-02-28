@@ -4,4 +4,8 @@ PPO_project/saved_models/**/logs/step_metrics_*.csv
 PPO_project.zip
 PPO_project/artifacts/
 PPO_project/out/
+PPO_project/save_models/
+PPO_project/saved_models/
+save_models/
+saved_models/
 artifacts/

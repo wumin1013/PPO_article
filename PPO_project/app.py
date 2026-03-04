@@ -41,7 +41,7 @@ SCENARIOS: Dict[str, Path] = {
     "P0_gold Baseline": CONFIG_DIR / "p0_l2_gold.yaml",
 }
 
-PATH_TYPES: List[str] = ["line", "square", "s_shape"]
+PATH_TYPES: List[str] = ["line", "square", "s_shape", "butterfly", "trapezoid", "circle"]
 
 KCM_FIELDS: List[Tuple[str, str]] = [
     ("MAX_VEL", "最大线速度 MAX_VEL"),
@@ -380,8 +380,101 @@ def _render_path_override_form(config: dict, path_type: str) -> dict:
         periods = st.sidebar.number_input("周期数", value=float(s_cfg.get("periods", 2.0)), step=0.5)
         override["path"]["s_shape"] = {"amplitude": amp, "periods": periods}
     elif path_type == "square":
-        # 正方形无需额外参数；侧边输入用 scale 表示边长
-        override["path"]["square"] = {}
+        square_cfg = path_cfg.get("square", {}) if isinstance(path_cfg.get("square", {}), dict) else {}
+        start_offset_ratio = float(
+            st.sidebar.number_input(
+                "起点偏移比例 start_offset_ratio",
+                min_value=0.0,
+                max_value=1.0,
+                value=float(square_cfg.get("start_offset_ratio", 0.0)),
+                step=0.05,
+                format="%.2f",
+            )
+        )
+        override["path"]["square"] = {"start_offset_ratio": start_offset_ratio}
+    elif path_type == "butterfly":
+        b_cfg = path_cfg.get("butterfly", {}) if isinstance(path_cfg.get("butterfly", {}), dict) else {}
+        wing_ratio = st.sidebar.number_input(
+            "蝴蝶翼比例 wing_ratio",
+            min_value=0.1,
+            max_value=2.0,
+            value=float(b_cfg.get("wing_ratio", 0.6)),
+            step=0.05,
+            format="%.2f",
+        )
+        long_ratio = st.sidebar.number_input(
+            "长直线比例 long_ratio",
+            min_value=0.55,
+            max_value=1.6,
+            value=float(b_cfg.get("long_ratio", 1.2)),
+            step=0.05,
+            format="%.2f",
+        )
+        cross_ratio = st.sidebar.number_input(
+            "中心交叉偏移 cross_ratio",
+            min_value=0.0,
+            max_value=0.25,
+            value=float(b_cfg.get("cross_ratio", 0.08)),
+            step=0.01,
+            format="%.2f",
+        )
+        style = st.sidebar.selectbox(
+            "蝴蝶类型 style",
+            options=["academic", "lemniscate"],
+            index=0 if str(b_cfg.get("style", "academic")) != "lemniscate" else 1,
+        )
+        phase = st.sidebar.number_input(
+            "相位 phase (仅lemniscate)",
+            value=float(b_cfg.get("phase", np.pi / 2.0)),
+            step=0.1,
+            format="%.4f",
+        )
+        closed = st.sidebar.checkbox("闭合路径 closed", value=bool(b_cfg.get("closed", True)))
+        override["path"]["butterfly"] = {
+            "wing_ratio": float(wing_ratio),
+            "long_ratio": float(long_ratio),
+            "cross_ratio": float(cross_ratio),
+            "style": str(style),
+            "phase": float(phase),
+            "closed": bool(closed),
+        }
+    elif path_type == "trapezoid":
+        t_cfg = path_cfg.get("trapezoid", {}) if isinstance(path_cfg.get("trapezoid", {}), dict) else {}
+        top_ratio = st.sidebar.number_input(
+            "梯形顶边比例 top_ratio",
+            min_value=0.1,
+            max_value=1.0,
+            value=float(t_cfg.get("top_ratio", 0.5)),
+            step=0.05,
+            format="%.2f",
+        )
+        height_ratio = st.sidebar.number_input(
+            "梯形高度比例 height_ratio",
+            min_value=0.1,
+            max_value=2.0,
+            value=float(t_cfg.get("height_ratio", 0.75)),
+            step=0.05,
+            format="%.2f",
+        )
+        start_offset_ratio = st.sidebar.number_input(
+            "梯形起点偏移 start_offset_ratio",
+            min_value=0.0,
+            max_value=1.0,
+            value=float(t_cfg.get("start_offset_ratio", 0.0)),
+            step=0.05,
+            format="%.2f",
+        )
+        closed = st.sidebar.checkbox("闭合路径 closed", value=bool(t_cfg.get("closed", True)))
+        override["path"]["trapezoid"] = {
+            "top_ratio": float(top_ratio),
+            "height_ratio": float(height_ratio),
+            "start_offset_ratio": float(start_offset_ratio),
+            "closed": bool(closed),
+        }
+    elif path_type == "circle":
+        c_cfg = path_cfg.get("circle", {}) if isinstance(path_cfg.get("circle", {}), dict) else {}
+        closed = st.sidebar.checkbox("闭合路径 closed", value=bool(c_cfg.get("closed", True)))
+        override["path"]["circle"] = {"closed": bool(closed)}
 
     return override
 

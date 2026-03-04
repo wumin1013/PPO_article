@@ -17,15 +17,17 @@ kinematic_constraints:
   MAX_ANG_JERK: 314.1592653589793
 
 reward_weights:
-  w_s: 20.0
-  w_e: 5.0
-  w_tau: 2.0
-  w_smooth: 0.0
+  w_s: 12.0
+  w_e: 8.0
+  w_tau: 3.0
+  w_smooth: 0.08
   minimal_mode: false
   control_authority:
     mode: blend
-    tangent_blend: 0.02
+    tangent_blend: 0.08
     max_correction_deg: 50.0
+    theta_ref_smooth_alpha: 0.35
+    progress_seg_hysteresis_ratio: 1.25
     blend_schedule: cosine
     warmup_episodes: 120
     warmup_blend: 0.20
@@ -41,8 +43,8 @@ reward_weights:
     min_dist: 0.8
     max_dist: 4.0
     straight_dist: 1.2
-    corner_dist: 2.8
-    mix_gain: 0.8
+    corner_dist: 2.4
+    mix_gain: 0.6
     action_default: 0.5
     cornerness_low_deg: 5.0
     cornerness_high_deg: 30.0
@@ -60,7 +62,7 @@ reward_weights:
     power: 2.0
     w_track0: 5.0
     w_track_min: 1.0
-    w_smooth0: 2.2
+    w_smooth0: 3.0
     smooth_source: domega
     smooth_power: 2.0
     keep_legacy_smooth: false
@@ -69,10 +71,10 @@ reward_weights:
     ratio: 0.5
   corridor:
     enabled: true
-    theta_enter_deg: 12.0
-    theta_exit_deg: 6.0
+    theta_enter_deg: 10.0
+    theta_exit_deg: 8.0
     dist_enter: 6.0
-    dist_exit: 8.0
+    dist_exit: 7.0
     margin_ratio: 0.10
     heading_weight: 2.0
     outside_penalty_weight: 0.0
@@ -126,6 +128,18 @@ reward_weights:
     kappa_smoothing_beta: 0.25
     kappa_dkappa_limit: null
     trace_ring_size: 200
+  p8:
+    use_corner_exit_hysteresis: true
+    corner_on_dist_scale: 2.0
+    corner_off_dist_scale: 3.0
+    corner_exit_hold_steps: 2
+    corner_exit_e_release_ratio: 0.55
+    corner_exit_psi_release_deg: 20.0
+    ang_cap_min_ratio: 0.10
+    use_vcap_rate_limit: true
+    vcap_rate_up: 0.01
+    vcap_rate_down: 0.01
+    use_recovery_cap: false
 
 ppo:
   actor_lr: 3.0e-04
@@ -133,14 +147,16 @@ ppo:
   hidden_dim: 256
   gamma: 0.99
   lmbda: 0.95
-  epochs: 10
+  epochs: 6
   eps: 0.1
   batch_size: null
-  ent_coef: 0.005
+  ent_coef: 0.01
 
 training:
   use_obs_normalizer: false
-  num_episodes: 500
+  num_episodes: 300
+  random_start_ratio: 0.0
+  best_trajectory_require_deterministic_start: true
   smoothing_factor: 0.9
   save_interval: 100
   log_interval: 50
@@ -155,9 +171,10 @@ training:
 path:
   type: square
   closed: true
-  scale: 10.0
+  scale: 20.0
   num_points: 200
-  square: {}
+  square:
+    start_offset_ratio: 0.5
 
 experiment:
   mode: train

@@ -255,6 +255,21 @@ class Env:
         if not math.isfinite(max_corr_deg) or max_corr_deg <= 0.0:
             max_corr_deg = 45.0
         self.control_max_correction_rad = float(math.radians(max_corr_deg))
+        theta_ref_smooth_alpha = control_cfg.get("theta_ref_smooth_alpha", 1.0)
+        try:
+            theta_ref_smooth_alpha = float(theta_ref_smooth_alpha)
+        except Exception:
+            theta_ref_smooth_alpha = 1.0
+        self.control_theta_ref_smooth_alpha = float(np.clip(theta_ref_smooth_alpha, 0.0, 1.0))
+
+        seg_hys_ratio = control_cfg.get("progress_seg_hysteresis_ratio", 1.25)
+        try:
+            seg_hys_ratio = float(seg_hys_ratio)
+        except Exception:
+            seg_hys_ratio = 1.25
+        self._progress_seg_hysteresis = float(max(seg_hys_ratio, 0.0) * max(self.half_epsilon, 1e-3))
+        self._progress_prev_seg_idx = 0
+        self._theta_ref_filtered = 0.0
         self._control_last: Dict[str, float] = {}
         self._episode_index = -1
         # 确保所有约束参数都是浮点数
@@ -447,7 +462,9 @@ class Env:
         print(
             f"  control_authority: mode={self.control_authority_mode}, "
             f"tangent_blend={self.control_tangent_blend:.3f}, "
-            f"max_correction_deg={math.degrees(self.control_max_correction_rad):.1f}"
+            f"max_correction_deg={math.degrees(self.control_max_correction_rad):.1f}, "
+            f"theta_ref_smooth_alpha={self.control_theta_ref_smooth_alpha:.3f}, "
+            f"progress_seg_hysteresis={self._progress_seg_hysteresis:.4f}"
         )
         print(
             f"  lookahead: obs_enabled={self.lookahead_obs_enabled}, "
@@ -737,27 +754,16 @@ class Env:
         
         return cumulative_s + t * seg_len
 
-    def _compute_turn_info(self) -> Dict[str, Any]:
-        """统一的 turn 感知计算与状态更新"""
-        s_now = self._get_current_arc_length()
-        if not math.isfinite(s_now):
-            s_now = 0.0
-
-        raw_scan = self._scan_for_next_turn(float(s_now))
-        dist_to_turn = float(raw_scan.get("dist_to_turn", float("inf")))
-        turn_angle = float(raw_scan.get("turn_angle", 0.0))
-
-        # --- Corner Phase Hysteresis Logic (Solidified) ---
+    def _update_corner_phase_hysteresis(self, turn_angle: float, dist_to_turn: float) -> tuple[bool, bool]:
+        """统一 corner_phase 迟滞状态机与抖动计数，避免多处重复更新导致漂移。"""
         corner_before = bool(getattr(self, "in_corner_phase", False))
         corner_after = corner_before
 
-        # Use attributes initialized in _init_corridor_config (now considered core or legacy-compat)
         theta_enter = float(getattr(self, "_corridor_theta_enter", 0.26))
         theta_exit = float(getattr(self, "_corridor_theta_exit", 0.14))
         dist_enter = float(getattr(self, "_corridor_dist_enter", 3.0))
         dist_exit = float(getattr(self, "_corridor_dist_exit", 4.5))
-
-        abs_angle = abs(turn_angle)
+        abs_angle = abs(float(turn_angle))
 
         if not corner_before:
             if abs_angle >= theta_enter and dist_to_turn <= dist_enter:
@@ -766,12 +772,11 @@ class Env:
             if abs_angle <= theta_exit or dist_to_turn >= dist_exit:
                 corner_after = False
 
-        self.in_corner_phase = corner_after
-        
-        # P7.1 Corner Toggle Counting
+        self.in_corner_phase = bool(corner_after)
+
         if corner_after != corner_before:
             self._p7_1_corner_toggle_count = int(getattr(self, "_p7_1_corner_toggle_count", 0)) + 1
-            
+
         if corner_after:
             self._p7_1_exit_timer = -1
         else:
@@ -781,6 +786,48 @@ class Env:
                 prev_exit = int(getattr(self, "_p7_1_exit_timer", -1))
                 if prev_exit >= 0:
                     self._p7_1_exit_timer = prev_exit + 1
+
+        return bool(corner_before), bool(corner_after)
+
+    def _resolve_episode_start(self, random_start: bool) -> tuple[np.ndarray, float, int]:
+        """根据 random_start 选择回合起点（默认首点，随机时按弧长均匀采样）。"""
+        self._rebuild_progress_cache()
+        total = float(getattr(self, "_progress_total_length", 0.0))
+        if (not random_start) or total <= 1e-9:
+            p0 = np.asarray(self.Pm[0], dtype=float).copy()
+            theta0 = float(self._tangent_angle_at_s(0.0))
+            return p0, theta0, 0
+
+        margin = float(max(0.5 * self.half_epsilon, 1e-3))
+        if self.closed and total > 2.0 * margin:
+            s_start = float(np.random.uniform(margin, total - margin))
+        else:
+            lo = 0.0
+            hi = total
+            if total > 2.0 * margin:
+                lo = margin
+                hi = total - margin
+            s_start = float(np.random.uniform(lo, hi))
+
+        start_pos = np.asarray(self._interpolate_progress_point_at_s(s_start), dtype=float)
+        start_heading = float(self._tangent_angle_at_s(s_start))
+        cumulative = np.asarray(getattr(self, "_progress_cumulative_lengths", [0.0]), dtype=float)
+        seg_idx = int(np.searchsorted(cumulative, s_start, side="right") - 1)
+        max_seg = max(0, len(getattr(self, "_progress_segment_lengths", [])) - 1)
+        seg_idx = int(np.clip(seg_idx, 0, max_seg))
+        return start_pos, start_heading, seg_idx
+
+    def _compute_turn_info(self) -> Dict[str, Any]:
+        """统一的 turn 感知计算与状态更新"""
+        s_now = self._get_current_arc_length()
+        if not math.isfinite(s_now):
+            s_now = 0.0
+
+        raw_scan = self._scan_for_next_turn(float(s_now))
+        dist_to_turn = float(raw_scan.get("dist_to_turn", float("inf")))
+        turn_angle = float(raw_scan.get("turn_angle", 0.0))
+        _corner_before, corner_after = self._update_corner_phase_hysteresis(turn_angle, dist_to_turn)
+        abs_angle = abs(float(turn_angle))
 
         return {
             "in_turn_zone": dist_to_turn < float(getattr(self, "_turn_zone_threshold", 50.0)),
@@ -799,16 +846,19 @@ class Env:
         self._update_control_authority_schedule()
         self.current_step = 0
         self.trajectory_states = []
-        # 强制从路径起点开始，忽略外部的 random_start 请求
-
-        self.current_segment_idx = 0
-        self.current_position = np.array(self.Pm[0])
-        self._current_direction_angle, self._current_step_length = self.initialize_starting_conditions()
+        # 允许随机起点：训练前期增加分布覆盖，缓解过早固化到局部策略。
+        start_pos, start_heading, start_seg_idx = self._resolve_episode_start(random_start=bool(random_start))
+        self.current_segment_idx = int(start_seg_idx)
+        self.current_position = np.asarray(start_pos, dtype=float).copy()
+        self._current_direction_angle = float(start_heading)
+        self._current_step_length = float(self.MAX_VEL)
         # P7.0：显式维护航向积分（禁止每步用 path_direction 重置航向）
         self.heading = float(self._current_direction_angle)
         self._theta_ref_prev = None
         self._theta_ref_last = float(self._current_direction_angle)
+        self._theta_ref_filtered = float(self._current_direction_angle)
         self._theta_ref_delta = 0.0
+        self._progress_prev_seg_idx = int(start_seg_idx)
         self._lookahead_obs_last = {"theta_tangent": 0.0, "theta_far": 0.0, "delta_theta_far": 0.0}
         self._lookahead_action_u = float(getattr(self, "lookahead_control_u_default", 0.5))
         self._lookahead_region_weight = 0.0
@@ -910,6 +960,22 @@ class Env:
         policy_theta = np.clip(policy_theta, -1.0, 1.0)
         policy_length = np.clip(policy_length, 0.0, 1.0)
         if bool(getattr(self, "lookahead_control_enabled", False)) and bool(getattr(self, "lookahead_control_policy_action", False)):
+            action_policy_full = np.array([policy_theta, policy_length, self._lookahead_action_u], dtype=float)
+        else:
+            action_policy_full = np.array([policy_theta, policy_length], dtype=float)
+
+        prev_policy = getattr(self, "_p6_prev_action_policy", None)
+        du_theta_u = 0.0
+        du_v_u = 0.0
+        du_lookahead_u = 0.0
+        if isinstance(prev_policy, np.ndarray) and prev_policy.size >= 2:
+            du_theta_u = float(action_policy_full[0] - prev_policy[0])
+            du_v_u = float(action_policy_full[1] - prev_policy[1])
+            if action_policy_full.size >= 3 and prev_policy.size >= 3:
+                du_lookahead_u = float(action_policy_full[2] - prev_policy[2])
+        self._p6_prev_action_policy = action_policy_full.copy()
+
+        if bool(getattr(self, "lookahead_control_enabled", False)) and bool(getattr(self, "lookahead_control_policy_action", False)):
             action_policy = np.array([policy_theta, policy_length, self._lookahead_action_u], dtype=float)
         else:
             action_policy = np.array([policy_theta, policy_length], dtype=float)
@@ -948,9 +1014,10 @@ class Env:
             "v_u_exec": float(v_u_exec),
             "v_intent": float(v_intent),
             "max_vel_cap_phys": float(max_vel_cap_phys),
-            "du_theta_u": 0.0,
-            "du_v_u": 0.0,
-            "du_l1": 0.0,
+            "du_theta_u": float(du_theta_u),
+            "du_v_u": float(du_v_u),
+            "du_lookahead_u": float(du_lookahead_u),
+            "du_l1": float(abs(du_theta_u) + abs(du_v_u)),
         })
 
         # Apply Kinematics
@@ -1019,8 +1086,8 @@ class Env:
             end_distance=float(self.state[7]) if len(self.state) > 7 else 0.0,  # dist_to_turn_norm
             p4_status=p4_status,
             corridor_status=getattr(self, "last_corridor_status", {}),
-            du_theta_u=0.0,
-            du_v_u=0.0,
+            du_theta_u=float(p4_status.get("du_theta_u", 0.0)),
+            du_v_u=float(p4_status.get("du_v_u", 0.0)),
             lookahead_delta_theta=float(getattr(self, "_lookahead_obs_last", {}).get("delta_theta_far", 0.0)),
             lookahead_dist=float(getattr(self, "_lookahead_dist_active", self.lookahead_dist)),
             lookahead_dist_norm=float(self._get_active_lookahead_norm()),
@@ -2344,6 +2411,7 @@ class Env:
         n_hat = np.array([-t_hat[1], t_hat[0]], dtype=float)
         s_base = float(self._progress_cumulative_lengths[seg_idx]) if getattr(self, "_progress_cumulative_lengths", None) else 0.0
         s_along = s_base + t * seg_len
+        self._progress_prev_seg_idx = int(seg_idx)
         return proj, seg_idx, s_along, t_hat, n_hat
 
     def _tangent_angle_at_s(self, s_value: float) -> float:
@@ -2652,44 +2720,25 @@ class Env:
         kappa_los = float(los.get("kappa_los", 0.0))
         theta_los = float(los.get("theta_los", float(getattr(self, "_current_direction_angle", 0.0))))
 
-        # P8.0：turn_sign/dist_to_turn 必须来自 s 域扫描（禁止基于索引/点距）
-        scan = self._scan_for_next_turn(float(s_now))
-        dist_to_turn = float(scan.get("dist_to_turn", float("inf")))
-        turn_angle = float(scan.get("turn_angle", 0.0))
-        turn_sign_scan = int(scan.get("turn_sign", 0))
-        is_isolated_corner = bool(scan.get("is_isolated_corner", False))
+        # 优先复用当前步已计算的 turn_info，避免重复扫描造成状态漂移。
+        turn_info = getattr(self, "turn_info", {}) or {}
+        if isinstance(turn_info, dict):
+            dist_to_turn = float(turn_info.get("dist_to_turn", float("inf")))
+            turn_angle = float(turn_info.get("turn_angle", 0.0))
+            turn_sign_scan = int(turn_info.get("turn_sign", 0))
+            is_isolated_corner = bool(turn_info.get("is_isolated_corner", False))
+            corner_after = bool(turn_info.get("corner_phase", getattr(self, "in_corner_phase", False)))
+        else:
+            scan = self._scan_for_next_turn(float(s_now))
+            dist_to_turn = float(scan.get("dist_to_turn", float("inf")))
+            turn_angle = float(scan.get("turn_angle", 0.0))
+            turn_sign_scan = int(scan.get("turn_sign", 0))
+            is_isolated_corner = bool(scan.get("is_isolated_corner", False))
+            corner_after = bool(getattr(self, "in_corner_phase", False))
         # S 型：关闭内切偏置与方向性偏好，但保留走廊/中线奖励
         turn_sign_effective = int(turn_sign_scan) if (is_isolated_corner and turn_sign_scan != 0) else 0
-
-        corner_before = bool(self.in_corner_phase)
-        corner_after = corner_before
-        if corridor_enabled:
-            # Step 3：corner_phase 进入/退出只使用 scan 的 dist_to_turn/turn_angle
-            abs_turn_angle = abs(float(turn_angle))
-            if not corner_before:
-                if abs_turn_angle >= float(getattr(self, "_corridor_theta_enter", 0.0)) and dist_to_turn <= float(
-                    getattr(self, "_corridor_dist_enter", float("inf"))
-                ):
-                    self.in_corner_phase = True
-            else:
-                if abs_turn_angle <= float(getattr(self, "_corridor_theta_exit", 0.0)) or dist_to_turn >= float(
-                    getattr(self, "_corridor_dist_exit", float("inf"))
-                ):
-                    self.in_corner_phase = False
-            corner_after = bool(self.in_corner_phase)
-
-            # P7.1：corner_phase toggle 计数 + exit_timer
-            if corner_after != corner_before:
-                self._p7_1_corner_toggle_count = int(getattr(self, "_p7_1_corner_toggle_count", 0)) + 1
-            if corner_after:
-                self._p7_1_exit_timer = -1
-            else:
-                if corner_before and not corner_after:
-                    self._p7_1_exit_timer = 0
-                else:
-                    prev_exit_timer = int(getattr(self, "_p7_1_exit_timer", -1))
-                    if prev_exit_timer >= 0:
-                        self._p7_1_exit_timer = prev_exit_timer + 1
+        if not corridor_enabled:
+            corner_after = False
 
         lower = 0.0
         upper = 0.0
@@ -2699,7 +2748,7 @@ class Env:
         margin_to_edge = float("nan")
 
         corridor_half = max(self.half_epsilon - float(self._corridor_margin), 0.0)
-        if corridor_enabled and self.in_corner_phase and corridor_half > 0.0:
+        if corridor_enabled and corner_after and corridor_half > 0.0:
             if is_isolated_corner and turn_sign_scan != 0:
                 if turn_sign_scan > 0:
                     lower, upper = 0.0, corridor_half
@@ -2733,8 +2782,8 @@ class Env:
 
         status.update(
             {
-                # Step 3：enable_corridor==False 时强制 corner_phase=False，且不更新 self.in_corner_phase
-                "corner_phase": bool(self.in_corner_phase) if corridor_enabled else False,
+                # Step 3：corner_phase 统一由 _compute_turn_info 状态机更新，这里只读不写。
+                "corner_phase": bool(corner_after) if corridor_enabled else False,
                 "toggle_count": int(getattr(self, "_p7_1_corner_toggle_count", 0)),
                 "exit_timer": int(exit_timer),
                 "exit_ramp_steps": int(ramp_steps),
@@ -2807,6 +2856,13 @@ class Env:
                     theta_ref = float(math.atan2(float(vec[1]), float(vec[0])))
                 else:
                     theta_ref = float(theta_tangent)
+
+        alpha = float(getattr(self, "control_theta_ref_smooth_alpha", 1.0))
+        if alpha < 1.0:
+            theta_prev = float(getattr(self, "_theta_ref_filtered", theta_ref))
+            delta = float(self._wrap_angle(theta_ref - theta_prev))
+            theta_ref = float(self._wrap_angle(theta_prev + alpha * delta))
+        self._theta_ref_filtered = float(theta_ref)
 
         if record:
             self._theta_ref_last = float(theta_ref)
@@ -3189,38 +3245,53 @@ class Env:
     
     def _find_nearest_segment_for_progress(self, pt):
         """专门为进度计算找最近线段，避免套圈问题"""
-        min_dist = float('inf')
-        nearest_segment_index = -1
         n = len(self.Pm)
-        
-        # 只考虑实际的线段数量（闭合路径排除最后一个重复点
-        actual_segments = n - 1 if self.closed else n - 1
-        
-        for i in range(actual_segments):
-            p1 = np.array(self.Pm[i])
-            p2 = np.array(self.Pm[i + 1])
-            
-            # 计算点到线段的距
+        actual_segments = max(0, n - 1)
+        if actual_segments <= 0:
+            return -1
+
+        pt_arr = np.asarray(pt, dtype=float)
+
+        def _distance_to_segment(seg_idx: int) -> float:
+            p1 = np.asarray(self.Pm[seg_idx], dtype=float)
+            p2 = np.asarray(self.Pm[seg_idx + 1], dtype=float)
             seg_vec = p2 - p1
-            pt_vec = pt - p1
-            seg_length_sq = np.dot(seg_vec, seg_vec)
-            
-            if seg_length_sq < 1e-6:
-                continue
-                
-            # 计算投影参数 t
-            t = np.dot(pt_vec, seg_vec) / seg_length_sq
-            t = np.clip(t, 0, 1)
+            seg_length_sq = float(np.dot(seg_vec, seg_vec))
+            if seg_length_sq < 1e-12:
+                return float("inf")
+            t = float(np.clip(np.dot(pt_arr - p1, seg_vec) / seg_length_sq, 0.0, 1.0))
             projection = p1 + t * seg_vec
-            
-            # 计算距离
-            dist = np.linalg.norm(pt - projection)
-            
-            # 更新最近线
+            return float(np.linalg.norm(pt_arr - projection))
+
+        prev_idx = int(getattr(self, "_progress_prev_seg_idx", -1))
+        hysteresis_gate = float(getattr(self, "_progress_seg_hysteresis", max(self.half_epsilon, 1e-3)))
+        if 0 <= prev_idx < actual_segments:
+            candidates = {prev_idx}
+            if self.closed:
+                candidates.add((prev_idx - 1) % actual_segments)
+                candidates.add((prev_idx + 1) % actual_segments)
+            else:
+                candidates.add(max(prev_idx - 1, 0))
+                candidates.add(min(prev_idx + 1, actual_segments - 1))
+
+            local_idx = prev_idx
+            local_dist = float("inf")
+            for idx in candidates:
+                dist = _distance_to_segment(int(idx))
+                if dist < local_dist:
+                    local_dist = dist
+                    local_idx = int(idx)
+            if math.isfinite(local_dist) and local_dist <= hysteresis_gate:
+                return int(local_idx)
+
+        min_dist = float("inf")
+        nearest_segment_index = -1
+        for i in range(actual_segments):
+            dist = _distance_to_segment(i)
             if dist < min_dist:
                 min_dist = dist
-                nearest_segment_index = i
-        
+                nearest_segment_index = int(i)
+
         return nearest_segment_index
 
     def _traditional_path_progress(self, pt, total_length, closed):

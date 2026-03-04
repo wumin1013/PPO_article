@@ -10,6 +10,98 @@ import numpy as np
 from scipy.interpolate import splev, splprep
 
 
+def _resample_path_by_arclength(
+    points: List[np.ndarray],
+    num_points: int,
+    closed: bool = False,
+) -> List[np.ndarray]:
+    """按弧长对离散路径重采样为指定点数。"""
+    if num_points < 2:
+        raise ValueError("num_points must be at least 2.")
+    if not points:
+        raise ValueError("points must not be empty.")
+
+    arr = np.asarray(points, dtype=float)
+    if arr.ndim != 2 or arr.shape[1] != 2:
+        raise ValueError("points must be 2D coordinates.")
+
+    if closed and not np.allclose(arr[0], arr[-1], atol=1e-9):
+        arr = np.vstack([arr, arr[0]])
+
+    seg = np.diff(arr, axis=0)
+    seg_len = np.linalg.norm(seg, axis=1)
+    cumulative = np.concatenate([[0.0], np.cumsum(seg_len)])
+    total = float(cumulative[-1])
+    if total <= 1e-12:
+        return [arr[0].copy() for _ in range(num_points)]
+
+    targets = np.linspace(0.0, total, num_points)
+    out: List[np.ndarray] = []
+    for s in targets:
+        idx = int(np.searchsorted(cumulative, s, side="right") - 1)
+        idx = int(np.clip(idx, 0, len(seg_len) - 1))
+        length = float(seg_len[idx])
+        if length <= 1e-12:
+            out.append(arr[idx].copy())
+            continue
+        t = float((s - cumulative[idx]) / length)
+        out.append(arr[idx] + t * (arr[idx + 1] - arr[idx]))
+
+    if closed:
+        out[-1] = out[0].copy()
+    return [np.asarray(p, dtype=float) for p in out]
+
+
+def _sample_polyline_keep_vertices(
+    nodes: List[np.ndarray],
+    num_points: int,
+    closed: bool = True,
+) -> List[np.ndarray]:
+    """按段长分配采样并保留折点，避免角点在重采样时被抹平。"""
+    if num_points < 2:
+        raise ValueError("num_points must be at least 2.")
+    if len(nodes) < 2:
+        raise ValueError("nodes must contain at least 2 points.")
+
+    pts = [np.asarray(p, dtype=float) for p in nodes]
+    if closed and not np.allclose(pts[0], pts[-1], atol=1e-9):
+        pts.append(pts[0].copy())
+
+    edges = len(pts) - 1
+    if edges <= 0:
+        return [pts[0].copy() for _ in range(num_points)]
+
+    seg_lengths = [float(np.linalg.norm(pts[i + 1] - pts[i])) for i in range(edges)]
+    total = max(1e-12, float(sum(seg_lengths)))
+    target = int(num_points) - 1
+    counts = [max(1, int(round(target * l / total))) for l in seg_lengths]
+    delta = target - int(sum(counts))
+    if delta != 0:
+        order = list(np.argsort(seg_lengths))[::-1]
+        k = 0
+        while delta != 0 and order:
+            idx = int(order[k % len(order)])
+            if delta > 0:
+                counts[idx] += 1
+                delta -= 1
+            elif counts[idx] > 1:
+                counts[idx] -= 1
+                delta += 1
+            k += 1
+
+    out: List[np.ndarray] = [pts[0].copy()]
+    for i in range(edges):
+        n = counts[i]
+        p1 = pts[i]
+        p2 = pts[i + 1]
+        for t in np.linspace(0.0, 1.0, n + 1)[1:]:
+            out.append(p1 + float(t) * (p2 - p1))
+
+    if closed:
+        out[-1] = out[0].copy()
+    return [np.asarray(p, dtype=float) for p in out]
+
+
 def generate_line_path(
     length: float = 10.0,
     num_points: int = 200,
@@ -76,31 +168,7 @@ def generate_square_path(
         if 1e-9 < offset < (side_length - 1e-9):
             start = vertices[0] + (offset / side_length) * (vertices[1] - vertices[0])
             nodes = [start, vertices[1], vertices[2], vertices[3], vertices[0], start]
-            segments = []
-            cumulative = [0.0]
-            for i in range(len(nodes) - 1):
-                p1 = np.array(nodes[i])
-                p2 = np.array(nodes[i + 1])
-                seg_len = float(np.linalg.norm(p2 - p1))
-                segments.append((p1, p2, seg_len))
-                cumulative.append(cumulative[-1] + seg_len)
-            total_len = cumulative[-1]
-            if total_len > 1e-9:
-                distances = np.linspace(0.0, total_len, num_points)
-                path_points: List[np.ndarray] = []
-                for s in distances:
-                    idx = int(np.searchsorted(cumulative, s, side="right") - 1)
-                    idx = int(np.clip(idx, 0, len(segments) - 1))
-                    p1, p2, seg_len = segments[idx]
-                    if seg_len <= 1e-12:
-                        point = p1.copy()
-                    else:
-                        t = float((s - cumulative[idx]) / seg_len)
-                        point = p1 + t * (p2 - p1)
-                    path_points.append(np.array(point))
-                if not np.allclose(path_points[-1], path_points[0]):
-                    path_points[-1] = path_points[0].copy()
-                return [np.array(p) for p in path_points]
+            return _sample_polyline_keep_vertices(nodes, num_points=int(num_points), closed=True)
 
     path_points: List[np.ndarray] = [vertices[0]]
     for edge_idx in range(edges):
@@ -171,6 +239,320 @@ def generate_s_shape_bspline(
     return [np.array([x_new[i], y_new[i]]) for i in range(num_points)]
 
 
+def generate_circle_path(
+    scale: float = 10.0,
+    num_points: int = 240,
+    closed: bool = True,
+) -> List[np.ndarray]:
+    """
+    生成圆形路径（连续曲率）。
+    - scale: 直径
+    """
+    if num_points < (4 if closed else 3):
+        raise ValueError("num_points too small for circle path.")
+    radius = float(scale) / 2.0
+    sample_count = int(num_points) - 1 if closed else int(num_points)
+    t = np.linspace(0.0, 2.0 * math.pi, sample_count, endpoint=False)
+    path = [np.array([radius * math.cos(tt), radius * math.sin(tt)], dtype=float) for tt in t]
+    if closed:
+        path.append(path[0].copy())
+    return path
+
+
+def generate_trapezoid_path(
+    scale: float = 10.0,
+    num_points: int = 220,
+    top_ratio: float = 0.5,
+    height_ratio: float = 0.75,
+    start_offset_ratio: float = 0.0,
+    closed: bool = True,
+) -> List[np.ndarray]:
+    """
+    生成对称梯形路径。
+    - scale: 底边长度
+    - top_ratio: 顶边与底边的比例
+    - height_ratio: 高度与底边的比例
+    """
+    min_points = 5 if closed else 4
+    if num_points < min_points:
+        raise ValueError(f"num_points must be at least {min_points}.")
+    top_ratio = float(np.clip(top_ratio, 0.1, 1.0))
+    height_ratio = float(np.clip(height_ratio, 0.1, 2.0))
+    start_offset_ratio = float(np.clip(start_offset_ratio, 0.0, 1.0))
+    bottom = float(scale)
+    top = bottom * top_ratio
+    height = bottom * height_ratio
+
+    bottom_left = np.array([-bottom / 2.0, 0.0], dtype=float)
+    bottom_right = np.array([bottom / 2.0, 0.0], dtype=float)
+    top_right = np.array([top / 2.0, height], dtype=float)
+    top_left = np.array([-top / 2.0, height], dtype=float)
+
+    # 闭环梯形支持底边偏移起点；ratio=0.5 即底边中点。
+    if closed:
+        start = bottom_left + start_offset_ratio * (bottom_right - bottom_left)
+        nodes = [start, bottom_right, top_right, top_left, bottom_left, start]
+        return _sample_polyline_keep_vertices(nodes, num_points=int(num_points), closed=True)
+
+    v = [bottom_left, bottom_right, top_right, top_left]
+    if closed:
+        v.append(v[0].copy())
+
+    edges = len(v) - 1
+    edge_lengths = [float(np.linalg.norm(v[i + 1] - v[i])) for i in range(edges)]
+    total = max(1e-12, sum(edge_lengths))
+    counts = [max(1, int(round((num_points - 1) * l / total))) for l in edge_lengths]
+    # 修正总点数，使闭合后恰好 num_points
+    delta = (num_points - 1) - sum(counts)
+    if delta != 0:
+        order = np.argsort(edge_lengths)[::-1]
+        k = 0
+        while delta != 0 and len(order) > 0:
+            idx = int(order[k % len(order)])
+            if delta > 0:
+                counts[idx] += 1
+                delta -= 1
+            elif counts[idx] > 1:
+                counts[idx] -= 1
+                delta += 1
+            k += 1
+
+    path: List[np.ndarray] = [v[0].copy()]
+    for i in range(edges):
+        n = counts[i]
+        p1, p2 = v[i], v[i + 1]
+        for t in np.linspace(0.0, 1.0, n + 1)[1:]:
+            path.append(p1 + float(t) * (p2 - p1))
+
+    if closed:
+        path[-1] = path[0].copy()
+    return [np.asarray(p, dtype=float) for p in path]
+
+
+def _generate_butterfly_lemniscate(
+    scale: float,
+    num_points: int,
+    wing_ratio: float,
+    phase: float,
+    closed: bool,
+) -> List[np.ndarray]:
+    """简单 8 字蝴蝶（历史实现，保留兼容）。"""
+    min_points = 4 if closed else 3
+    if num_points < min_points:
+        raise ValueError(f"num_points must be at least {min_points}.")
+
+    wing_ratio = float(np.clip(wing_ratio, 0.1, 2.0))
+    a = float(scale) / 2.0
+    b = float(scale) * wing_ratio / 2.0
+    phase = float(phase)
+
+    sample_count = int(num_points) - 1 if closed else int(num_points)
+    t = np.linspace(0.0, 2.0 * math.pi, sample_count, endpoint=False)
+    tt = t + phase
+
+    x = a * np.sin(tt)
+    y = b * np.sin(tt) * np.cos(tt)
+    path = [np.array([x[i], y[i]], dtype=float) for i in range(sample_count)]
+    if closed:
+        path.append(path[0].copy())
+    return path
+
+
+def _generate_butterfly_academic(
+    scale: float,
+    num_points: int,
+    wing_ratio: float,
+    long_ratio: float,
+    cross_ratio: float,
+    closed: bool,
+) -> List[np.ndarray]:
+    """
+    参考 Boon 图形风格的蝴蝶闭环（无尖角、无自交）。
+    采用“长短直线趋势 + 圆弧过渡”的控制点模板，再用周期 B 样条平滑，
+    保证中心线 Pm 连续光滑，避免偏移时出现尖点放大问题。
+    """
+    min_points = 24 if closed else 16
+    if num_points < min_points:
+        raise ValueError(f"num_points must be at least {min_points}.")
+
+    wing_ratio = float(np.clip(wing_ratio, 0.7, 1.4))
+    long_ratio = float(np.clip(long_ratio, 0.9, 1.9))
+    cross_ratio = float(np.clip(cross_ratio, 0.05, 0.20))
+
+    # 以 scale=40 为模板尺寸；long_ratio 控制横向长度，wing_ratio 控制纵向展开。
+    sx = (float(scale) / 40.0) * long_ratio
+    sy = (float(scale) / 40.0) * (0.90 + 0.25 * wing_ratio)
+    waist_delta = (cross_ratio - 0.10) * 10.0  # 温和调节腰部开口
+
+    # 顺时针控制点（无自交），外形匹配“长短直线+圆弧组合”的参考图。
+    ctrl = np.array(
+        [
+            [-39.0, 17.0],
+            [-31.0, 17.6],
+            [-22.0, 17.2],
+            [-8.0, 13.0],
+            [2.0, 11.0],
+            [18.0, 15.5],
+            [30.0, 15.8],
+            [42.0, 8.0],
+            [50.0, -3.0],
+            [45.0, -7.5],
+            [34.0, -8.5],
+            [30.0, -16.8],
+            [23.0, -17.8],
+            [8.0, -8.2],
+            [0.0, -6.0],
+            [-8.0, -8.2],
+            [-23.0, -17.8],
+            [-30.0, -16.8],
+            [-34.0, -8.5],
+            [-45.0, -7.5],
+            [-50.0, 2.0],
+            [-44.0, 9.5],
+        ],
+        dtype=float,
+    )
+
+    # 腰部调节：top-middle 下压、bottom-middle 上抬。
+    top_ids = [3, 4]
+    bot_ids = [13, 14, 15]
+    ctrl[top_ids, 1] -= waist_delta
+    ctrl[bot_ids, 1] += waist_delta
+
+    ctrl[:, 0] *= sx
+    ctrl[:, 1] *= sy
+    ctrl = np.vstack([ctrl, ctrl[0]])
+
+    # 用周期 B 样条得到连续光滑闭环基线。
+    smooth_s = 4.0 * (float(scale) / 40.0) ** 2
+    tck, _ = splprep([ctrl[:, 0], ctrl[:, 1]], s=smooth_s, k=3, per=True)
+    sample_count = int(num_points) - 1 if closed else int(num_points)
+    u = np.linspace(0.0, 1.0, sample_count, endpoint=False)
+    x, y = splev(u, tck)
+    pm = np.column_stack([x, y]).astype(float)
+
+    def _nearest_idx(poly: np.ndarray, pt: np.ndarray) -> int:
+        d2 = np.sum((poly - pt) ** 2, axis=1)
+        return int(np.argmin(d2))
+
+    def _replace_section_with_polyline(
+        poly: np.ndarray,
+        start_idx: int,
+        end_idx: int,
+        anchors: np.ndarray,
+    ) -> None:
+        n = int(poly.shape[0])
+        s = int(start_idx)
+        e = int(end_idx)
+        if e < s:
+            e += n
+        idxs = np.arange(s, e + 1, dtype=int)
+        m = int(len(idxs))
+        if m <= 1:
+            return
+
+        seg = np.diff(anchors, axis=0)
+        seg_len = np.linalg.norm(seg, axis=1)
+        total = float(np.sum(seg_len))
+        if total <= 1e-12:
+            return
+        cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+
+        targets = np.linspace(0.0, total, m)
+        repl = np.zeros((m, 2), dtype=float)
+        for k, dist in enumerate(targets):
+            j = int(np.searchsorted(cum, dist, side="right") - 1)
+            j = int(np.clip(j, 0, len(seg_len) - 1))
+            l = float(seg_len[j])
+            if l <= 1e-12:
+                repl[k] = anchors[j]
+                continue
+            t = float((dist - cum[j]) / l)
+            repl[k] = anchors[j] + t * (anchors[j + 1] - anchors[j])
+
+        for k, ii in enumerate(idxs):
+            poly[ii % n] = repl[k]
+
+    # 在中部嵌入“长短直线穿插”段（参考用户给图）：
+    # - 上中段：短水平 + 长下斜 + 长上斜 + 短水平
+    # - 下中段：短斜线 + 长斜线 + 短线 + 长斜线 + 短斜线
+    top_anchors = np.array(
+        [
+            [-30.0, 17.0],
+            [-18.0, 17.0],
+            [-4.0, 12.0 - 0.5 * waist_delta],
+            [18.0, 16.0],
+            [30.0, 16.0],
+        ],
+        dtype=float,
+    )
+    bot_anchors = np.array(
+        [
+            [30.0, -16.2],
+            [22.0, -17.0],
+            [8.0, -8.2 + waist_delta],
+            [0.0, -6.0 + 0.6 * waist_delta],
+            [-8.0, -8.2 + waist_delta],
+            [-22.0, -17.0],
+            [-30.0, -16.2],
+        ],
+        dtype=float,
+    )
+    top_anchors[:, 0] *= sx
+    top_anchors[:, 1] *= sy
+    bot_anchors[:, 0] *= sx
+    bot_anchors[:, 1] *= sy
+
+    top_start = _nearest_idx(pm, top_anchors[0])
+    top_end = _nearest_idx(pm, top_anchors[-1])
+    _replace_section_with_polyline(pm, top_start, top_end, top_anchors)
+
+    bot_start = _nearest_idx(pm, bot_anchors[0])
+    bot_end = _nearest_idx(pm, bot_anchors[-1])
+    _replace_section_with_polyline(pm, bot_start, bot_end, bot_anchors)
+
+    raw = [np.array([pm[i, 0], pm[i, 1]], dtype=float) for i in range(pm.shape[0])]
+
+    if closed:
+        raw.append(raw[0].copy())
+
+    return _resample_path_by_arclength(raw, num_points=int(num_points), closed=bool(closed))
+
+
+def generate_butterfly_path(
+    scale: float = 10.0,
+    num_points: int = 300,
+    wing_ratio: float = 0.6,
+    phase: float = math.pi / 2.0,
+    long_ratio: float = 1.2,
+    cross_ratio: float = 0.08,
+    style: str = "academic",
+    closed: bool = True,
+) -> List[np.ndarray]:
+    """
+    生成蝴蝶路径。
+    - style='academic'：长短直线交叉 + 弧线（默认）
+    - style='lemniscate'：简单8字（兼容旧配置）
+    """
+    style_norm = str(style).strip().lower()
+    if style_norm in {"8", "simple", "lemniscate"}:
+        return _generate_butterfly_lemniscate(
+            scale=scale,
+            num_points=num_points,
+            wing_ratio=wing_ratio,
+            phase=phase,
+            closed=closed,
+        )
+    return _generate_butterfly_academic(
+        scale=scale,
+        num_points=num_points,
+        wing_ratio=wing_ratio,
+        long_ratio=long_ratio,
+        cross_ratio=cross_ratio,
+        closed=closed,
+    )
+
+
 def generate_sharp_angle_path(
     segment_length: float = 10.0,
     turn_angle_deg: float = 30.0,
@@ -211,13 +593,16 @@ def get_path_by_name(
     """
     根据名称获取路径。
 
-    支持: 'line', 'square', 's_shape', 's_shape_bspline'
+    支持: 'line', 'square', 's_shape', 's_shape_bspline', 'butterfly', 'trapezoid', 'circle'
     """
     path_generators = {
         "line": generate_line_path,
         "square": generate_square_path,
         "s_shape": generate_s_shape_path,
         "s_shape_bspline": generate_s_shape_bspline,
+        "butterfly": generate_butterfly_path,
+        "trapezoid": generate_trapezoid_path,
+        "circle": generate_circle_path,
         "sharp_angle": generate_sharp_angle_path,
     }
 
@@ -248,6 +633,32 @@ def get_path_by_name(
             num_points=num_points,
             control_points=kwargs.get("control_points"),
             smoothing=kwargs.get("smoothing", 0.0),
+        )
+    if path_name == "butterfly":
+        return generator(
+            scale=scale,
+            num_points=num_points,
+            wing_ratio=kwargs.get("wing_ratio", 0.6),
+            phase=kwargs.get("phase", math.pi / 2.0),
+            long_ratio=kwargs.get("long_ratio", 1.2),
+            cross_ratio=kwargs.get("cross_ratio", 0.08),
+            style=kwargs.get("style", "academic"),
+            closed=bool(kwargs.get("closed", True)),
+        )
+    if path_name == "trapezoid":
+        return generator(
+            scale=scale,
+            num_points=num_points,
+            top_ratio=kwargs.get("top_ratio", 0.5),
+            height_ratio=kwargs.get("height_ratio", 0.75),
+            start_offset_ratio=kwargs.get("start_offset_ratio", 0.0),
+            closed=bool(kwargs.get("closed", True)),
+        )
+    if path_name == "circle":
+        return generator(
+            scale=scale,
+            num_points=num_points,
+            closed=bool(kwargs.get("closed", True)),
         )
     if path_name == "sharp_angle":
         return generator(
@@ -299,6 +710,9 @@ __all__ = [
     "generate_square_path",
     "generate_s_shape_path",
     "generate_s_shape_bspline",
+    "generate_trapezoid_path",
+    "generate_circle_path",
+    "generate_butterfly_path",
     "generate_sharp_angle_path",
     "get_path_by_name",
     "compute_path_length",

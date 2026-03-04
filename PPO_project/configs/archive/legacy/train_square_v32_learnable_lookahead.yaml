@@ -3,7 +3,7 @@ seed: 42
 environment:
   epsilon: 2.5
   interpolation_period: 0.001
-  max_steps: 4000
+  max_steps: 8000
   lookahead_points: 8
   lookahead_obs_enabled: true
   lookahead_obs_scales: [0.5, 1.0, 2.0]
@@ -18,8 +18,8 @@ kinematic_constraints:
 
 reward_weights:
   w_s: 20.0
-  w_e: 5.0
-  w_tau: 2.0
+  w_e: 7.5
+  w_tau: 2.8
   w_smooth: 0.0
   minimal_mode: false
   control_authority:
@@ -41,15 +41,15 @@ reward_weights:
     min_dist: 0.8
     max_dist: 4.0
     straight_dist: 1.2
-    corner_dist: 2.8
-    mix_gain: 0.8
+    corner_dist: 2.0
+    mix_gain: 0.65
     action_default: 0.5
     cornerness_low_deg: 5.0
     cornerness_high_deg: 30.0
   lookahead_reward:
     enabled: true
     straight_target: 0.20
-    corner_target: 0.80
+    corner_target: 0.68
     w_straight: 0.6
     w_corner: 1.2
     power: 2.0
@@ -58,8 +58,8 @@ reward_weights:
     theta0_deg: 30.0
     ema_tau_steps: 12
     power: 2.0
-    w_track0: 5.0
-    w_track_min: 1.0
+    w_track0: 7.5
+    w_track_min: 2.2
     w_smooth0: 2.2
     smooth_source: domega
     smooth_power: 2.0
@@ -80,7 +80,7 @@ reward_weights:
     barrier_scale_ratio: 0.05
     barrier_weight: 0.0
     exit_center_ramp_steps: 60
-    center_weight: 0.0
+    center_weight: 0.25
     center_power: 1.0
     dir_pref_weight: 0.0
     dir_pref_beta: 2.0
@@ -96,13 +96,13 @@ reward_weights:
     exit_progress_mult: 1.35
     exit_speed_target_min: 0.95
     stall_enabled: true
-    stall_steps: 300
-    stall_progress_eps: 1e-4
-    stall_v_eps: 0.05
+    stall_steps: 1200
+    stall_progress_eps: 5e-6
+    stall_v_eps: 0.01
     stall_penalty: -8.0
     speed_cap_enabled: true
     speed_cap_eps: 1e-12
-    speed_cap_k: 4
+    speed_cap_k: 3
     speed_cap_s_min: 1.0
     speed_cap_s_max: 30.0
     p7_2_k: 0.01
@@ -121,11 +121,18 @@ reward_weights:
     j_ref_enabled: true
     j_ref_max_ratio: 0.5
   p7_3:
-    stall_cap_low: 0.25
+    stall_cap_low: 0.05
     kappa_smoothing_enabled: true
     kappa_smoothing_beta: 0.25
     kappa_dkappa_limit: null
     trace_ring_size: 200
+  p8:
+    use_recovery_cap: false
+    ang_cap_min_ratio: 0.12
+    vcap_rate_up: 0.01
+    vcap_rate_down: 0.03
+    corner_on_dist_scale: 1.5
+    corner_off_dist_scale: 3.0
 
 ppo:
   actor_lr: 3.0e-04
@@ -140,27 +147,74 @@ ppo:
 
 training:
   use_obs_normalizer: false
-  num_episodes: 500
+  num_episodes: 220
   smoothing_factor: 0.9
   save_interval: 100
   log_interval: 50
   checkpoint_interval_steps: 2048
-  step_log_interval_steps: 1
-  traj_write_interval_steps: 50
+  step_log_interval_steps: 10
+  traj_write_interval_steps: 0
   traj_write_max_points: 2000
-  enable_latest_trajectory: true
+  enable_latest_trajectory: false
   enable_best_trajectory_snapshot: true
-  enable_final_visualization: true
+  enable_final_visualization: false
+  path_curriculum:
+    enabled: true
+    mode: round_robin
+    episodes_per_path: 2
+    seed: 42
+    paths:
+      - name: square
+        type: square
+        closed: true
+        scale: 22.0
+        num_points: 260
+        square:
+          start_offset_ratio: 0.20
+      - name: s_shape
+        type: s_shape
+        scale: 26.0
+        num_points: 280
+        s_shape:
+          amplitude: 6.0
+          periods: 1.5
+      - name: butterfly
+        type: butterfly
+        scale: 40.0
+        num_points: 420
+        butterfly:
+          style: academic
+          wing_ratio: 1.00
+          long_ratio: 1.45
+          cross_ratio: 0.10
+          closed: true
+      - name: trapezoid
+        type: trapezoid
+        scale: 24.0
+        num_points: 260
+        trapezoid:
+          top_ratio: 0.45
+          height_ratio: 0.80
+          start_offset_ratio: 0.50
+          closed: true
+      - name: circle
+        type: circle
+        scale: 24.0
+        num_points: 280
+        circle:
+          closed: true
 
 path:
   type: square
   closed: true
-  scale: 10.0
-  num_points: 200
+  scale: 22.0
+  num_points: 260
   square: {}
 
 experiment:
   mode: train
+  category: phase32
+  name: phase32_multi_shape_academic_fix4_220ep
   baseline_type: null
   enable_kcm: true
   model_path: null

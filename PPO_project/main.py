@@ -5,12 +5,13 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import os
 import random
 import time
 from pathlib import Path
-from typing import Mapping, Optional, Sequence, Tuple
+from typing import Any, Mapping, Optional, Sequence, Tuple
 
 import numpy as np
 import torch
@@ -319,6 +320,124 @@ def _build_path(path_config: dict) -> list[np.ndarray]:
     return Pm
 
 
+def _merge_path_config(base_path_config: Mapping[str, Any], override: Mapping[str, Any]) -> dict:
+    """合并路径配置（override 优先），用于多路径课程训练。"""
+    merged = copy.deepcopy(dict(base_path_config))
+    for key, value in dict(override).items():
+        merged[key] = copy.deepcopy(value)
+    return merged
+
+
+def _build_path_curriculum(
+    base_path_config: Mapping[str, Any],
+    training_config: Mapping[str, Any],
+) -> tuple[list[dict], str, int, int]:
+    """
+    解析多路径课程配置。
+
+    配置示例:
+    training:
+      path_curriculum:
+        enabled: true
+        mode: round_robin  # round_robin | random
+        episodes_per_path: 1
+        seed: 42
+        paths:
+          - {name: square, type: square, scale: 10.0, num_points: 200}
+          - {name: s_shape, type: s_shape, scale: 10.0, num_points: 240, s_shape: {amplitude: 4.0, periods: 1.5}}
+    """
+    curriculum_cfg = training_config.get("path_curriculum", {})
+    if not isinstance(curriculum_cfg, Mapping):
+        return [], "round_robin", 1, 0
+
+    if not bool(curriculum_cfg.get("enabled", False)):
+        return [], "round_robin", 1, 0
+
+    raw_paths = curriculum_cfg.get("paths", [])
+    if not isinstance(raw_paths, Sequence) or isinstance(raw_paths, (str, bytes)):
+        raise ValueError("training.path_curriculum.paths 必须为列表")
+
+    parsed_paths: list[dict] = []
+    for idx, entry in enumerate(raw_paths):
+        if isinstance(entry, str):
+            override = {"type": str(entry)}
+        elif isinstance(entry, Mapping):
+            override = dict(entry)
+        else:
+            raise ValueError(f"training.path_curriculum.paths[{idx}] 必须是字符串或字典")
+
+        merged_cfg = _merge_path_config(base_path_config, override)
+        path_type = merged_cfg.get("type")
+        if not isinstance(path_type, str) or not path_type.strip():
+            raise ValueError(f"training.path_curriculum.paths[{idx}] 缺少有效的 type")
+        parsed_paths.append(merged_cfg)
+
+    mode = str(curriculum_cfg.get("mode", "round_robin")).strip().lower()
+    if mode not in {"round_robin", "random"}:
+        mode = "round_robin"
+
+    episodes_per_path = int(max(1, int(curriculum_cfg.get("episodes_per_path", 1))))
+    seed = int(curriculum_cfg.get("seed", 0))
+    return parsed_paths, mode, episodes_per_path, seed
+
+
+def _select_curriculum_path(
+    paths: Sequence[Mapping[str, Any]],
+    *,
+    mode: str,
+    episodes_per_path: int,
+    episode_idx: int,
+    seed: int,
+) -> tuple[dict, int, str]:
+    """按课程策略为当前回合选择路径配置。"""
+    if not paths:
+        raise ValueError("路径课程为空，无法选择路径")
+
+    if mode == "random":
+        # 使用 episode_idx 派生随机索引，保证可复现且无状态。
+        chooser = random.Random(int(seed) + int(episode_idx) * 7919 + 17)
+        path_idx = chooser.randrange(len(paths))
+    else:
+        span = max(1, int(episodes_per_path))
+        path_idx = (int(episode_idx) // span) % len(paths)
+
+    selected = dict(paths[path_idx])
+    path_name = str(selected.get("name") or selected.get("type") or f"path_{path_idx}")
+    return selected, path_idx, path_name
+
+
+def _create_env(
+    *,
+    device: torch.device,
+    env_config: Mapping[str, Any],
+    kcm_config: Mapping[str, Any],
+    reward_weights: Mapping[str, Any],
+    training_config: Mapping[str, Any],
+    path_points: Sequence[np.ndarray],
+) -> Env:
+    """统一环境构建，便于单路径/多路径复用。"""
+    use_obs_normalizer = bool(training_config.get("use_obs_normalizer", False))
+    return Env(
+        device=device,
+        epsilon=env_config["epsilon"],
+        interpolation_period=env_config["interpolation_period"],
+        MAX_VEL=kcm_config["MAX_VEL"],
+        MAX_ACC=kcm_config["MAX_ACC"],
+        MAX_JERK=kcm_config["MAX_JERK"],
+        MAX_ANG_VEL=kcm_config["MAX_ANG_VEL"],
+        MAX_ANG_ACC=kcm_config["MAX_ANG_ACC"],
+        MAX_ANG_JERK=kcm_config["MAX_ANG_JERK"],
+        Pm=path_points,
+        max_steps=env_config["max_steps"],
+        lookahead_points=env_config.get("lookahead_points", 5),
+        lookahead_obs_enabled=env_config.get("lookahead_obs_enabled", True),
+        lookahead_obs_scales=env_config.get("lookahead_obs_scales", [1.0]),
+        reward_weights=reward_weights,
+        curvature_observation=env_config.get("curvature_observation"),
+        return_normalized_obs=not use_obs_normalizer,
+    )
+
+
 def _find_model_checkpoint(category: str, mode_suffix: str) -> Path | None:
     """查找最新实验下的优选模型（best_model优先，其次旧版final）。"""
     base_dir = Path(__file__).resolve().parent / "saved_models" / category
@@ -381,25 +500,42 @@ def train(
     training_config.setdefault("use_obs_normalizer", False)
     use_obs_normalizer = bool(training_config.get("use_obs_normalizer", False))
 
-    Pm = _build_path(path_config)
-    env = Env(
+    curriculum_paths, curriculum_mode, curriculum_episodes_per_path, curriculum_seed = _build_path_curriculum(
+        path_config,
+        training_config,
+    )
+    curriculum_enabled = len(curriculum_paths) > 0
+    if curriculum_enabled:
+        if len(curriculum_paths) < 2:
+            print("[PATH-CURRICULUM] 路径数<2，自动退化为单一路径训练。")
+            curriculum_enabled = False
+            curriculum_paths = []
+        else:
+            print(
+                "[PATH-CURRICULUM] 启用多路径课程: "
+                f"paths={len(curriculum_paths)}, mode={curriculum_mode}, "
+                f"episodes_per_path={curriculum_episodes_per_path}, seed={curriculum_seed}"
+            )
+
+    initial_path_cfg = dict(path_config)
+    initial_path_name = str(path_config.get("type", "path"))
+    initial_path_idx = 0
+    if curriculum_enabled:
+        initial_path_cfg, initial_path_idx, initial_path_name = _select_curriculum_path(
+            curriculum_paths,
+            mode=curriculum_mode,
+            episodes_per_path=curriculum_episodes_per_path,
+            episode_idx=0,
+            seed=curriculum_seed,
+        )
+    Pm = _build_path(initial_path_cfg)
+    env = _create_env(
         device=device,
-        epsilon=env_config["epsilon"],
-        interpolation_period=env_config["interpolation_period"],
-        MAX_VEL=kcm_config["MAX_VEL"],
-        MAX_ACC=kcm_config["MAX_ACC"],
-        MAX_JERK=kcm_config["MAX_JERK"],
-        MAX_ANG_VEL=kcm_config["MAX_ANG_VEL"],
-        MAX_ANG_ACC=kcm_config["MAX_ANG_ACC"],
-        MAX_ANG_JERK=kcm_config["MAX_ANG_JERK"],
-        Pm=Pm,
-        max_steps=env_config["max_steps"],
-        lookahead_points=env_config.get("lookahead_points", 5),
-        lookahead_obs_enabled=env_config.get("lookahead_obs_enabled", True),
-        lookahead_obs_scales=env_config.get("lookahead_obs_scales", [1.0]),
+        env_config=env_config,
+        kcm_config=kcm_config,
         reward_weights=reward_weights,
-        curvature_observation=env_config.get("curvature_observation"),
-        return_normalized_obs=not use_obs_normalizer,
+        training_config=training_config,
+        path_points=Pm,
     )
 
     obs_space = getattr(env, "observation_space", None)
@@ -491,6 +627,11 @@ def train(
     step_log_interval_steps = _resolve_int_setting("step_log_interval_steps", 1)
     traj_write_interval_steps = _resolve_int_setting("traj_write_interval_steps", 50)
     traj_write_max_points = _resolve_int_setting("traj_write_max_points", 2000)
+    random_start_ratio = float(training_config.get("random_start_ratio", 0.0))
+    random_start_ratio = float(np.clip(random_start_ratio, 0.0, 1.0))
+    best_snapshot_require_deterministic_start = bool(
+        training_config.get("best_trajectory_require_deterministic_start", True)
+    )
     enable_latest_trajectory = bool(training_config.get("enable_latest_trajectory", True))
     enable_best_trajectory_snapshot = bool(training_config.get("enable_best_trajectory_snapshot", True))
     enable_final_visualization = bool(training_config.get("enable_final_visualization", True))
@@ -531,9 +672,10 @@ def train(
     explicit_experiment_dir = getattr(cli_overrides, "experiment_dir", None) or experiment_dir
     target_experiment_dir = resume_experiment_dir or explicit_experiment_dir
 
+    path_config_for_log = {"type": "multi_path"} if curriculum_enabled else path_config
     manager, log_tag = _init_experiment(
         resolved_config_path,
-        path_config,
+        path_config_for_log,
         experiment_mode,
         experiment_config,
         experiment_dir=target_experiment_dir,
@@ -546,11 +688,50 @@ def train(
         print(f"续训起始回合({start_episode})已达到总回合数({num_episodes})，不再继续。")
         return
 
-    print(f"\n开始训练 共{num_episodes}个回合\n")
+    print(
+        f"\n开始训练 共{num_episodes}个回合 "
+        f"(random_start_ratio={random_start_ratio:.2f}, "
+        f"best_snapshot_require_deterministic_start={best_snapshot_require_deterministic_start})\n"
+    )
 
+    current_path_idx = int(initial_path_idx)
+    current_path_name = str(initial_path_name)
     with tqdm(total=num_episodes, initial=start_episode, desc="训练进度") as pbar:
         for episode in range(start_episode, num_episodes):
-            use_random_start = episode < num_episodes * 0.3
+            if curriculum_enabled:
+                episode_path_cfg, episode_path_idx, episode_path_name = _select_curriculum_path(
+                    curriculum_paths,
+                    mode=curriculum_mode,
+                    episodes_per_path=curriculum_episodes_per_path,
+                    episode_idx=episode,
+                    seed=curriculum_seed,
+                )
+                if episode_path_idx != current_path_idx:
+                    current_path_idx = int(episode_path_idx)
+                    current_path_name = str(episode_path_name)
+                    print(
+                        f"[PATH-CURRICULUM] Episode {episode + 1}/{num_episodes} "
+                        f"切换路径 -> {current_path_name}"
+                    )
+                elif episode == start_episode:
+                    print(
+                        f"[PATH-CURRICULUM] Episode {episode + 1}/{num_episodes} "
+                        f"使用路径 -> {current_path_name}"
+                    )
+
+                Pm = _build_path(episode_path_cfg)
+                env = _create_env(
+                    device=device,
+                    env_config=env_config,
+                    kcm_config=kcm_config,
+                    reward_weights=reward_weights,
+                    training_config=training_config,
+                    path_points=Pm,
+                )
+                if hasattr(env, "_episode_index"):
+                    env._episode_index = int(episode) - 1
+
+            use_random_start = episode < num_episodes * random_start_ratio
             state = env.reset(random_start=use_random_start)
             state = normalizer(state)
             paper_metrics = PaperMetrics()
@@ -728,7 +909,12 @@ def train(
                     config=config,
                 )
                 # 保存最佳模型对应的轨迹快照
-                if enable_best_trajectory_snapshot and collect_episode_trace:
+                should_write_best_snapshot = (
+                    enable_best_trajectory_snapshot
+                    and collect_episode_trace
+                    and (not best_snapshot_require_deterministic_start or not use_random_start)
+                )
+                if should_write_best_snapshot:
                     best_traj_path = manager.logs_dir / f"best_trajectory_ep{episode+1}.csv"
                     _write_trajectory_to_file(best_traj_path, current_episode_trace)
                 print(f"发现更优模型: eval_reward={eval_reward:.2f}, 保存到 {best_path}")
@@ -763,14 +949,15 @@ def train(
                         f,
                     )
 
-            pbar.set_postfix(
-                {
-                    "Reward": f"{episode_reward:.1f}",
-                    "Smoothed": f"{smoothed_rewards[-1]:.1f}",
-                    "Actor Loss": f"{avg_actor_loss:.2f}",
-                    "Critic Loss": f"{avg_critic_loss:.2f}",
-                }
-            )
+            postfix_row = {
+                "Reward": f"{episode_reward:.1f}",
+                "Smoothed": f"{smoothed_rewards[-1]:.1f}",
+                "Actor Loss": f"{avg_actor_loss:.2f}",
+                "Critic Loss": f"{avg_critic_loss:.2f}",
+            }
+            if curriculum_enabled:
+                postfix_row["Path"] = current_path_name
+            pbar.set_postfix(postfix_row)
             pbar.update(1)
 
     print("\n" + "=" * 80)
@@ -848,6 +1035,7 @@ def test(
     path_config = config["path"]
     reward_weights = config.get("reward_weights", {})
     ppo_config = config.get("ppo", {})
+    training_config = config.get("training", {}) if isinstance(config.get("training", {}), dict) else {}
 
     manager, log_tag = _init_experiment(
         resolved_config_path,
@@ -859,23 +1047,13 @@ def test(
     )
 
     Pm = _build_path(path_config)
-    env = Env(
+    env = _create_env(
         device=device,
-        epsilon=env_config["epsilon"],
-        interpolation_period=env_config["interpolation_period"],
-        MAX_VEL=kcm_config["MAX_VEL"],
-        MAX_ACC=kcm_config["MAX_ACC"],
-        MAX_JERK=kcm_config["MAX_JERK"],
-        MAX_ANG_VEL=kcm_config["MAX_ANG_VEL"],
-        MAX_ANG_ACC=kcm_config["MAX_ANG_ACC"],
-        MAX_ANG_JERK=kcm_config["MAX_ANG_JERK"],
-        Pm=Pm,
-        max_steps=env_config["max_steps"],
-        lookahead_points=env_config.get("lookahead_points", 5),
-        lookahead_obs_enabled=env_config.get("lookahead_obs_enabled", True),
-        lookahead_obs_scales=env_config.get("lookahead_obs_scales", [1.0]),
+        env_config=env_config,
+        kcm_config=kcm_config,
         reward_weights=reward_weights,
-        curvature_observation=env_config.get("curvature_observation"),
+        training_config=training_config,
+        path_points=Pm,
     )
 
     obs_space = getattr(env, "observation_space", None)

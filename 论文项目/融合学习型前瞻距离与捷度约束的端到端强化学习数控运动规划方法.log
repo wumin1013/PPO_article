@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.12.2)  6 MAR 2026 14:06
+This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.12.2)  6 MAR 2026 14:14
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -681,14 +681,14 @@ LaTeX Font Info:    Trying to load font information for U+msb on input line 46.
  (d:/texlive/2025/texmf-dist/tex/latex/amsfonts/umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 )
-File: ./figures/fig1.pdf Graphic file (type pdf)
-<use ./figures/fig1.pdf>
-
 
 [1
 
 
 ]
+File: ./figures/fig1.pdf Graphic file (type pdf)
+<use ./figures/fig1.pdf>
+
 
 [2]
 
@@ -758,10 +758,10 @@ Package rerunfilecheck Info: File `融合学习型前瞻距离与捷度约束的
 Here is how much of TeX's memory you used:
  18742 strings out of 473832
  390130 string characters out of 5733158
- 816259 words of memory out of 5000000
+ 814257 words of memory out of 5000000
  41518 multiletter control sequences out of 15000+600000
  573420 words of font info for 98 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 93i,11n,111p,536b,563s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 93i,11n,111p,536b,520s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
 Output written on 融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.pdf (16 pages).

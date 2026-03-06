@@ -1,0 +1,12 @@
+\begin{thebibliography}{1}
+\expandafter\ifx\csname url\endcsname\relax
+  \def\url#1{\texttt{#1}}\fi
+\expandafter\ifx\csname urlprefix\endcsname\relax\def\urlprefix{URL }\fi
+\expandafter\ifx\csname href\endcsname\relax
+  \def\href#1#2{#2} \def\path#1{#1}\fi
+
+\bibitem{Li2020}
+B.~Li, H.~Zhang, P.~Ye, J.~Wang, Trajectory smoothing method using reinforcement learning for computer numerical control machine tools, Robotics and Computer-Integrated Manufacturing 61 (2020) 101847.
+\newblock \href {https://doi.org/10.1016/j.rcim.2019.101847} {\path{doi:10.1016/j.rcim.2019.101847}}.
+
+\end{thebibliography}

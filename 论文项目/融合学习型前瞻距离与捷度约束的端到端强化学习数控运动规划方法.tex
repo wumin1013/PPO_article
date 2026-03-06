@@ -1,0 +1,411 @@
+\documentclass[preprint,12pt]{elsarticle}
+
+\usepackage{ctex}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{subcaption}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{enumitem}
+
+\graphicspath{{./figures/}}
+\journal{Journal of Manufacturing Systems}
+
+\renewcommand{\algorithmicrequire}{\textbf{Require:}}
+\renewcommand{\algorithmicensure}{\textbf{Ensure:}}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{融合捷度约束的端到端强化学习运动规划方法}
+
+\author[1]{作者姓名}
+\affiliation[1]{organization={某某大学/机构},
+            addressline={某某路},
+            city={某某市},
+            postcode={000000},
+            country={中国}}
+
+\begin{abstract}
+针对由短线段构成的数控刀具路径，传统“几何平滑--速度规划”串行流程在几何处理、速度调节和动态约束之间存在较强耦合，在线应用时还容易在拐角处出现效率与平顺性难以兼顾的问题。为此，本文提出一种融合捷度约束的端到端强化学习运动规划方法。该方法以轮廓允差带作为几何可行域，将路径跟踪写成受约束序列决策问题；在状态侧构造由核心运动学量、拐角感知量和多尺度预瞻几何量组成的紧凑表示；在动作侧同时输出转向、进给和前瞻距离调节量，并通过运动学约束模块将策略输出在线转换为满足速度、加速度与捷度约束的可执行控制指令；在奖励侧采用以进度为主、以轮廓误差与平滑性为辅的设计。此外，本文将前瞻距离作为可学习控制量引入闭环，使策略能够根据局部几何和运行阶段自动调整前瞻长度，在直线区和拐角区形成不同的前视行为，并结合拐角相位判别实现高速直行与平滑过弯之间的切换。该方法将几何表征、前瞻调节、约束执行与奖励设计统一到同一控制框架中，为CNC短线段路径的智能运动规划提供了一种可执行的强化学习方案。
+\end{abstract}
+
+\begin{keyword}
+运动规划 \sep 强化学习 \sep 捷度约束 \sep 端到端控制 \sep CNC
+\end{keyword}
+
+\end{frontmatter}
+
+\section{引言}
+\label{sec:intro}
+
+由CAM系统输出的G01刀具路径通常由大量短线段组成。对于此类路径，传统CNC运动控制一般采用“几何平滑--速度规划--插补执行”的串行处理流程。该流程工程上成熟，但也存在两个共性问题：其一，几何与运动学分属不同模块，局部拐角处的轨迹形状与速度包络往往通过层层折衷获得，难以在统一目标下直接优化；其二，面对由长短线段混合构成的复杂路径，前瞻、平滑和约束传播之间的耦合会显著增加在线求解负担。
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.9\linewidth]{fig1.pdf}
+    \caption{传统串行式运动规划与端到端神经网络规划的架构对比。}
+    \label{fig:comparison_arch}
+\end{figure}
+
+近年来，基于强化学习的直接神经网络控制方法为上述问题提供了新的技术路径\cite{Li2020}。它不是先生成平滑曲线，再单独做速度规划，而是让策略在每个插补周期直接给出运动指令，使几何跟踪、速度调节和局部过弯在同一闭环内同时完成。这类方法的意义在于，一旦策略学到了稳定的局部控制规律，就可以在不同路径段上按统一方式在线运行，而不必针对每一类几何结构另外设计解析过渡曲线。
+
+但把直接控制用到数控运动规划里，也有几个很实际的问题。第一，如果策略输出没有显式的动态约束保护，拐角处很容易出现不合理的加速度和捷度尖峰。第二，如果状态只包含当前位置和速度等局部信息，策略往往来不及提前感知将要到来的转向。第三，如果奖励过度依赖单一的轮廓误差惩罚，策略又会倾向于“保守贴线”，难以真正利用允差带内可用的几何自由度。因此，面向CNC场景的端到端强化学习方法至少要把三件事处理清楚：让策略看见前方几何，让策略输出始终可执行，让奖励在效率、精度和平顺性之间建立合理关系。
+
+围绕上述问题，本文构建了一种面向CNC短线段轨迹的端到端强化学习控制框架。框架的重点放在四个环节上：\textbf{(1) 紧凑的几何--运动学状态编码}，用于描述当前轮廓偏差、拐角显著性和预瞻几何；\textbf{(2) 可学习的前瞻距离调节}，将前瞻长度作为策略输出的一部分，使智能体能够根据不同几何区段自适应决定“看多远”；\textbf{(3) 面向执行侧的运动学约束模块}，将策略动作在线投影到满足速度、加速度与捷度上限的控制指令；\textbf{(4) 拐角感知的奖励设计}，在直线段鼓励快速推进，在拐角段加强方向一致性和平滑性要求，从而引导策略在允差带内形成更合理的过弯轨迹。
+
+基于上述框架，本文的主要贡献如下：
+\begin{enumerate}[leftmargin=2em]
+    \item 提出一种面向CNC短线段路径的紧凑状态表示，将核心运动学状态、拐角感知状态与多尺度预瞻几何观测统一到同一决策输入中，以降低策略学习负担并提升对未来转向的响应能力；
+    \item 将前瞻距离作为策略可学习控制量引入动作空间，使智能体能够根据局部几何与运行相位自适应调节前瞻长度，并在拐角区与直线区形成差异化的前视行为，从而实现提前转向与高速推进之间的统一协调；
+    \item 设计一种运动学约束模块（Kinematic Constraint Module, KCM），在不破坏端到端控制闭环的前提下，将策略输出在线投影为满足速度、加速度与捷度约束的可执行动作，从而将动态安全性前置到执行层；
+    \item 构建一种以路径进度为主导、以轮廓误差和拐角平滑为辅助的奖励结构，使策略能够在允差带内自主学习“直线段快速推进--拐角段主动减速与平滑转向”的控制规律。
+\end{enumerate}
+
+本文余下内容安排如下：第二章给出问题定义与约束建模；第三章详细阐述本文方法；第四章给出实验组织方式、评价指标与结果呈现框架；第五章总结全文并讨论实机扩展方向。
+
+\section{问题定义与约束建模}
+\label{sec:problem}
+
+本章给出与本文方法直接相关的任务定义、几何约束与执行约束，为后续方法部分提供必要的形式化基础。
+
+\subsection{刀具路径与几何可行域}
+给定由CAM系统生成的离散刀位点序列
+\begin{equation}
+P_{raw}=\{p_1,p_2,\dots,p_N\},
+\end{equation}
+其中 $p_i\in\mathbb{R}^2$ 表示插补平面内的参考点。设轮廓允差为 $\varepsilon$，则参考路径两侧各偏置 $\varepsilon/2$ 后可得到一条允许策略局部偏离的几何可行域：
+\begin{equation}
+\Omega=\{x\mid d(x,P_{raw})\leq \varepsilon/2\},
+\label{eq:feasible_region}
+\end{equation}
+式中 $d(x,P_{raw})$ 为点 $x$ 到参考路径的最小距离。该定义意味着本文并不将“严格贴附中心线”作为唯一合理行为，而是允许策略在允差带内进行局部几何重分配，以换取更平滑的拐角通过过程。
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox{0.72\linewidth}{\centering \vspace{2.2cm} 图2占位符：参考路径、左右偏置边界与可行域示意图 \vspace{2.2cm}}}
+    \caption{参考路径与轮廓允差带构成的几何可行域。}
+    \label{fig:feasible_region}
+\end{figure}
+
+为便于在闭环决策中感知局部几何，我们进一步对参考路径进行弧长参数化，并在当前投影弧长 $s_t$ 附近提取法向误差、切向方向、到下一拐角距离以及下一拐角转角等量。这些量既参与状态构造，也参与奖励加权与拐角模式判定。
+
+\subsection{受约束序列决策表述}
+在每个插补周期 $\Delta t$ 内，策略接收当前状态 $s_t$ 并输出归一化动作 $a_t^{\pi}$。环境执行动作后更新位置、姿态及运动学状态，并返回即时奖励 $r_t$。因此，本文任务可以写成一个受约束的序列决策问题：
+\begin{equation}
+\max_{\pi}\ \mathbb{E}_{\pi}\left[\sum_{t=0}^{T} \gamma^t r_t\right],
+\end{equation}
+同时满足几何约束
+\begin{equation}
+x_t\in \Omega,
+\end{equation}
+以及执行侧运动学约束
+\begin{equation}
+|v_t|\leq V_{\max},\quad |a_t|\leq A_{\max},\quad |j_t|\leq J_{\max},
+\end{equation}
+\begin{equation}
+|\omega_t|\leq \Omega_{\max},\quad |\dot{\omega}_t|\leq A^{\omega}_{\max},\quad |\ddot{\omega}_t|\leq J^{\omega}_{\max}.
+\end{equation}
+其中 $v_t,a_t,j_t$ 分别表示线速度、线加速度与线捷度，$\omega_t,\dot{\omega}_t,\ddot{\omega}_t$ 分别表示角速度、角加速度与角捷度。
+
+这里的约束不是作为离线评价指标放在结果部分再检查，而是在执行时就通过KCM直接施加到动作上。也就是说，策略负责给出控制意图，约束模块负责把它变成当前状态下可以安全执行的动作。
+
+\subsection{优化目标的任务化解释}
+从加工任务角度看，本文的优化目标可归纳为三条：
+\begin{enumerate}[leftmargin=2em]
+    \item 在直线段尽可能提高进给效率，减少不必要的速度损失；
+    \item 在拐角段保持轮廓误差受控，同时避免由于转向过急而引发的加速度、捷度尖峰；
+    \item 在允许的轮廓带内形成更连续的速度和方向过渡，使策略在不同几何段之间自动完成从“高速推进”到“平滑过弯”的模式切换。
+\end{enumerate}
+围绕这三个目标，本文的方法设计主要从几何表征、前瞻调节、约束执行和奖励设计四条线展开。下一章给出具体方法。
+
+\section{方法}
+\label{sec:method}
+
+\subsection{总体框架}
+本文方法的总体框架如图\ref{fig:framework}所示。给定参考路径与轮廓允差，系统首先在环境侧完成路径投影、拐角扫描与预瞻几何提取，构造当前时刻的紧凑状态向量；随后，策略网络输出归一化控制动作，分别对应方向调整、进给水平以及前瞻距离调节；最后，KCM根据上一时刻的速度、加速度和捷度状态，对策略动作进行在线约束投影，得到满足速度、加速度与捷度限制的最终执行动作。执行结果反过来更新当前位置、运动学量、拐角相位与前瞻观测，形成完整闭环。
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox{0.88\linewidth}{\centering \vspace{2.8cm} 图3占位符：路径几何编码--策略网络--KCM--环境更新的闭环框架图 \vspace{2.8cm}}}
+    \caption{本文方法的总体闭环框架。}
+    \label{fig:framework}
+\end{figure}
+
+这个框架有三个主要特点。第一，状态侧不是简单堆叠原始运动学量，而是把当前误差、拐角感知和预瞻观测分开组织，各自承担不同的决策作用。第二，动作侧除了转向和进给，还加入了前瞻距离控制量，使策略能够在直线区和拐角区采用不同的观察尺度。第三，网络输出不会直接拿去执行，而是先经过KCM完成从策略意图到可执行动作的映射，从而把端到端学习和工业场景需要的约束可执行性放在同一个闭环里。
+
+\subsection{紧凑状态表示：核心状态、拐角感知与预瞻观测}
+为降低学习难度，本文采用一种分层的紧凑状态表示：
+\begin{equation}
+s_t=[s_t^{core},\ s_t^{corner},\ s_t^{preview}].
+\end{equation}
+其中 $s_t^{core}$ 描述当前时刻的局部跟踪与运动学状态，$s_t^{corner}$ 描述当前路径段与下一拐角之间的关系，$s_t^{preview}$ 描述前方若干距离处的几何变化趋势。
+
+\paragraph{(1) 核心状态 $s_t^{core}$} 核心状态采用8维构造：
+\begin{equation}
+s_t^{core}=[\bar e_t,\ \bar e_{n,t},\ \bar\tau_t,\ \bar v_t,\ \bar a_t,\ \bar\omega_t,\ \rho_t,\ \bar d_{c,t}],
+\end{equation}
+其中 $\bar e_t$ 为归一化轮廓误差，$\bar e_{n,t}$ 为带符号法向误差，$\bar\tau_t$ 为当前航向与局部切向方向之间的归一化夹角误差，$\bar v_t$、$\bar a_t$、$\bar\omega_t$ 分别为归一化线速度、线加速度和角速度，$\rho_t\in[0,1]$ 为路径整体进度，$\bar d_{c,t}$ 为到下一拐角距离的归一化量。该组特征提供了策略在当前局部内进行“跟踪--推进”决策所需的基本信息。
+
+\paragraph{(2) 拐角感知状态 $s_t^{corner}$} 为使策略显式感知即将到来的转向需求，本文进一步构造4维拐角感知特征：
+\begin{equation}
+s_t^{corner}=[\bar\phi_t,\ \sigma_t,\ m_t,\ \sigma_t\bar e_{n,t}],
+\end{equation}
+其中 $\bar\phi_t$ 为下一拐角转角的归一化值，$\sigma_t\in\{-1,0,1\}$ 表示拐角转向符号，$m_t\in\{0,1\}$ 表示是否处于拐角影响区间，$\sigma_t\bar e_{n,t}$ 则给出了相对于转向内侧或外侧的带符号位置关系。该设计比单纯提供“离拐角多远”更有效，因为它同时告诉策略“拐角有多急”和“当前偏在内侧还是外侧”。
+
+\paragraph{(3) 预瞻观测 $s_t^{preview}$} 仅依赖当前局部几何会导致策略在拐角临近时反应过晚。为此，本文沿参考路径弧长方向设置若干预瞻尺度 $\{\lambda_k\}_{k=1}^{N_L}$，并在每个尺度上提取前方观测点相对于当前切向的角度变化和距离比例：
+\begin{equation}
+s_t^{preview}=\big[\Delta \theta_t^{(1)},\ \bar d_t^{(1)},\ \dots,\ \Delta \theta_t^{(N_L)},\ \bar d_t^{(N_L)}\big].
+\end{equation}
+其中 $\Delta \theta_t^{(k)}$ 表征第 $k$ 个预瞻尺度上的方向变化趋势，$\bar d_t^{(k)}$ 表征当前位置到该预瞻点的归一化距离。当前实现中，主配置采用3个预瞻尺度，因此总状态维数为 $8+4+2\times 3=18$。多尺度观测与可学习前瞻距离是配套设计：前者为策略提供不同空间尺度上的几何线索，后者则允许策略在运行过程中主动选择更偏向直线推进还是更偏向拐角预判的观察长度。
+
+这种分层状态表示的思路比较直接：核心状态描述“当前位置和当前速度”；拐角状态描述“前方是否要转以及向哪边转”；预瞻观测描述“前方几何正在怎样变化”。三部分合在一起，用来支撑策略在局部跟踪和前方预判之间进行协调。
+
+\subsection{动作空间与运动学约束模块}
+策略网络在每个周期输出归一化动作
+\begin{equation}
+ a_t^{\pi}=[u_{\theta,t},u_{v,t},u_{L,t}],
+\end{equation}
+其中 $u_{\theta,t}\in[-1,1]$ 表示角速度控制意图，$u_{v,t}\in[0,1]$ 表示线速度控制意图，$u_{L,t}\in[0,1]$ 表示前瞻距离调节量。设前瞻距离允许范围为 $[L_{\min},L_{\max}]$，则其物理量映射为
+\begin{equation}
+L_t=L_{\min}+u_{L,t}(L_{\max}-L_{\min}).
+\end{equation}
+这样一来，前瞻长度不再由人工预先固定，而是作为策略的一部分随局部几何、当前速度和拐角相位在线变化。在直线区，策略可以选择较短前瞻以保持较高响应和推进速度；在拐角临近或进入拐角阶段时，策略则可以主动增大前瞻距离，更早感知转向趋势，并提前调整速度和姿态。
+
+策略输出首先被映射为物理空间中的意图量：
+\begin{equation}
+\omega_t^{int}=u_{\theta,t}\Omega_{\max},\qquad v_t^{int}=u_{v,t}V_{\max}.
+\end{equation}
+前瞻距离 $L_t$ 则直接参与局部参考方向与预瞻几何的计算，从而影响当前周期的姿态参考与状态观测。随后，KCM根据上一时刻运动学状态对 $(\omega_t^{int},v_t^{int})$ 进行约束投影。以线速度通道为例，设上一周期的线速度和线加速度分别为 $v_{t-1}$ 与 $a_{t-1}$，则有
+\begin{equation}
+ a_t^{int}=\frac{v_t^{int}-v_{t-1}}{\Delta t},
+\end{equation}
+\begin{equation}
+ j_t^{int}=\frac{a_t^{int}-a_{t-1}}{\Delta t}.
+\end{equation}
+KCM首先对意图捷度进行裁剪：
+\begin{equation}
+ j_t=\mathrm{clip}(j_t^{int},-J_{\max},J_{\max}),
+\end{equation}
+再由此反算本周期可实现的加速度与速度：
+\begin{equation}
+ a_t=\mathrm{clip}(a_{t-1}+j_t\Delta t,-A_{\max},A_{\max}),
+\end{equation}
+\begin{equation}
+ v_t=\mathrm{clip}\left(v_{t-1}+a_{t-1}\Delta t+\frac{1}{2}j_t\Delta t^2,0,V_{\max}\right).
+\end{equation}
+角速度通道采用完全同构的约束流程。这样得到的 $(\omega_t,v_t)$ 才是真正送入环境执行的控制量。
+
+为观察约束层在不同几何场景下的作用，本文还定义KCM干预度：
+\begin{equation}
+\eta_t=\frac{|v_t-v_t^{int}|}{V_{\max}}+\frac{|\omega_t-\omega_t^{int}|}{\Omega_{\max}}.
+\end{equation}
+该量并不参与主优化目标，但可作为结果分析中衡量“策略输出与物理约束之间冲突程度”的辅助指标。
+
+\begin{algorithm}[htbp]
+\caption{KCM约束投影过程}
+\label{alg:kcm}
+\begin{algorithmic}[1]
+\Require 策略输出 $a_t^{\pi}=[u_{\theta,t},u_{v,t},u_{L,t}]$；上一时刻运动学状态 $(v_{t-1},a_{t-1},\omega_{t-1},\alpha_{t-1})$
+\Ensure 可执行动作 $(\omega_t,v_t)$ 及更新后的运动学状态
+\State 将归一化动作映射为物理意图 $(\omega_t^{int},v_t^{int},L_t)$
+\State 根据 $v_t^{int}$ 与 $v_{t-1}$ 计算意图加速度 $a_t^{int}$
+\State 根据 $a_t^{int}$ 与 $a_{t-1}$ 计算意图捷度 $j_t^{int}$
+\State 对 $j_t^{int}$ 进行裁剪，得到满足上限的 $j_t$
+\State 由 $j_t$ 反算线加速度 $a_t$，并执行加速度裁剪
+\State 由 $(v_{t-1},a_{t-1},j_t)$ 积分得到本周期线速度 $v_t$
+\State 对角速度通道重复步骤3--6，得到 $\omega_t$
+\State 返回 $(\omega_t,v_t)$ 及相应更新后的运动学状态
+\end{algorithmic}
+\end{algorithm}
+
+在这一设计下，策略给出转向、进给和前瞻长度三类控制意图，KCM负责保证其中运动学量可以执行；前瞻距离则通过影响局部参考方向和未来几何感知，进一步改变策略的转向时机和过弯方式。
+
+\subsection{拐角感知奖励设计}
+本文采用以进度为主的奖励结构。原因很简单：对CNC运动规划来说，策略首先要把路径走完，其次才是在约束范围内把局部行为做得更好。因此，即时奖励写为
+\begin{equation}
+ r_t=r_t^{prog}+r_t^{track}+r_t^{dir}+r_t^{smooth}+r_t^{time}+r_t^{aux}.
+\label{eq:reward_total}
+\end{equation}
+
+\paragraph{(1) 进度奖励} 进度奖励刻画本周期沿弧长方向的净推进量：
+\begin{equation}
+ r_t^{prog}=w_p\max(0,\rho_t-\rho_{t-1}),
+\end{equation}
+其中 $\rho_t$ 为整体路径进度。该项确保策略不会通过无效抖动来换取局部误差下降。
+
+\paragraph{(2) 轮廓误差项} 对轮廓误差，本文不再采用简单的全局线性惩罚，而是根据允差带和拐角模式构造分段惩罚函数：
+\begin{equation}
+\phi_e(e_t)=
+\begin{cases}
+0, & |e_{n,t}|\leq \delta_t,\\[4pt]
+\left(\dfrac{|e_{n,t}|-\delta_t}{\varepsilon/2}\right)^2, & |e_{n,t}|>\delta_t,
+\end{cases}
+\end{equation}
+并定义
+\begin{equation}
+ r_t^{track}=-w_e(c_t)\,\phi_e(e_t).
+\end{equation}
+其中 $\delta_t$ 为容许带内的松弛边界，$c_t\in[0,1]$ 为拐角显著性。该设计允许策略在带内保留必要的几何自由度，而不是被轮廓误差持续“压回中心线”。
+
+\paragraph{(3) 方向一致性项} 为减少拐角前后的姿态错位，设置
+\begin{equation}
+ r_t^{dir}=-w_{\tau}\,|\tau_t|,
+\end{equation}
+其中 $\tau_t$ 为当前航向与局部参考方向之间的夹角误差。该项在拐角临近时对策略的转向行为形成更直接约束。
+
+\paragraph{(4) 平滑性项} 平滑性惩罚主要约束拐角区域内的速度与转向突变：
+\begin{equation}
+ r_t^{smooth}=-w_s(c_t)\,\psi_t,
+\end{equation}
+其中 $\psi_t$ 可取线捷度、角加速度或角捷度的归一化量；$w_s(c_t)$ 则采用随拐角显著性动态变化的权重。一个常用实现为
+\begin{equation}
+ w_s(c_t)=w_s^0 c_t^{\gamma}, \qquad \gamma>1,
+\end{equation}
+即在直线段弱化平滑约束、在拐角段增强平滑约束。这样做不是为了把全程动态响应都压低，而是把平滑性约束更多放在真正需要的拐角区域。
+
+\paragraph{(5) 时间与辅助项} 为抑制无效拖延，本文保留固定时间惩罚 $r_t^{time}=-w_t$；此外，根据实现需要，$r_t^{aux}$ 中还可包含停滞惩罚、走廊越界惩罚、边界势垒惩罚以及完成奖励等项，用于稳定训练过程并提升任务完备性。
+
+总体上，式(\ref{eq:reward_total})遵循的是一个比较明确的顺序：\textbf{先鼓励前进，再约束偏离，最后在拐角处加强方向与平顺性。} 这一结构与CNC运动规划中效率、精度和平顺性的实际层级关系是一致的。
+
+\subsection{PPO训练实现}
+本文采用PPO算法训练策略网络。策略与价值函数共享前端特征提取结构，随后分化为策略头和价值头。考虑到本文状态向量已被压缩为相对紧凑的几何--运动学表示，因此网络结构无需过深，一般使用多层全连接网络即可满足训练需求。
+
+训练时，系统在仿真环境中按插补周期滚动生成轨迹，收集状态、动作、奖励和下一状态，并采用PPO剪切目标进行参数更新。为提高训练稳定性，本文实现中引入了如下工程策略：
+\begin{enumerate}[leftmargin=2em]
+    \item 使用归一化状态量与固定动作边界，减小不同物理量尺度差异对优化造成的影响；
+    \item 采用随机起点或不同起始相位以提升闭合路径训练中的分布覆盖能力；
+    \item 在评估阶段统一采用确定性策略，并记录轨迹、奖励分解、KCM干预度、拐角状态等过程量，以便后续绘制对比图和进行消融分析；
+    \item 将主方法、基线方法和消融配置统一封装在同一实验管线中，保证不同试验之间的口径一致性。
+\end{enumerate}
+
+这里需要说明的是，PPO本身不是本文的创新重点。本文更关心的是，在CNC短线段轨迹场景下，如何为PPO提供清晰的状态输入、可学习的前瞻调节能力、可执行的动作约束机制以及稳定的奖励引导。换句话说，PPO在这里主要承担优化器的角色。
+
+\section{实验设计与结果}
+\label{sec:experiments}
+
+本节给出与当前代码实现一致的实验组织方式，并围绕主方法、基线方法与消融方法建立统一的对比口径。实验重点考察该方法在不同路径几何下的任务完成性、几何精度、动态平顺性以及行为解释性。
+
+\subsection{实验平台与实现口径}
+实验平台基于Python与PyTorch实现，强化学习训练与评估均在统一的仿真环境中完成。环境侧显式维护路径几何、运动学状态、轮廓误差、KCM干预度以及拐角相位等信息；训练侧统一记录配置文件、随机种子、模型检查点、轨迹日志和统计摘要，以保证实验可复现。
+
+按照当前代码主线，实验至少应报告以下三类配置：
+\begin{enumerate}[leftmargin=2em]
+    \item \textbf{主方法}：紧凑状态表示 + 可学习前瞻距离 + KCM约束执行 + 拐角感知奖励；
+    \item \textbf{NNC基线}：保留端到端控制框架，但移除或弱化显式捷度约束；
+    \item \textbf{传统基线}：采用串行式平滑与速度规划流程，例如B样条/局部平滑配合S曲线进给规划。
+\end{enumerate}
+在统一RL框架内部比较场景下，第二、第三类基线也可分别替换为 \texttt{baseline\_nnc} 与 \texttt{baseline\_s\_curve} 的同口径实现。
+
+\subsection{评价指标}
+本文将评价指标分为“任务完成性、几何精度、动态平顺性、行为解释性”四个层次：
+\begin{enumerate}[leftmargin=2em]
+    \item \textbf{任务完成性}：成功率、最终进度、停滞率；
+    \item \textbf{几何精度}：最大轮廓误差、平均轮廓误差、法向误差分布；
+    \item \textbf{动态平顺性}：最大/平均线捷度、最大/平均角加速度、最大/平均角捷度；
+    \item \textbf{行为解释性}：拐角区最小速度、内切比例、KCM平均干预度、拐角相位内的速度衰减率等。
+\end{enumerate}
+采用这种分层口径，一方面可以把“是否完成任务”和“任务完成得如何”区分开，另一方面也能把主方法的优势落到更具体的局部行为指标上，而不只是看单一总回报。
+
+\subsection{测试路径与消融设置}
+为检验策略的普适性，实验采用以下三类路径：
+\begin{enumerate}[leftmargin=2em]
+    \item 平滑曲线型路径，用于考察连续转向场景下的速度保持能力；
+    \item 含明显尖角的折线路径，用于考察拐角段的减速、转向与重加速能力；
+    \item 由长短线段混合组成的复合路径，用于考察策略在不同几何尺度下的鲁棒性。
+\end{enumerate}
+
+消融实验围绕三条主线展开：
+\begin{enumerate}[leftmargin=2em]
+    \item \textbf{无KCM}：检验约束执行层对训练稳定性和动态可执行性的作用；
+    \item \textbf{固定前瞻/无可学习前瞻距离}：检验 agent 自适应调节前瞻长度对拐角前响应和分区行为形成的作用；
+    \item \textbf{无拐角感知平滑项}：检验动态奖励调度对平顺过弯行为的作用。
+\end{enumerate}
+
+\subsection{结果呈现模板}
+主结果表、消融表和可视化图统一整理如下。
+
+\begin{table}[H]
+\centering
+\caption{不同方法在典型路径上的总体性能对比（待用脚本结果回填）。}
+\label{tab:main_results}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+\textbf{路径} & \textbf{指标} & \textbf{本文方法} & \textbf{NNC基线} & \textbf{传统基线} & \textbf{说明}\\
+\midrule
+\multirow{5}{*}{路径A} 
+& 成功率 & 待填 & 待填 & 待填 & 20次或更多独立评估\\
+& 最大轮廓误差 & 待填 & 待填 & 待填 & 单位与容差口径保持一致\\
+& 平均轮廓误差 & 待填 & 待填 & 待填 &  \\
+& 峰值捷度/角加速度 & 待填 & 待填 & 待填 & 推荐同时给出均值与峰值\\
+& 拐角区最小速度 & 待填 & 待填 & 待填 & 反映过弯效率\\
+\midrule
+\multirow{5}{*}{路径B} 
+& 成功率 & 待填 & 待填 & 待填 &  \\
+& 最大轮廓误差 & 待填 & 待填 & 待填 &  \\
+& 平均轮廓误差 & 待填 & 待填 & 待填 &  \\
+& 峰值捷度/角加速度 & 待填 & 待填 & 待填 &  \\
+& 拐角区最小速度 & 待填 & 待填 & 待填 &  \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\begin{table}[H]
+\centering
+\caption{关键模块消融实验（待用脚本结果回填）。}
+\label{tab:ablation}
+\resizebox{0.96\textwidth}{!}{%
+\begin{tabular}{lcccc}
+\toprule
+\textbf{模型配置} & \textbf{成功率} & \textbf{最大轮廓误差} & \textbf{峰值捷度/角加速度} & \textbf{备注}\\
+\midrule
+完整模型 & 待填 & 待填 & 待填 & 主方法\\
+无KCM & 待填 & 待填 & 待填 & 检验执行层作用\\
+固定前瞻/无学习型前瞻 & 待填 & 待填 & 待填 & 检验前瞻自适应作用\\
+无拐角平滑项 & 待填 & 待填 & 待填 & 检验动态奖励调度作用\\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox{0.9\linewidth}{\centering \vspace{2.8cm} 图4占位符：不同方法在典型拐角上的轨迹叠加、速度曲线与动态曲线对比 \vspace{2.8cm}}}
+    \caption{主方法与基线方法在典型拐角场景下的轨迹与动态响应对比。}
+    \label{fig:qualitative_results}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \fbox{\parbox{0.9\linewidth}{\centering \vspace{2.8cm} 图5占位符：KCM干预度、拐角相位与误差/速度时序对齐图 \vspace{2.8cm}}}
+    \caption{KCM干预度与拐角行为解释图。}
+    \label{fig:kcm_analysis}
+\end{figure}
+
+结果分析可以依次围绕成功率与误差上界、拐角区动态指标与最小速度、以及KCM干预度与拐角相位可视化展开，用来同时说明方法的可靠性、效率和平顺性。
+
+\subsection{可复现实验配置说明}
+实验过程统一记录配置文件、随机种子、模型检查点、轨迹日志和统计摘要。对于同一路径集合上的主方法、基线方法与消融方法，可直接按照表\ref{tab:main_results}和表\ref{tab:ablation}的格式汇总结果，并结合图\ref{fig:qualitative_results}和图\ref{fig:kcm_analysis}开展定量与定性分析。
+
+\section{结论与讨论}
+\label{sec:conclusion}
+
+本文提出了一种融合捷度约束的端到端强化学习运动规划方法，用于解决CNC短线段路径在统一决策闭环下的高速跟踪与平滑过弯问题。该方法通过由核心运动学状态、拐角感知状态和预瞻几何观测构成的紧凑状态表示，使策略能够同时感知当前偏差与未来转向需求；通过将前瞻距离作为策略可学习控制量，使智能体在直线区与拐角区形成差异化的前视行为，从而实现提前转向与高效推进之间的动态协调；通过KCM在执行侧对策略动作进行在线约束投影，将速度、加速度与捷度可执行性前置到控制闭环内部；通过以进度为主导、以轮廓误差和平滑性为辅助的拐角感知奖励，引导策略在允差带内形成更合理的局部几何与动态行为。
+
+从方法上看，本文的重点不在于替换PPO本身，而在于把几何表征、前瞻调节、约束执行和奖励设计组织成一个统一的工业控制闭环。该框架保留了端到端学习对复杂局部行为的自适应能力，同时又通过显式约束执行机制保证了控制输出的物理可实施性。对制造场景来说，这种“可学习前瞻 + 受约束执行”的结构为复杂短线段轨迹的智能规划提供了一种更容易落地的实现方式。
+
+\bibliographystyle{elsarticle-num}
+\bibliography{references}
+
+\end{document}

@@ -308,72 +308,88 @@ KCM首先对意图捷度进行裁剪：
 \end{enumerate}
 
 \subsection{主结果}
-本小节用于汇总本文方法与各基线方法在典型路径集合上的总体表现。正式结果回填时，可直接按照表\ref{tab:main_results}的结构填写成功率、进度、轮廓误差以及动态平顺性指标，并在表后结合路径类别讨论方法的整体优势与局限。
+本小节汇总本文最终方法与基线策略在代表性路径上的总体表现。论文专用实验链路会将最新结果自动写入 `generated/main_results_table.tex`；若结果尚未完成，则保留占位结构，待明日统一回填。
 
-\begin{table}[H]
-\centering
-\caption{不同方法在典型路径上的总体性能对比。}
-\label{tab:main_results}
-\resizebox{\textwidth}{!}{
-\begin{tabular}{llcccc}
-\toprule
-\textbf{路径} & \textbf{指标} & \textbf{本文方法} & \textbf{固定前瞻基线} & \textbf{无KCM基线} & \textbf{传统基线}\\
-\midrule
-\multirow{5}{*}{square}
-& 成功率 & 待填 & 待填 & 待填 & 待填\\
-& 最终进度 & 待填 & 待填 & 待填 & 待填\\
-& 最大轮廓误差 & 待填 & 待填 & 待填 & 待填\\
-& 平均轮廓误差 & 待填 & 待填 & 待填 & 待填\\
-& 平均捷度/角加速度 & 待填 & 待填 & 待填 & 待填\\
-\midrule
-\multirow{5}{*}{butterfly}
-& 成功率 & 待填 & 待填 & 待填 & 待填\\
-& 最终进度 & 待填 & 待填 & 待填 & 待填\\
-& 最大轮廓误差 & 待填 & 待填 & 待填 & 待填\\
-& 平均轮廓误差 & 待填 & 待填 & 待填 & 待填\\
-& 平均捷度/角加速度 & 待填 & 待填 & 待填 & 待填\\
-\bottomrule
-\end{tabular}
+\IfFileExists{generated/main_results_table.tex}{
+    \input{generated/main_results_table.tex}
+}{
+    \begin{table}[H]
+    \centering
+    \caption{本文最终方法与基线策略在代表性路径上的对比结果。}
+    \label{tab:main_results}
+    \begin{tabular}{llcc}
+    \toprule
+    \textbf{路径} & \textbf{指标} & \textbf{本文最终方法} & \textbf{基线策略}\\
+    \midrule
+    \multirow{3}{*}{square} & 成功率 & 待填 & 待填\\
+    & 最终进度 & 待填 & 待填\\
+    & 最大轮廓误差 & 待填 & 待填\\
+    \midrule
+    \multirow{3}{*}{butterfly} & 成功率 & 待填 & 待填\\
+    & 最终进度 & 待填 & 待填\\
+    & 最大轮廓误差 & 待填 & 待填\\
+    \bottomrule
+    \end{tabular}
+    \end{table}
 }
-\end{table}
 
 \subsection{消融结果}
-本小节用于分析学习型前瞻距离、KCM以及拐角感知平滑项等关键模块的贡献。正式写作时，可围绕表\ref{tab:ablation}对完整模型与各消融模型进行对照，并说明不同模块对完成性、误差上界与平顺性的影响。
+本小节用于分析学习型前瞻距离、KCM以及拐角感知平滑项等关键模块的贡献。结构化消融结果将由论文专用实验自动写入 `generated/ablation_table.tex`，并与搜索过程解耦，避免正文被工程搜索日志干扰。
 
-\begin{table}[H]
-\centering
-\caption{关键模块消融实验结果。}
-\label{tab:ablation}
-\resizebox{0.96\textwidth}{!}{
-\begin{tabular}{lcccc}
-\toprule
-\textbf{模型配置} & \textbf{成功率} & \textbf{最大轮廓误差} & \textbf{平均捷度/角加速度} & \textbf{平均KCM干预度}\\
-\midrule
-完整模型 & 待填 & 待填 & 待填 & 待填\\
-固定前瞻/无学习型前瞻 & 待填 & 待填 & 待填 & 待填\\
-无KCM & 待填 & 待填 & 待填 & 待填\\
-无拐角感知平滑项 & 待填 & 待填 & 待填 & 待填\\
-\bottomrule
-\end{tabular}
+\IfFileExists{generated/ablation_table.tex}{
+    \input{generated/ablation_table.tex}
+}{
+    \begin{table}[H]
+    \centering
+    \caption{结构化消融结果汇总。}
+    \label{tab:ablation}
+    \begin{tabular}{lccccc}
+    \toprule
+    \textbf{模型配置} & \textbf{通过路径数} & \textbf{均值成功率} & \textbf{均值末进度} & \textbf{全局最大轮廓误差} & \textbf{平均KCM干预度}\\
+    \midrule
+    本文最终方法 & 待填 & 待填 & 待填 & 待填 & 待填\\
+    固定前瞻 & 待填 & 待填 & 待填 & 待填 & 待填\\
+    无KCM & 待填 & 待填 & 待填 & 待填 & 待填\\
+    无拐角感知平滑 & 待填 & 待填 & 待填 & 待填 & 待填\\
+    \bottomrule
+    \end{tabular}
+    \end{table}
 }
-\end{table}
 
 \subsection{典型案例与行为分析}
 本小节用于结合轨迹图与时序图，对策略在典型拐角和复合路径上的行为进行解释。正式结果回填时，可围绕图\ref{fig:qualitative_results}讨论轨迹形状、速度保持与误差分布，再结合图\ref{fig:kcm_analysis}分析前瞻距离变化、KCM干预度与拐角相位之间的关系。
 
-\begin{figure}[htbp]
-    \centering
-    \fbox{\parbox{0.9\linewidth}{\centering \vspace{2.8cm} 轨迹对比占位图：本文方法与基线方法在典型路径上的轨迹叠加、速度着色或局部放大图 \vspace{2.8cm}}}
-    \caption{主方法与基线方法在典型路径场景下的轨迹对比。}
-    \label{fig:qualitative_results}
-\end{figure}
+\IfFileExists{figures/generated/qualitative_results.png}{
+    \begin{figure}[htbp]
+        \centering
+        \includegraphics[width=0.96\linewidth]{generated/qualitative_results.png}
+        \caption{主方法与基线方法在代表性路径场景下的轨迹对比。}
+        \label{fig:qualitative_results}
+    \end{figure}
+}{
+    \begin{figure}[htbp]
+        \centering
+        \fbox{\parbox{0.9\linewidth}{\centering \vspace{2.8cm} 轨迹对比占位图：本文方法与基线方法在典型路径上的轨迹叠加、速度着色或局部放大图 \vspace{2.8cm}}}
+        \caption{主方法与基线方法在典型路径场景下的轨迹对比。}
+        \label{fig:qualitative_results}
+    \end{figure}
+}
 
-\begin{figure}[htbp]
-    \centering
-    \fbox{\parbox{0.9\linewidth}{\centering \vspace{2.8cm} 行为解释占位图：前瞻距离、KCM干预度、误差和速度在拐角区的时序对齐图 \vspace{2.8cm}}}
-    \caption{前瞻调节、KCM干预度与拐角行为解释图。}
-    \label{fig:kcm_analysis}
-\end{figure}
+\IfFileExists{figures/generated/kcm_analysis.png}{
+    \begin{figure}[htbp]
+        \centering
+        \includegraphics[width=0.96\linewidth]{generated/kcm_analysis.png}
+        \caption{前瞻调节、KCM干预度与拐角行为解释图。}
+        \label{fig:kcm_analysis}
+    \end{figure}
+}{
+    \begin{figure}[htbp]
+        \centering
+        \fbox{\parbox{0.9\linewidth}{\centering \vspace{2.8cm} 行为解释占位图：前瞻距离、KCM干预度、误差和速度在拐角区的时序对齐图 \vspace{2.8cm}}}
+        \caption{前瞻调节、KCM干预度与拐角行为解释图。}
+        \label{fig:kcm_analysis}
+    \end{figure}
+}
 
 \section{结论与讨论}
 \label{sec:conclusion}
@@ -419,6 +435,15 @@ KCM首先对意图捷度进行裁剪：
 
 \subsection{可复现实验配置说明}
 实验过程统一记录配置文件、随机种子、模型检查点、轨迹日志和统计摘要。对于同一路径集合上的主方法、基线方法与消融方法，可直接按照表\ref{tab:main_results}和表\ref{tab:ablation}的格式汇总结果，并结合图\ref{fig:qualitative_results}和图\ref{fig:kcm_analysis}开展定量与定性分析。
+
+\section{自动搜索与配置选择}
+\label{sec:appendix_autosearch}
+
+\IfFileExists{generated/appendix_autosearch.tex}{
+    \input{generated/appendix_autosearch.tex}
+}{
+    本附录用于记录自动搜索空间、两阶段筛选准则以及代表性晋升配置摘要。相关内容将由后台实验链路自动刷新，明日根据最终搜索结果统一回填。
+}
 
 \bibliographystyle{elsarticle-num}
 \bibliography{references}

@@ -2,6 +2,7 @@ runs/
 archives/
 workspace/
 long_runs/
+paper_runs/
 results.tsv
 *.log
 __pycache__/

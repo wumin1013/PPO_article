@@ -10,6 +10,7 @@ from prepare import (
     CURRENT_BEST_CONFIG,
     RUNS_DIR,
     ExperimentResult,
+    archive_promoted_result,
     append_result_row,
     build_selected_paths,
     build_train_config,
@@ -23,12 +24,15 @@ from prepare import (
     latest_checkpoint_from_state,
     load_checkpoint_episode,
     load_current_best_state,
+    read_results_history,
+    refresh_workspace_reports,
     load_yaml,
     mul_nested,
     next_experiment_id,
     now_text,
     promote_candidate,
     set_nested,
+    summarize_candidate_history,
     train_candidate,
     write_json,
     write_yaml,
@@ -107,12 +111,43 @@ def candidate_specs() -> list[CandidateSpec]:
     ]
 
 
-def choose_candidate(iteration: int, has_best: bool) -> CandidateSpec:
+def choose_candidate(iteration: int, has_best: bool, history: Sequence[dict]) -> CandidateSpec:
     specs = candidate_specs()
     if not has_best:
         return specs[0]
+
+    history_stats = summarize_candidate_history(history)
     pool = specs[1:] if len(specs) > 1 else specs
-    return pool[max(0, iteration - 1) % len(pool)]
+
+    untried = [spec for spec in pool if int(history_stats.get(spec.name, {}).get("tries", 0)) == 0]
+    if untried:
+        return untried[0]
+
+    order = {spec.name: idx for idx, spec in enumerate(specs)}
+
+    def _score_key(spec: CandidateSpec) -> tuple:
+        stat = history_stats.get(spec.name, {})
+        best_score = float(stat.get("best_score", float("-inf")))
+        if best_score == float("-inf"):
+            best_score = -1e18
+        return (
+            int(stat.get("recent_non_keep_streak", 0)),
+            -int(stat.get("keep_count", 0)),
+            -float(stat.get("ok_rate", 0.0)),
+            -best_score,
+            int(stat.get("tries", 0)),
+            order.get(spec.name, 999),
+        )
+
+    ranked = sorted(pool, key=_score_key)
+    top_n = max(1, min(3, len(ranked)))
+    chosen = ranked[int(iteration) % top_n]
+
+    if history:
+        last_candidate = str(history[-1].get("candidate", "")).strip()
+        if chosen.name == last_candidate and top_n > 1:
+            chosen = ranked[(int(iteration) + 1) % top_n]
+    return chosen
 
 
 def should_keep(result: ExperimentResult, best_state: dict, score_epsilon: float) -> bool:
@@ -312,6 +347,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     workspace = ensure_workspace()
+    history = read_results_history()
+    refresh_workspace_reports(history, load_current_best_state())
     if args.setup_only:
         print(f"[SETUP] workspace initialized: {workspace}")
         return 0
@@ -320,12 +357,12 @@ def main() -> int:
     path_specs = build_selected_paths(path_names)
 
     remaining = None if int(args.max_experiments) == 0 else int(args.max_experiments)
-    iteration = 0
+    iteration = len(history)
     while remaining is None or remaining != 0:
         best_state = load_current_best_state()
         has_best = bool(str(best_state.get("experiment_id", "")).strip())
         parent_config_path = CURRENT_BEST_CONFIG
-        candidate = choose_candidate(iteration, has_best=has_best)
+        candidate = choose_candidate(iteration, has_best=has_best, history=history)
 
         result = run_single_experiment(
             iteration=iteration,
@@ -338,8 +375,11 @@ def main() -> int:
         result.keep = should_keep(result, best_state, score_epsilon=float(args.score_epsilon))
         if result.keep:
             promote_candidate(Path(result.config_path), result)
+            archive_promoted_result(result)
 
         append_result_row(result)
+        history = read_results_history()
+        refresh_workspace_reports(history, load_current_best_state())
         print(
             "[ITER] id={id} candidate={candidate} status={status} keep={keep} score={score:.3f} pass={pass_count}".format(
                 id=result.experiment_id,

@@ -22,6 +22,10 @@ WORKSPACE_DIR = RESEARCH_ROOT / "workspace"
 RUNS_DIR = RESEARCH_ROOT / "runs"
 ARCHIVES_DIR = RESEARCH_ROOT / "archives"
 RESULTS_TSV = RESEARCH_ROOT / "results.tsv"
+LEADERBOARD_JSON = WORKSPACE_DIR / "leaderboard.json"
+LEADERBOARD_MD = WORKSPACE_DIR / "leaderboard.md"
+CURRENT_BEST_ARCHIVE = ARCHIVES_DIR / "current_best.json"
+PROMOTED_ARCHIVE_DIR = ARCHIVES_DIR / "promoted"
 
 MAIN_SCRIPT = PPO_ROOT / "main.py"
 ACCEPTANCE_SCRIPT = PPO_ROOT / "tools" / "acceptance_suite.py"
@@ -178,6 +182,161 @@ def append_result_row(result: ExperimentResult) -> None:
     with RESULTS_TSV.open("a", encoding="utf-8", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=RESULTS_HEADER, delimiter="\t")
         writer.writerow(asdict(result))
+
+
+def _parse_bool(raw: Any) -> bool:
+    text = str(raw).strip().lower()
+    return text in {"1", "true", "yes", "y", "on"}
+
+
+def _parse_int(raw: Any, default: int = 0) -> int:
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return int(default)
+
+
+def _parse_float(raw: Any, default: float = 0.0) -> float:
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return float(default)
+
+
+def read_results_history() -> list[dict]:
+    ensure_results_tsv()
+    rows: list[dict] = []
+    with RESULTS_TSV.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f, delimiter="\t")
+        for row in reader:
+            experiment_id = str(row.get("experiment_id", "")).strip()
+            if not experiment_id:
+                continue
+            rows.append(
+                {
+                    **row,
+                    "experiment_id": experiment_id,
+                    "candidate": str(row.get("candidate", "")).strip(),
+                    "parent_experiment_id": str(row.get("parent_experiment_id", "")).strip(),
+                    "status": str(row.get("status", "")).strip(),
+                    "keep": _parse_bool(row.get("keep", False)),
+                    "score": _parse_float(row.get("score", float("-inf")), float("-inf")),
+                    "pass_count": _parse_int(row.get("pass_count", 0), 0),
+                    "mean_success_rate": _parse_float(row.get("mean_success_rate", 0.0), 0.0),
+                    "mean_progress_final": _parse_float(row.get("mean_progress_final", 0.0), 0.0),
+                    "mean_stall_rate": _parse_float(row.get("mean_stall_rate", 1.0), 1.0),
+                    "mean_error_ratio": _parse_float(row.get("mean_error_ratio", 999.0), 999.0),
+                    "max_error_ratio": _parse_float(row.get("max_error_ratio", 999.0), 999.0),
+                }
+            )
+    return rows
+
+
+def summarize_candidate_history(history: Sequence[Mapping[str, Any]]) -> dict[str, dict]:
+    stats: dict[str, dict] = {}
+    for row in history:
+        candidate = str(row.get("candidate", "")).strip()
+        if not candidate:
+            continue
+        item = stats.setdefault(
+            candidate,
+            {
+                "tries": 0,
+                "ok_runs": 0,
+                "keep_count": 0,
+                "failed_runs": 0,
+                "best_score": float("-inf"),
+                "last_score": float("-inf"),
+                "last_status": "",
+                "last_experiment_id": "",
+                "last_finished_at": "",
+                "_rows": [],
+            },
+        )
+        item["tries"] += 1
+        if str(row.get("status", "")) == "ok":
+            item["ok_runs"] += 1
+        else:
+            item["failed_runs"] += 1
+        if bool(row.get("keep", False)):
+            item["keep_count"] += 1
+
+        score = _parse_float(row.get("score", float("-inf")), float("-inf"))
+        item["best_score"] = max(float(item["best_score"]), score)
+        item["last_score"] = score
+        item["last_status"] = str(row.get("status", ""))
+        item["last_experiment_id"] = str(row.get("experiment_id", ""))
+        item["last_finished_at"] = str(row.get("finished_at", ""))
+        item["_rows"].append(dict(row))
+
+    for candidate, item in stats.items():
+        rows = list(item.pop("_rows", []))
+        recent_non_keep_streak = 0
+        for row in reversed(rows):
+            if bool(row.get("keep", False)):
+                break
+            recent_non_keep_streak += 1
+        tries = max(1, int(item["tries"]))
+        item["candidate"] = candidate
+        item["keep_rate"] = float(item["keep_count"]) / tries
+        item["ok_rate"] = float(item["ok_runs"]) / tries
+        item["recent_non_keep_streak"] = int(recent_non_keep_streak)
+    return stats
+
+
+def refresh_workspace_reports(history: Sequence[Mapping[str, Any]], best_state: Mapping[str, Any]) -> None:
+    WORKSPACE_DIR.mkdir(parents=True, exist_ok=True)
+    ranked = sorted(
+        history,
+        key=lambda row: (
+            0 if str(row.get("status", "")) == "ok" else 1,
+            -float(row.get("score", float("-inf"))),
+            str(row.get("finished_at", "")),
+        ),
+    )
+
+    payload = {
+        "updated_at": now_text(),
+        "current_best": dict(best_state),
+        "candidate_stats": summarize_candidate_history(history),
+        "results": [dict(row) for row in ranked],
+    }
+    write_json(LEADERBOARD_JSON, payload)
+
+    lines = ["# trajectory_autoresearch leaderboard", ""]
+    if best_state:
+        lines.append(
+            "Current best: `{experiment_id}` | candidate=`{candidate}` | score=`{score:.3f}` | pass=`{pass_count}`".format(
+                experiment_id=str(best_state.get("experiment_id", "")),
+                candidate=str(best_state.get("candidate", "")),
+                score=float(best_state.get("score", float("-inf"))),
+                pass_count=int(best_state.get("pass_count", 0)),
+            )
+        )
+        lines.append("")
+    lines.extend(
+        [
+            "| rank | experiment | candidate | status | keep | score | pass | success | progress | stall |",
+            "|---|---|---|---|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    for idx, row in enumerate(ranked[:50], start=1):
+        lines.append(
+            "| {rank} | {experiment} | {candidate} | {status} | {keep} | {score:.3f} | {pass_count} | "
+            "{success:.4f} | {progress:.4f} | {stall:.4f} |".format(
+                rank=idx,
+                experiment=str(row.get("experiment_id", "")),
+                candidate=str(row.get("candidate", "")),
+                status=str(row.get("status", "")),
+                keep="Y" if bool(row.get("keep", False)) else "N",
+                score=float(row.get("score", float("-inf"))),
+                pass_count=int(row.get("pass_count", 0)),
+                success=float(row.get("mean_success_rate", 0.0)),
+                progress=float(row.get("mean_progress_final", 0.0)),
+                stall=float(row.get("mean_stall_rate", 1.0)),
+            )
+        )
+    LEADERBOARD_MD.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def ensure_workspace(base_config_source: Path = DEFAULT_BASE_CONFIG_SOURCE) -> dict:
@@ -615,3 +774,30 @@ def copy_tree_if_exists(source: Path, target: Path) -> None:
     if target.exists():
         shutil.rmtree(target)
     shutil.copytree(source, target)
+
+
+def copy_file_if_exists(source: Path, target: Path) -> None:
+    if not source.exists():
+        return
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+
+
+def archive_promoted_result(result: ExperimentResult) -> Path:
+    archive_dir = PROMOTED_ARCHIVE_DIR / result.experiment_id
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    run_dir = Path(result.run_dir)
+    copy_file_if_exists(Path(result.config_path), archive_dir / "config.yaml")
+    copy_file_if_exists(run_dir / "train.log", archive_dir / "train.log")
+    copy_file_if_exists(run_dir / "experiment_summary.json", archive_dir / "experiment_summary.json")
+    copy_tree_if_exists(run_dir / "evaluation", archive_dir / "evaluation")
+    copy_tree_if_exists(run_dir / "best_rollouts", archive_dir / "best_rollouts")
+    copy_tree_if_exists(run_dir / "checkpoints", archive_dir / "checkpoints")
+
+    payload = asdict(result)
+    payload["archived_at"] = now_text()
+    payload["archive_dir"] = str(archive_dir)
+    write_json(archive_dir / "result.json", payload)
+    write_json(CURRENT_BEST_ARCHIVE, payload)
+    return archive_dir

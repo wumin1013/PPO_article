@@ -5,7 +5,7 @@
 当前版本保留三层职责：
 
 - `prepare.py`：固定工具层。负责工作区初始化、训练调用、统一评测、结果聚合、轨迹导出与结果表维护。
-- `train.py`：自治循环入口。这里定义候选策略、保留/丢弃规则，以及无限实验循环。
+- `train.py`：自治循环入口。这里定义候选策略、基于历史结果的候选选择、保留/丢弃规则，以及无限实验循环。
 - `program.md`：给代理的运行说明，约束自治研究流程。
 
 与原版 `autoresearch` 的对应关系：
@@ -29,6 +29,7 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
 
 - `trajectory_autoresearch\workspace\base_config.yaml`
 - `trajectory_autoresearch\workspace\current_best.yaml`
+- `trajectory_autoresearch\workspace\leaderboard.md`
 - `trajectory_autoresearch\results.tsv`
 
 ## 跑一轮实验
@@ -48,12 +49,13 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
 - `--max-experiments 0` 表示无限循环，直到手工中断
 - 每轮实验都会：
   1. 以当前最优配置为父代
-  2. 生成一个候选配置
+  2. 基于历史结果选择下一个候选方向并生成配置
   3. 调用 `PPO_project/main.py` 训练
   4. 调用 `acceptance_suite.py` 做多路径统一评测
   5. 调用 `phase32_export_best_trajectories.py` 导出每条路径的最佳轨迹图与 CSV
   6. 写入 `results.tsv`
-  7. 若得分提升，则晋升为新的当前最优
+  7. 刷新 `workspace/leaderboard.{md,json}`
+  8. 若得分提升，则晋升为新的当前最优，并封存到 `archives/promoted/<experiment_id>/`
 
 ## 当前阶段说明
 

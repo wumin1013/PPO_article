@@ -69,22 +69,29 @@ function Write-AmpSnapshot {
         [Parameter(Mandatory = $true)][string]$LocalCondaEnv,
         [Parameter(Mandatory = $true)][string]$WorkingDirectory
     )
-    $code = @"
+    $snapshotScriptPath = "$Path.snapshot.py"
+    $stdoutPath = "$Path.stdout.tmp"
+    $stderrPath = "$Path.stderr.tmp"
+    $process = $null
+    $workingDirectoryLiteral = $WorkingDirectory.Replace("\", "\\")
+    try {
+        @"
+import sys
+sys.path.insert(0, r"$workingDirectoryLiteral")
+
 from train import candidate_specs, compute_candidate_amplitude
 from prepare import read_results_history
+
 history = read_results_history()
 for spec in candidate_specs():
     if spec.name == "baseline":
         continue
     amp = compute_candidate_amplitude(spec, history, $Lookback)
     print(f"{spec.name}\t{amp:.3f}")
-"@
-    $stdoutPath = "$Path.stdout.tmp"
-    $stderrPath = "$Path.stderr.tmp"
-    $process = $null
-    try {
+"@ | Out-File -FilePath $snapshotScriptPath -Encoding utf8
+
         $process = Start-Process -FilePath $LocalCondaExe `
-            -ArgumentList @("run", "-n", $LocalCondaEnv, "python", "-c", $code) `
+            -ArgumentList @("run", "-n", $LocalCondaEnv, "python", $snapshotScriptPath) `
             -WorkingDirectory $WorkingDirectory `
             -RedirectStandardOutput $stdoutPath `
             -RedirectStandardError $stderrPath `
@@ -114,7 +121,7 @@ for spec in candidate_specs():
         $_ | Out-File -FilePath $Path -Encoding utf8
     }
     finally {
-        Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $snapshotScriptPath, $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
     }
 }
 

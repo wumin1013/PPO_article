@@ -79,16 +79,42 @@ for spec in candidate_specs():
     amp = compute_candidate_amplitude(spec, history, $Lookback)
     print(f"{spec.name}\t{amp:.3f}")
 "@
-    Push-Location $WorkingDirectory
+    $stdoutPath = "$Path.stdout.tmp"
+    $stderrPath = "$Path.stderr.tmp"
+    $process = $null
     try {
-        $output = & $LocalCondaExe run -n $LocalCondaEnv python -c $code 2>&1
-        $output | Out-File -FilePath $Path -Encoding utf8
+        $process = Start-Process -FilePath $LocalCondaExe `
+            -ArgumentList @("run", "-n", $LocalCondaEnv, "python", "-c", $code) `
+            -WorkingDirectory $WorkingDirectory `
+            -RedirectStandardOutput $stdoutPath `
+            -RedirectStandardError $stderrPath `
+            -PassThru
+        if (-not $process.WaitForExit(60000)) {
+            & taskkill /PID $process.Id /T /F | Out-Null
+            "amp snapshot timed out after 60 seconds" | Out-File -FilePath $Path -Encoding utf8
+            return
+        }
+
+        $lines = @()
+        if (Test-Path -LiteralPath $stdoutPath) {
+            $lines += Get-Content -LiteralPath $stdoutPath
+        }
+        if (Test-Path -LiteralPath $stderrPath) {
+            $stderrLines = Get-Content -LiteralPath $stderrPath
+            if ($stderrLines) {
+                $lines += $stderrLines
+            }
+        }
+        if (-not $lines) {
+            $lines = @("amp snapshot completed with no output")
+        }
+        $lines | Out-File -FilePath $Path -Encoding utf8
     }
     catch {
         $_ | Out-File -FilePath $Path -Encoding utf8
     }
     finally {
-        Pop-Location
+        Remove-Item -LiteralPath $stdoutPath, $stderrPath -ErrorAction SilentlyContinue
     }
 }
 
@@ -103,11 +129,6 @@ $leaderboardJsonPath = Join-Path $scriptRoot "workspace\leaderboard.json"
 $resultsPath = Join-Path $scriptRoot "results.tsv"
 
 $resultsLineCountBefore = Get-ResultsLineCount -Path $resultsPath
-Copy-IfExists -SourcePath $currentBestPath -TargetPath (Join-Path $runDir "current_best_before.json")
-Copy-IfExists -SourcePath $leaderboardMarkdownPath -TargetPath (Join-Path $runDir "leaderboard_before.md")
-Copy-IfExists -SourcePath $leaderboardJsonPath -TargetPath (Join-Path $runDir "leaderboard_before.json")
-Write-AmpSnapshot -Path (Join-Path $runDir "amp_before.tsv") -Lookback $AmpLookback -LocalCondaExe $CondaExe -LocalCondaEnv $CondaEnv -WorkingDirectory $scriptRoot
-
 $startTime = Get-Date
 $deadline = $startTime.AddHours($Hours)
 $branch = (& git -C $repoRoot branch --show-current).Trim()
@@ -142,7 +163,7 @@ if ($DeterministicEval.IsPresent) {
 
 $status = [ordered]@{
     run_id = $runId
-    status = "launching"
+    status = "initializing"
     branch = $branch
     git_head = $gitHead
     start_time = $startTime.ToString("yyyy-MM-dd HH:mm:ss")
@@ -157,6 +178,11 @@ $status = [ordered]@{
     current_best_before = Read-JsonObject -Path $currentBestPath
 }
 Write-JsonFile -Path $statusPath -Value $status
+
+Copy-IfExists -SourcePath $currentBestPath -TargetPath (Join-Path $runDir "current_best_before.json")
+Copy-IfExists -SourcePath $leaderboardMarkdownPath -TargetPath (Join-Path $runDir "leaderboard_before.md")
+Copy-IfExists -SourcePath $leaderboardJsonPath -TargetPath (Join-Path $runDir "leaderboard_before.json")
+Write-AmpSnapshot -Path (Join-Path $runDir "amp_before.tsv") -Lookback $AmpLookback -LocalCondaExe $CondaExe -LocalCondaEnv $CondaEnv -WorkingDirectory $scriptRoot
 
 $process = Start-Process -FilePath $CondaExe `
     -ArgumentList $trainArgs `

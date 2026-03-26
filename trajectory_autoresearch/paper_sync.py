@@ -276,7 +276,7 @@ def _select_main_full_variant(suite_variants: dict[str, dict], current_best_vari
 
 
 def _build_main_results_tex(full_method: dict, baseline: dict) -> str:
-    targets = [("square", "square"), ("butterfly", "butterfly")]
+    targets = [("square", "square"), ("circle", "circle"), ("butterfly", "butterfly")]
     lines = [
         r"\begin{table}[H]",
         r"\centering",
@@ -466,7 +466,7 @@ def _read_rollout_png(rollouts_summary: dict, path_name: str) -> Path | None:
 
 
 def _choose_qualitative_paths(full_method: dict, baseline: dict) -> list[str]:
-    preferred = ["square", "butterfly", "circle", "s_shape", "trapezoid"]
+    preferred = ["square", "circle", "butterfly"]
     full_paths = full_method.get("rollouts_summary", {}).get("paths", {})
     baseline_paths = baseline.get("rollouts_summary", {}).get("paths", {})
 
@@ -477,11 +477,9 @@ def _choose_qualitative_paths(full_method: dict, baseline: dict) -> list[str]:
         union_names.update(str(name) for name in baseline_paths.keys())
 
     selected = [name for name in preferred if name in union_names]
-    if len(selected) >= 2:
-        return selected[:2]
     if selected:
         return selected
-    return preferred[:2]
+    return preferred
 
 
 def _build_qualitative_figure(full_method: dict, baseline: dict) -> None:

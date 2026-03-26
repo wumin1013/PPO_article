@@ -124,7 +124,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-episodes", type=int, default=3, help="每条路径的评测 episode 数")
     parser.add_argument("--eval-seed", type=int, default=43, help="统一评测随机种子")
     parser.add_argument("--seed", type=int, default=42, help="训练配置中写入的种子")
-    parser.add_argument("--paths", type=str, default="square,s_shape,butterfly,trapezoid,circle", help="评测路径列表")
+    parser.add_argument("--paths", type=str, default="square,circle,butterfly", help="评测路径列表")
     parser.add_argument("--conda-env", type=str, default="PPO", help="使用的 conda 环境")
     parser.add_argument("--deterministic-eval", action="store_true", help="评测时使用确定性策略")
     parser.add_argument("--sync-after-each", action="store_true", help="每完成一个变体即刷新论文产物")

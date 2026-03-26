@@ -45,6 +45,10 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
 ## Objective
 
 目标不是单路径刷分，而是在统一路径集合上取得更高的聚合得分，同时保留每轮的最佳轨迹图和 CSV。
+当前实验是两阶段的：
+
+- `stage1`：粗筛，低成本评测
+- `stage2`：只对 top 候选做全量复评估
 
 当前聚合评测包含：
 
@@ -63,7 +67,7 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
 每轮实验遵循以下流程：
 
 1. 读取当前最优状态与 `results.tsv`
-2. 基于当前最优配置提出一个新候选
+2. 基于当前最优配置提出一批候选，并根据历史结果自动调节每个候选的调参幅度
 3. 运行：
 
 ```powershell
@@ -72,7 +76,8 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
 
 4. 训练完成后检查：
    - `trajectory_autoresearch/runs/<experiment_id>/train.log`
-   - `trajectory_autoresearch/runs/<experiment_id>/evaluation/summary.json`
+   - `trajectory_autoresearch/runs/<experiment_id>/evaluation/stage1/summary.json`
+   - `trajectory_autoresearch/runs/<experiment_id>/evaluation/stage2/summary.json`
    - `trajectory_autoresearch/runs/<experiment_id>/best_rollouts/summary.json`
 5. 将结果写入 `results.tsv`
 6. 如果得分变好，则晋升为新的当前最优；否则丢弃并继续下一轮

@@ -22,7 +22,7 @@ for p in (PROJECT_ROOT, SRC_DIR):
         sys.path.insert(0, str(p))
 
 # 导入原有训练代码中的核心组件
-from src.environment import Env
+from src.environment import Env, create_env_compatible
 from src.utils.path_generator import get_path_by_name
 from src.algorithms.baselines import SCurvePlanner
 
@@ -133,7 +133,7 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
     if config.disable_kcm:
         constraints = _inflate_constraints(constraints, factor=200.0)
 
-    env = Env(
+    env = create_env_compatible(
         device=torch.device("cpu"),
         epsilon=config.epsilon,
         interpolation_period=dt,

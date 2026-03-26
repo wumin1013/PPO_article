@@ -27,7 +27,7 @@ os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
 
 from src.algorithms.baselines import NNCAgent, create_baseline_agent
 from src.algorithms.ppo import PPOContinuous
-from src.environment import Env
+from src.environment import Env, create_env_compatible
 from src.utils.checkpoint import CheckpointManager, load_for_resume
 from src.utils.logger import CSVLogger, DataLogger, ExperimentManager
 from src.utils.metrics import PaperMetrics
@@ -74,6 +74,7 @@ def apply_cli_overrides(config: dict, overrides: Optional[argparse.Namespace]) -
     experiment_cfg = config.setdefault("experiment", {})
     reward_cfg = config.setdefault("reward_weights", {})
     kcm_cfg = config.setdefault("kinematic_constraints", {})
+    training_cfg = config.setdefault("training", {})
 
     if getattr(overrides, "experiment_name", None):
         experiment_cfg["name"] = overrides.experiment_name
@@ -103,6 +104,10 @@ def apply_cli_overrides(config: dict, overrides: Optional[argparse.Namespace]) -
         if cli_value is not None:
             kcm_cfg[cfg_key] = float(cli_value)
             print(f"[CLI Override] {cfg_key} <- {cli_value}")
+
+    if getattr(overrides, "time_budget_seconds", None) is not None:
+        training_cfg["time_budget_seconds"] = float(overrides.time_budget_seconds)
+        print(f"[CLI Override] training.time_budget_seconds <- {overrides.time_budget_seconds}")
 
 
 def _set_global_seed(seed: int) -> None:
@@ -417,7 +422,7 @@ def _create_env(
 ) -> Env:
     """统一环境构建，便于单路径/多路径复用。"""
     use_obs_normalizer = bool(training_config.get("use_obs_normalizer", False))
-    return Env(
+    return create_env_compatible(
         device=device,
         epsilon=env_config["epsilon"],
         interpolation_period=env_config["interpolation_period"],
@@ -644,6 +649,18 @@ def train(
 
     smoothed_rewards: list[float] = []
     wall_time_start = time.perf_counter()
+    time_budget_seconds_raw = training_config.get("time_budget_seconds")
+    time_budget_seconds: float | None = None
+    if time_budget_seconds_raw is not None:
+        try:
+            parsed_budget = float(time_budget_seconds_raw)
+            if parsed_budget > 0.0:
+                time_budget_seconds = parsed_budget
+        except (TypeError, ValueError):
+            print(f"警告: 无法解析 training.time_budget_seconds={time_budget_seconds_raw!r}，将忽略该设置。")
+    time_budget_deadline = (
+        wall_time_start + time_budget_seconds if time_budget_seconds is not None else None
+    )
     start_episode = 0
     global_step = 0
     last_checkpoint_step = 0
@@ -670,7 +687,9 @@ def train(
             print(f"警告: 未找到续训文件 {resume_file}，将从头开始。")
 
     explicit_experiment_dir = getattr(cli_overrides, "experiment_dir", None) or experiment_dir
-    target_experiment_dir = resume_experiment_dir or explicit_experiment_dir
+    # 显式 experiment_dir 应优先于 resume 内部记录的旧目录，
+    # 便于从同一 checkpoint 分叉出多个独立实验。
+    target_experiment_dir = explicit_experiment_dir or resume_experiment_dir
 
     path_config_for_log = {"type": "multi_path"} if curriculum_enabled else path_config
     manager, log_tag = _init_experiment(
@@ -691,13 +710,20 @@ def train(
     print(
         f"\n开始训练 共{num_episodes}个回合 "
         f"(random_start_ratio={random_start_ratio:.2f}, "
-        f"best_snapshot_require_deterministic_start={best_snapshot_require_deterministic_start})\n"
+        f"best_snapshot_require_deterministic_start={best_snapshot_require_deterministic_start}, "
+        f"time_budget_seconds={time_budget_seconds if time_budget_seconds is not None else 'disabled'})\n"
     )
 
     current_path_idx = int(initial_path_idx)
     current_path_name = str(initial_path_name)
+    stop_due_to_time_budget = False
     with tqdm(total=num_episodes, initial=start_episode, desc="训练进度") as pbar:
         for episode in range(start_episode, num_episodes):
+            if time_budget_deadline is not None and time.perf_counter() >= time_budget_deadline:
+                stop_due_to_time_budget = True
+                print(f"[TIME BUDGET] 到达时间预算上限，在 episode {episode + 1} 开始前停止训练。")
+                break
+
             if curriculum_enabled:
                 episode_path_cfg, episode_path_idx, episode_path_name = _select_curriculum_path(
                     curriculum_paths,
@@ -851,6 +877,14 @@ def train(
                 episode_reward += reward
                 state = next_state
 
+                if time_budget_deadline is not None and time.perf_counter() >= time_budget_deadline:
+                    stop_due_to_time_budget = True
+                    print(
+                        f"[TIME BUDGET] 到达时间预算上限，"
+                        f"在 episode {episode + 1} step={info.get('step', global_step)} 后结束当前实验。"
+                    )
+                    done = True
+
             final_progress = info.get("progress", 0.0)
 
             if hasattr(agent, "update") and len(transition_dict["states"]) > 10:
@@ -959,6 +993,9 @@ def train(
                 postfix_row["Path"] = current_path_name
             pbar.set_postfix(postfix_row)
             pbar.update(1)
+
+            if stop_due_to_time_budget:
+                break
 
     print("\n" + "=" * 80)
     print(f"训练完成！实验目录 {manager.experiment_dir}")
@@ -1228,6 +1265,7 @@ if __name__ == "__main__":
     parser.add_argument("--traj_write_interval_steps", type=int, default=None, help="latest_trajectory.csv 覆盖写入间隔 (steps)")
     parser.add_argument("--traj_write_max_points", type=int, default=None, help="latest_trajectory.csv 最多写入点数 (保留末尾)")
     parser.add_argument("--step_log_interval_steps", type=int, default=None, help="step_metrics 写入间隔 (steps, 0=关闭)")
+    parser.add_argument("--time_budget_seconds", type=float, default=None, help="训练墙钟时间预算（秒），到时后安全收尾并停止")
 
     args = parser.parse_args()
 

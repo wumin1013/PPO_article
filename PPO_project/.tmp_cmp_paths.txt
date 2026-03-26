@@ -1,2 +1,0 @@
-saved_models/phase31_cmp/20260227_171135_A
-saved_models/phase31_cmp/20260227_171135_D

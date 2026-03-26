@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from src.environment import Env
+from src.environment import Env, create_env_compatible
 from src.utils.path_generator import get_path_by_name
 
 
@@ -50,7 +50,7 @@ def _build_env(config: dict, *, device: torch.device) -> Env:
     training_cfg = config.get("training", {}) if isinstance(config.get("training", {}), dict) else {}
     use_obs_normalizer = bool(training_cfg.get("use_obs_normalizer", False))
 
-    return Env(
+    return create_env_compatible(
         device=device,
         epsilon=env_cfg["epsilon"],
         interpolation_period=env_cfg["interpolation_period"],

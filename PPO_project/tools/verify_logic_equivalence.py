@@ -11,7 +11,7 @@ from pathlib import Path
 # Add src to path
 sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 
-from src.environment import Env
+from src.environment import Env, create_env_compatible
 from src.utils.path_generator import get_path_by_name
 import torch
 
@@ -33,7 +33,7 @@ def build_env_from_config(cfg):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     
-    env = Env(
+    env = create_env_compatible(
         device=device,
         epsilon=env_cfg["epsilon"],
         interpolation_period=env_cfg["interpolation_period"],

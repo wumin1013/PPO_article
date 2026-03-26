@@ -24,7 +24,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.algorithms.ppo import PPOContinuous
-from src.environment import Env
+from src.environment import Env, create_env_compatible
 from src.utils.geometry import generate_offset_paths
 from src.utils.path_generator import get_path_by_name
 
@@ -56,7 +56,7 @@ def _make_env(config: dict, path_cfg: Dict[str, Any], device: torch.device) -> E
     training_cfg = config.get("training", {}) if isinstance(config.get("training", {}), dict) else {}
     use_obs_normalizer = bool(training_cfg.get("use_obs_normalizer", False))
     path_points = _build_path(path_cfg)
-    return Env(
+    return create_env_compatible(
         device=device,
         epsilon=env_cfg["epsilon"],
         interpolation_period=env_cfg["interpolation_period"],

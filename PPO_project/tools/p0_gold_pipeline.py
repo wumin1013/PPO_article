@@ -31,7 +31,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.algorithms.ppo import PPOContinuous
-from src.environment import Env
+from src.environment import Env, create_env_compatible
 from src.utils.logger import DataLogger
 
 
@@ -106,7 +106,7 @@ def _build_env(config: dict, *, device: torch.device) -> Env:
     training_cfg = config.get("training", {}) if isinstance(config.get("training", {}), dict) else {}
     use_obs_normalizer = bool(training_cfg.get("use_obs_normalizer", False))
 
-    env = Env(
+    env = create_env_compatible(
         device=device,
         epsilon=env_cfg["epsilon"],
         interpolation_period=env_cfg["interpolation_period"],

@@ -1,0 +1,185 @@
+seed: 42
+
+environment:
+  epsilon: 2.5
+  interpolation_period: 0.001
+  max_steps: 4000
+  lookahead_points: 8
+  lookahead_obs_enabled: true
+  lookahead_obs_scales: [0.5, 1.0, 2.0]
+
+kinematic_constraints:
+  MAX_VEL: 100.0
+  MAX_ACC: 2000.0
+  MAX_JERK: 20000.0
+  MAX_ANG_VEL: 6.283185307179586
+  MAX_ANG_ACC: 31.41592653589793
+  MAX_ANG_JERK: 314.1592653589793
+
+reward_weights:
+  w_s: 12.0
+  w_e: 8.0
+  w_tau: 3.0
+  w_smooth: 0.08
+  minimal_mode: false
+  control_authority:
+    mode: blend
+    tangent_blend: 0.08
+    max_correction_deg: 50.0
+    theta_ref_smooth_alpha: 0.35
+    progress_seg_hysteresis_ratio: 1.25
+    blend_schedule: cosine
+    warmup_episodes: 40
+    warmup_blend: 0.20
+  lookahead:
+    enabled: true
+    distance: 2.5
+    ref_in_control: true
+  lookahead_control:
+    enabled: true
+    policy_action: true
+    direction_mode: los
+    region_source: turn
+    min_dist: 0.8
+    max_dist: 4.0
+    straight_dist: 1.2
+    corner_dist: 2.4
+    mix_gain: 0.6
+    action_default: 0.5
+    cornerness_low_deg: 5.0
+    cornerness_high_deg: 30.0
+  lookahead_reward:
+    enabled: true
+    straight_target: 0.20
+    corner_target: 0.80
+    w_straight: 0.6
+    w_corner: 1.2
+    power: 2.0
+  cornerness:
+    enabled: true
+    theta0_deg: 30.0
+    ema_tau_steps: 12
+    power: 2.0
+    w_track0: 5.0
+    w_track_min: 1.0
+    w_smooth0: 3.0
+    smooth_source: domega
+    smooth_power: 2.0
+    keep_legacy_smooth: false
+  tube:
+    enabled: false
+    ratio: 0.5
+  corridor:
+    enabled: true
+    theta_enter_deg: 10.0
+    theta_exit_deg: 8.0
+    dist_enter: 6.0
+    dist_exit: 7.0
+    margin_ratio: 0.10
+    heading_weight: 2.0
+    outside_penalty_weight: 0.0
+    safe_margin_ratio: 0.20
+    barrier_scale_ratio: 0.05
+    barrier_weight: 0.0
+    exit_center_ramp_steps: 60
+    center_weight: 0.0
+    center_power: 1.0
+    dir_pref_weight: 0.0
+    dir_pref_beta: 2.0
+  p4:
+    time_penalty: -0.01
+    v_max: 1.0
+    v_min: 0.35
+    theta_max_deg: 90.0
+    d_scale: null
+    speed_weight: 6.0
+    exit_boost_enabled: true
+    exit_window_sec: 0.25
+    exit_progress_mult: 1.35
+    exit_speed_target_min: 0.95
+    stall_enabled: true
+    stall_steps: 300
+    stall_progress_eps: 1e-4
+    stall_v_eps: 0.05
+    stall_penalty: -8.0
+    speed_cap_enabled: true
+    speed_cap_eps: 1e-12
+    speed_cap_k: 4
+    speed_cap_s_min: 1.0
+    speed_cap_s_max: 30.0
+    p7_2_k: 0.01
+    speed_cap_preview_points: 8
+    speed_cap_use_wdot: true
+    speed_cap_use_wddot: true
+    debug: false
+  p6_1:
+    du_enabled: true
+    w_du: 0.01
+    du_mode: l1
+    v_target_smoother_enabled: true
+    v_target_mode: accel
+    v_target_tau: 0.10
+    a_ref_max_ratio: 0.5
+    j_ref_enabled: true
+    j_ref_max_ratio: 0.5
+  p7_3:
+    stall_cap_low: 0.25
+    kappa_smoothing_enabled: true
+    kappa_smoothing_beta: 0.25
+    kappa_dkappa_limit: null
+    trace_ring_size: 200
+  p8:
+    use_corner_exit_hysteresis: true
+    corner_on_dist_scale: 2.0
+    corner_off_dist_scale: 3.0
+    corner_exit_hold_steps: 2
+    corner_exit_e_release_ratio: 0.55
+    corner_exit_psi_release_deg: 20.0
+    ang_cap_min_ratio: 0.10
+    use_vcap_rate_limit: true
+    vcap_rate_up: 0.01
+    vcap_rate_down: 0.01
+    use_recovery_cap: false
+
+ppo:
+  actor_lr: 3.0e-04
+  critic_lr: 0.0001
+  hidden_dim: 256
+  gamma: 0.99
+  lmbda: 0.95
+  epochs: 6
+  eps: 0.1
+  batch_size: null
+  ent_coef: 0.01
+
+training:
+  use_obs_normalizer: false
+  num_episodes: 30
+  random_start_ratio: 0.0
+  best_trajectory_require_deterministic_start: true
+  smoothing_factor: 0.9
+  save_interval: 30
+  log_interval: 10
+  checkpoint_interval_steps: 2048
+  step_log_interval_steps: 1
+  traj_write_interval_steps: 50
+  traj_write_max_points: 2000
+  enable_latest_trajectory: false
+  enable_best_trajectory_snapshot: false
+  enable_final_visualization: false
+
+path:
+  type: square
+  closed: true
+  scale: 20.0
+  num_points: 200
+  square:
+    start_offset_ratio: 0.5
+
+experiment:
+  mode: train
+  category: square_compare
+  name: square_compare_3d_short
+  baseline_type: null
+  enable_kcm: true
+  model_path: null

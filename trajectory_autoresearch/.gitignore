@@ -1,6 +1,7 @@
 runs/
 archives/
 workspace/
+long_runs/
 results.tsv
 *.log
 __pycache__/

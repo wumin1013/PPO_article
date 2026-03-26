@@ -49,10 +49,10 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
 - `--max-experiments 0` 表示无限循环，直到手工中断
 - 每轮实验都会：
   1. 以当前最优配置为父代
-  2. 基于历史 keep/失败结果选择一批候选，并自动调整各自调参幅度
+  2. 基于历史结果选择一批候选，并按最近 N 次完整评测的真实得分增益自动调整各自调参幅度
   3. 调用 `PPO_project/main.py` 训练每个候选
-  4. 用较少路径和较少 episode 做 `stage1` 粗筛
-  5. 仅对 `top-k` 候选做更贵的 `stage2` 全量复评估
+  4. 用较少路径和较少 episode 做 `stage1` 粗筛，采用偏 `pass_rate/稳定性` 的评分权重
+  5. 仅对 `top-k` 候选做更贵的 `stage2` 全量复评估，采用偏 `pass_count/全量路径` 的评分权重
   6. 对进入 `stage2` 的候选导出每条路径的最佳轨迹图与 CSV
   7. 写入 `results.tsv`
   8. 刷新 `workspace/leaderboard.{md,json}`

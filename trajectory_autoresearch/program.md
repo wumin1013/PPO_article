@@ -50,6 +50,9 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
 - `stage1`：粗筛，低成本评测
 - `stage2`：只对 top 候选做全量复评估
 
+候选幅度 `amp` 不再依赖 keep-rate 启发式，而是基于最近 N 次完整评测的真实得分增益自动缩放。
+同时，`stage1` 和 `stage2` 使用不同的聚合权重，避免用粗筛分数直接替代最终决策。
+
 当前聚合评测包含：
 
 - `pass_count`
@@ -67,7 +70,7 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
 每轮实验遵循以下流程：
 
 1. 读取当前最优状态与 `results.tsv`
-2. 基于当前最优配置提出一批候选，并根据历史结果自动调节每个候选的调参幅度
+2. 基于当前最优配置提出一批候选，并根据最近 N 次完整评测的真实得分增益自动调节每个候选的调参幅度
 3. 运行：
 
 ```powershell

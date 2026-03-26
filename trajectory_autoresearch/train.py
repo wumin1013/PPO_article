@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import traceback
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,6 +53,11 @@ class CandidatePlan:
     amplitude: float
     description: str
     apply: Callable[[dict], None]
+
+
+AMP_MIN = 0.55
+AMP_MAX = 1.60
+AMP_SCORE_GAIN_SCALE = 30.0
 
 
 def _scale_up(base_delta: float, amplitude: float) -> float:
@@ -131,30 +137,67 @@ def candidate_specs() -> list[CandidateSpec]:
     ]
 
 
-def compute_candidate_amplitude(spec: CandidateSpec, history_stats: dict[str, dict]) -> float:
+def _weighted_recent_mean(values: Sequence[float]) -> float:
+    if not values:
+        return 0.0
+    weights = list(range(1, len(values) + 1))
+    total = sum(weights)
+    return sum(float(value) * weight for value, weight in zip(values, weights)) / max(1, total)
+
+
+def _is_comparable_eval_row(row: dict) -> bool:
+    if str(row.get("status", "")).strip() != "ok":
+        return False
+    if str(row.get("evaluation_stage", "")).strip().lower() not in {"stage2", "full"}:
+        return False
+    try:
+        score = float(row.get("score", float("-inf")))
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(score)
+
+
+def collect_recent_score_gains(candidate_name: str, history: Sequence[dict], lookback: int) -> list[float]:
+    lookback = max(1, int(lookback))
+    rows_by_id = {
+        str(row.get("experiment_id", "")).strip(): row
+        for row in history
+        if str(row.get("experiment_id", "")).strip()
+    }
+    gains: list[float] = []
+    for row in history:
+        if str(row.get("candidate", "")).strip() != candidate_name:
+            continue
+        if not _is_comparable_eval_row(row):
+            continue
+        parent_id = str(row.get("parent_experiment_id", "")).strip()
+        if not parent_id:
+            continue
+        parent_row = rows_by_id.get(parent_id)
+        if parent_row is None or not _is_comparable_eval_row(parent_row):
+            continue
+        gains.append(float(row.get("score", 0.0)) - float(parent_row.get("score", 0.0)))
+    return gains[-lookback:]
+
+
+def compute_candidate_amplitude(spec: CandidateSpec, history: Sequence[dict], lookback: int) -> float:
     if spec.name == "baseline":
         return 1.0
 
-    stat = history_stats.get(spec.name, {})
-    tries = int(stat.get("tries", 0))
-    if tries <= 0:
+    gains = collect_recent_score_gains(spec.name, history, lookback)
+    if not gains:
         return 1.0
 
-    keep_rate = float(stat.get("keep_rate", 0.0))
-    ok_rate = float(stat.get("ok_rate", 0.0))
-    keep_count = int(stat.get("keep_count", 0))
-    recent_non_keep_streak = int(stat.get("recent_non_keep_streak", 0))
-
-    amplitude = 1.0
-    amplitude += min(0.35, 0.35 * keep_rate)
-    amplitude += min(0.15, 0.08 * keep_count)
-    amplitude += max(-0.12, 0.10 * (ok_rate - 0.5))
-    amplitude -= min(0.45, 0.12 * recent_non_keep_streak)
-    return clamp(amplitude, 0.55, 1.60)
+    gain_signal = 0.65 * _weighted_recent_mean(gains) + 0.35 * float(gains[-1])
+    mean_abs_gain = sum(abs(float(value)) for value in gains) / max(1, len(gains))
+    gain_scale = max(AMP_SCORE_GAIN_SCALE, mean_abs_gain * 3.0)
+    confidence = min(1.0, len(gains) / max(1, int(lookback)))
+    amplitude_delta = clamp(gain_signal / gain_scale, -0.45, 0.60) * confidence
+    return clamp(1.0 + amplitude_delta, AMP_MIN, AMP_MAX)
 
 
 def materialize_candidate(spec: CandidateSpec, amplitude: float) -> CandidatePlan:
-    amplitude = float(clamp(amplitude, 0.55, 1.60))
+    amplitude = float(clamp(amplitude, AMP_MIN, AMP_MAX))
 
     def _apply(cfg: dict) -> None:
         spec.apply(cfg, amplitude)
@@ -172,6 +215,7 @@ def choose_candidate_batch(
     has_best: bool,
     history: Sequence[dict],
     batch_size: int,
+    amp_lookback: int,
 ) -> list[CandidatePlan]:
     specs = candidate_specs()
     batch_size = max(1, int(batch_size))
@@ -221,7 +265,7 @@ def choose_candidate_batch(
         unique_specs.append(spec)
         seen.add(spec.name)
 
-    plans = [materialize_candidate(spec, compute_candidate_amplitude(spec, history_stats)) for spec in unique_specs]
+    plans = [materialize_candidate(spec, compute_candidate_amplitude(spec, history, amp_lookback)) for spec in unique_specs]
     return plans[:batch_size]
 
 
@@ -426,6 +470,7 @@ def run_single_experiment(
             deterministic=args.deterministic_eval,
             seed=args.eval_seed,
             conda_env=args.conda_env,
+            score_profile=evaluation_label,
         )
         aggregated = eval_payload["aggregated"]
         result.status = "ok"
@@ -497,6 +542,7 @@ def refine_experiment_result(
             deterministic=args.deterministic_eval,
             seed=args.eval_seed,
             conda_env=args.conda_env,
+            score_profile=evaluation_label,
         )
         aggregated = eval_payload["aggregated"]
         result.status = "ok"
@@ -547,6 +593,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--screen-top-k", type=int, default=1, help="粗筛后进入复评估的 top-k 候选数")
     parser.add_argument("--screen-eval-episodes", type=int, default=1, help="粗筛阶段每条路径的评测 episode 数")
     parser.add_argument("--screen-paths", type=str, default="", help="粗筛阶段使用的路径名列表，逗号分隔；为空则自动选子集")
+    parser.add_argument("--amp-lookback", type=int, default=4, help="按最近 N 次完整评测的真实得分增益缩放候选 amp")
     parser.add_argument("--extra-episodes", type=int, default=40, help="每轮在父代基础上追加的 episode 数")
     parser.add_argument("--time-budget-seconds", type=float, default=900.0, help="每轮训练的墙钟时间预算")
     parser.add_argument("--process-timeout-seconds", type=float, default=7200.0, help="单个训练子进程超时")
@@ -590,6 +637,7 @@ def main() -> int:
             has_best=has_best,
             history=history,
             batch_size=batch_size,
+            amp_lookback=int(args.amp_lookback),
         )
 
         print(

@@ -37,6 +37,26 @@ CURRENT_BEST_STATE = WORKSPACE_DIR / "current_best.json"
 BASE_CONFIG_COPY = WORKSPACE_DIR / "base_config.yaml"
 
 DEFAULT_PATH_NAMES = ("square", "s_shape", "butterfly", "trapezoid", "circle")
+SCORE_PROFILES: Dict[str, Dict[str, float]] = {
+    "stage1": {
+        "pass_count": 0.0,
+        "pass_rate": 280.0,
+        "success": 220.0,
+        "progress": 120.0,
+        "stall": -140.0,
+        "mean_error": -30.0,
+        "max_error": -15.0,
+    },
+    "stage2": {
+        "pass_count": 1000.0,
+        "pass_rate": 80.0,
+        "success": 120.0,
+        "progress": 25.0,
+        "stall": -80.0,
+        "mean_error": -20.0,
+        "max_error": -12.0,
+    },
+}
 RESULTS_HEADER = [
     "experiment_id",
     "candidate",
@@ -203,6 +223,17 @@ def _parse_float(raw: Any, default: float = 0.0) -> float:
         return float(default)
 
 
+def infer_evaluation_stage(eval_summary_path: Any) -> str:
+    raw = str(eval_summary_path or "").replace("\\", "/").lower()
+    if "/stage1/" in raw:
+        return "stage1"
+    if "/stage2/" in raw:
+        return "stage2"
+    if raw:
+        return "full"
+    return "unknown"
+
+
 def read_results_history() -> list[dict]:
     ensure_results_tsv()
     rows: list[dict] = []
@@ -219,6 +250,7 @@ def read_results_history() -> list[dict]:
                     "candidate": str(row.get("candidate", "")).strip(),
                     "parent_experiment_id": str(row.get("parent_experiment_id", "")).strip(),
                     "status": str(row.get("status", "")).strip(),
+                    "evaluation_stage": infer_evaluation_stage(row.get("eval_summary_path", "")),
                     "keep": _parse_bool(row.get("keep", False)),
                     "score": _parse_float(row.get("score", float("-inf")), float("-inf")),
                     "pass_count": _parse_int(row.get("pass_count", 0), 0),
@@ -614,7 +646,8 @@ def read_eval_summary(summary_path: Path) -> dict:
     return summary
 
 
-def aggregate_eval_results(path_results: Dict[str, dict]) -> dict:
+def aggregate_eval_results(path_results: Dict[str, dict], *, score_profile: str = "stage2") -> dict:
+    weights = SCORE_PROFILES.get(str(score_profile), SCORE_PROFILES["stage2"])
     if not path_results:
         return {
             "path_results": {},
@@ -626,6 +659,8 @@ def aggregate_eval_results(path_results: Dict[str, dict]) -> dict:
                 "mean_progress_final": 0.0,
                 "mean_error_ratio": 999.0,
                 "max_error_ratio": 999.0,
+                "pass_rate": 0.0,
+                "score_profile": str(score_profile),
                 "score": float("-inf"),
             },
         }
@@ -650,24 +685,30 @@ def aggregate_eval_results(path_results: Dict[str, dict]) -> dict:
     mean_progress = float(mean(progress_values))
     mean_error_ratio = float(mean(error_ratios))
     max_error_ratio = float(max(error_ratios))
+    path_count = len(path_results)
+    pass_rate = float(pass_count / max(1, path_count))
     score = (
-        1000.0 * float(pass_count)
-        + 120.0 * mean_success
-        + 25.0 * mean_progress
-        - 80.0 * mean_stall
-        - 20.0 * mean_error_ratio
+        float(weights.get("pass_count", 0.0)) * float(pass_count)
+        + float(weights.get("pass_rate", 0.0)) * pass_rate
+        + float(weights.get("success", 0.0)) * mean_success
+        + float(weights.get("progress", 0.0)) * mean_progress
+        + float(weights.get("stall", 0.0)) * mean_stall
+        + float(weights.get("mean_error", 0.0)) * mean_error_ratio
+        + float(weights.get("max_error", 0.0)) * max_error_ratio
     )
 
     return {
         "path_results": path_results,
         "aggregated": {
-            "path_count": len(path_results),
+            "path_count": path_count,
             "pass_count": int(pass_count),
+            "pass_rate": pass_rate,
             "mean_success_rate": mean_success,
             "mean_stall_rate": mean_stall,
             "mean_progress_final": mean_progress,
             "mean_error_ratio": mean_error_ratio,
             "max_error_ratio": max_error_ratio,
+            "score_profile": str(score_profile),
             "score": score,
         },
     }
@@ -683,6 +724,7 @@ def evaluate_model_across_paths(
     deterministic: bool,
     seed: int,
     conda_env: str,
+    score_profile: str = "stage2",
 ) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     path_results: Dict[str, dict] = {}
@@ -716,7 +758,7 @@ def evaluate_model_across_paths(
         run_command(cmd, cwd=PPO_ROOT, log_path=log_path, check=False)
         path_results[path_name] = read_eval_summary(eval_out_dir / "summary.json")
 
-    payload = aggregate_eval_results(path_results)
+    payload = aggregate_eval_results(path_results, score_profile=score_profile)
     write_json(out_dir / "summary.json", payload)
     return payload
 

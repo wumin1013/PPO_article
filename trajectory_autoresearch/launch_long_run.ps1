@@ -50,7 +50,7 @@ function Read-JsonObject {
     if (-not (Test-Path -LiteralPath $Path)) {
         return $null
     }
-    return Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+    return Get-Content -LiteralPath $Path -Raw -Encoding utf8 | ConvertFrom-Json
 }
 
 function Get-ResultsLineCount {

@@ -363,7 +363,7 @@ KCM首先对意图捷度进行裁剪：
 }
 
 \subsection{典型案例与行为分析}
-本小节用于结合轨迹图与时序图，对策略在典型拐角和复合路径上的行为进行解释。正式结果回填时，可围绕图\ref{fig:qualitative_results}讨论轨迹形状、速度保持与误差分布，再结合图\ref{fig:kcm_analysis}分析前瞻距离变化、KCM干预度与拐角相位之间的关系。
+本小节用于结合轨迹图与时序图，对策略在典型拐角和复合路径上的行为进行解释。正式结果回填时，可围绕图~\ref{fig:qualitative_results}讨论轨迹形状、速度保持与误差分布，再结合图~\ref{fig:kcm_analysis}分析前瞻距离变化、KCM干预度与拐角相位之间的关系，并结合图~\ref{fig:jerk_constraint_comparison}比较完整方法与无KCM消融在捷度约束满足性上的差异。
 
 \IfFileExists{figures/generated/qualitative_results.png}{
     \begin{figure}[htbp]
@@ -385,7 +385,7 @@ KCM首先对意图捷度进行裁剪：
     \begin{figure}[htbp]
         \centering
         \includegraphics[width=0.96\linewidth]{generated/kcm_analysis.png}
-        \caption{前瞻调节、KCM干预度与拐角行为解释图。}
+        \caption{本文最终方法在选定代表性轨迹上的速度、轮廓误差、前瞻距离与KCM干预度时序图。}
         \label{fig:kcm_analysis}
     \end{figure}
 }{
@@ -394,6 +394,22 @@ KCM首先对意图捷度进行裁剪：
         \fbox{\parbox{0.9\linewidth}{\centering \vspace{2.8cm} 行为解释占位图：前瞻距离、KCM干预度、误差和速度在拐角区的时序对齐图 \vspace{2.8cm}}}
         \caption{前瞻调节、KCM干预度与拐角行为解释图。}
         \label{fig:kcm_analysis}
+    \end{figure}
+}
+
+\IfFileExists{figures/generated/jerk_constraint_comparison.png}{
+    \begin{figure}[htbp]
+        \centering
+        \includegraphics[width=0.96\linewidth]{generated/jerk_constraint_comparison.png}
+        \caption{本文最终方法与无KCM消融在相同代表性路径上的线捷度与捷度约束对比。}
+        \label{fig:jerk_constraint_comparison}
+    \end{figure}
+}{
+    \begin{figure}[htbp]
+        \centering
+        \fbox{\parbox{0.9\linewidth}{\centering \vspace{2.8cm} 捷度约束对比占位图：本文最终方法与无KCM消融在相同路径上的线捷度及其约束上界对比 \vspace{2.8cm}}}
+        \caption{本文最终方法与无KCM消融在相同代表性路径上的线捷度与捷度约束对比。}
+        \label{fig:jerk_constraint_comparison}
     \end{figure}
 }
 
@@ -440,7 +456,7 @@ KCM首先对意图捷度进行裁剪：
 这里需要说明的是，PPO本身不是本文的创新重点。本文更关心的是，在CNC短线段轨迹场景下，如何为PPO提供清晰的状态输入、可学习的前瞻调节能力、可执行的动作约束机制以及稳定的奖励引导。换句话说，PPO在这里主要承担优化器的角色。
 
 \subsection{可复现实验配置说明}
-实验过程统一记录配置文件、随机种子、模型检查点、轨迹日志和统计摘要。对于同一路径集合上的主方法、基线方法与消融方法，可直接按照表\ref{tab:main_results}和表\ref{tab:ablation}的格式汇总结果，并结合图\ref{fig:qualitative_results}和图\ref{fig:kcm_analysis}开展定量与定性分析。
+实验过程统一记录配置文件、随机种子、模型检查点、轨迹日志和统计摘要。对于同一路径集合上的主方法、基线方法与消融方法，可直接按照表\ref{tab:main_results}和表\ref{tab:ablation}的格式汇总结果，并结合图\ref{fig:qualitative_results}、图\ref{fig:kcm_analysis}和图\ref{fig:jerk_constraint_comparison}开展定量与定性分析。
 
 \section{自动搜索与配置选择}
 \label{sec:appendix_autosearch}

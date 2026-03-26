@@ -11,7 +11,7 @@ param(
     [double]$TimeBudgetSeconds = 600.0,
     [double]$ProcessTimeoutSeconds = 3600.0,
     [int]$AmpLookback = 4,
-    [string]$Paths = "square,s_shape,butterfly,trapezoid,circle",
+    [string]$Paths = "square,circle,butterfly",
     [string]$ScreenPaths = "",
     [switch]$DeterministicEval
 )

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import json
 import math
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -13,8 +15,18 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.image as mpimg
 import matplotlib.pyplot as plt
+import numpy as np
+import torch
 
-from prepare import RESEARCH_ROOT, load_current_best_state
+from prepare import RESEARCH_ROOT, build_selected_paths, load_current_best_state, load_yaml
+
+PPO_ROOT = RESEARCH_ROOT.parent / "PPO_project"
+if str(PPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(PPO_ROOT))
+
+from src.algorithms.ppo import PPOContinuous
+from src.environment import create_env_compatible
+from src.utils.path_generator import get_path_by_name
 
 
 PAPER_ROOT = RESEARCH_ROOT.parent / "论文项目"
@@ -30,6 +42,11 @@ APPENDIX_TEX = PAPER_GENERATED_DIR / "appendix_autosearch.tex"
 SUMMARY_JSON = PAPER_GENERATED_DIR / "paper_bridge_summary.json"
 QUAL_FIG = PAPER_FIGURES_DIR / "qualitative_results.png"
 KCM_FIG = PAPER_FIGURES_DIR / "kcm_analysis.png"
+JERK_COMPARE_FIG = PAPER_FIGURES_DIR / "jerk_constraint_comparison.png"
+FULL_TRACE_SUMMARY_JSON = PAPER_GENERATED_DIR / "full_method_trace_summary.json"
+ABL_NO_KCM_TRACE_SUMMARY_JSON = PAPER_GENERATED_DIR / "abl_no_kcm_trace_summary.json"
+
+TRACE_PATH_NAMES = ("square", "circle", "butterfly")
 
 VARIANT_LABELS = {
     "full_method_snapshot": "本文最终方法",
@@ -174,6 +191,335 @@ def _load_step_series(run_dir: Path, episode_idx: int) -> dict[str, list[float]]
     return series
 
 
+def _build_path_points(path_cfg: dict[str, Any]) -> list[np.ndarray]:
+    path_type = str(path_cfg["type"])
+    scale = float(path_cfg.get("scale", 10.0))
+    num_points = int(path_cfg.get("num_points", 200))
+    extra = path_cfg.get(path_type, {})
+    if not isinstance(extra, dict):
+        extra = {}
+    if path_type == "square" and "closed" in path_cfg and "closed" not in extra:
+        extra["closed"] = bool(path_cfg.get("closed"))
+    return get_path_by_name(path_type, scale=scale, num_points=num_points, **extra)
+
+
+def _make_env(config: dict[str, Any], path_cfg: dict[str, Any], device: torch.device):
+    env_cfg = config["environment"]
+    kcm_cfg = config["kinematic_constraints"]
+    reward_weights = config.get("reward_weights", {})
+    training_cfg = config.get("training", {}) if isinstance(config.get("training", {}), dict) else {}
+    use_obs_normalizer = bool(training_cfg.get("use_obs_normalizer", False))
+    path_points = _build_path_points(path_cfg)
+    return create_env_compatible(
+        device=device,
+        epsilon=env_cfg["epsilon"],
+        interpolation_period=env_cfg["interpolation_period"],
+        MAX_VEL=kcm_cfg["MAX_VEL"],
+        MAX_ACC=kcm_cfg["MAX_ACC"],
+        MAX_JERK=kcm_cfg["MAX_JERK"],
+        MAX_ANG_VEL=kcm_cfg["MAX_ANG_VEL"],
+        MAX_ANG_ACC=kcm_cfg["MAX_ANG_ACC"],
+        MAX_ANG_JERK=kcm_cfg["MAX_ANG_JERK"],
+        Pm=path_points,
+        max_steps=env_cfg["max_steps"],
+        lookahead_points=env_cfg.get("lookahead_points", 5),
+        lookahead_obs_enabled=env_cfg.get("lookahead_obs_enabled", True),
+        lookahead_obs_scales=env_cfg.get("lookahead_obs_scales", [1.0]),
+        reward_weights=reward_weights,
+        curvature_observation=env_cfg.get("curvature_observation"),
+        return_normalized_obs=not use_obs_normalizer,
+    )
+
+
+def _make_agent(config: dict[str, Any], env, device: torch.device) -> PPOContinuous:
+    ppo_cfg = config["ppo"]
+    obs_space = getattr(env, "observation_space", None)
+    act_space = getattr(env, "action_space", None)
+    return PPOContinuous(
+        state_dim=None,
+        hidden_dim=ppo_cfg["hidden_dim"],
+        action_dim=None,
+        actor_lr=ppo_cfg["actor_lr"],
+        critic_lr=ppo_cfg["critic_lr"],
+        lmbda=ppo_cfg["lmbda"],
+        epochs=ppo_cfg["epochs"],
+        eps=ppo_cfg["eps"],
+        gamma=ppo_cfg["gamma"],
+        ent_coef=ppo_cfg.get("ent_coef", 0.0),
+        device=device,
+        observation_space=obs_space,
+        action_space=act_space,
+    )
+
+
+def _take_deterministic_action(agent: PPOContinuous, state: Any) -> np.ndarray:
+    state_arr = np.asarray(state, dtype=np.float32).reshape(1, -1)
+    state_tensor = torch.as_tensor(state_arr, dtype=torch.float32, device=agent.device)
+    with torch.no_grad():
+        mu, _ = agent.actor(state_tensor)
+    return mu.squeeze(0).detach().cpu().numpy().astype(float)
+
+
+def _write_trace_csv(path: Path, rows: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "path_name",
+        "env_step",
+        "time_s",
+        "reward",
+        "contour_error",
+        "velocity",
+        "acceleration",
+        "jerk",
+        "omega",
+        "angular_acc",
+        "angular_jerk",
+        "kcm_intervention",
+        "cornerness",
+        "lookahead_dist_active",
+    ]
+    with path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({name: row.get(name, "") for name in fieldnames})
+
+
+def _rollout_trace(config: dict[str, Any], path_cfg: dict[str, Any], model_path: Path) -> dict[str, Any]:
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    env = _make_env(config, path_cfg, device)
+    agent = _make_agent(config, env, device)
+
+    ckpt = torch.load(model_path, map_location=device)
+    agent.actor.load_state_dict(ckpt["actor"])
+    if "critic" in ckpt:
+        agent.critic.load_state_dict(ckpt["critic"])
+    agent.actor.eval()
+    agent.critic.eval()
+
+    dt = float(config.get("environment", {}).get("interpolation_period", 1.0))
+    state = env.reset(random_start=False)
+    total_reward = 0.0
+    done = False
+    info: dict[str, Any] = {}
+    rows: list[dict[str, Any]] = []
+
+    while not done:
+        action = _take_deterministic_action(agent, state)
+        if getattr(env, "action_space", None) is not None:
+            action = np.clip(action, env.action_space.low, env.action_space.high)
+        else:
+            action = np.array([np.clip(action[0], -1.0, 1.0), np.clip(action[1], 0.0, 1.0)], dtype=float)
+
+        next_state, reward, done, info = env.step(action)
+        p4_status = info.get("p4_status", {})
+        if not isinstance(p4_status, dict):
+            p4_status = {}
+
+        env_step = int(info.get("step", len(rows) + 1))
+        rows.append(
+            {
+                "path_name": str(path_cfg.get("name") or path_cfg.get("type")),
+                "env_step": env_step,
+                "time_s": env_step * dt,
+                "reward": float(reward),
+                "contour_error": float(info.get("contour_error", 0.0)),
+                "velocity": float(getattr(env, "velocity", 0.0)),
+                "acceleration": float(getattr(env, "acceleration", 0.0)),
+                "jerk": float(info.get("jerk", getattr(env, "jerk", 0.0))),
+                "omega": float(getattr(env, "angular_vel", 0.0)),
+                "angular_acc": float(getattr(env, "angular_acc", 0.0)),
+                "angular_jerk": float(getattr(env, "angular_jerk", 0.0)),
+                "kcm_intervention": float(info.get("kcm_intervention", 0.0)),
+                "cornerness": float(info.get("cornerness", 0.0)),
+                "lookahead_dist_active": float(p4_status.get("lookahead_dist_active", getattr(env, "_lookahead_dist_active", 0.0))),
+            }
+        )
+        total_reward += float(reward)
+        state = next_state
+
+        if env_step > int(config["environment"]["max_steps"]) + 5:
+            break
+
+    progress = float(info.get("progress", 0.0))
+    max_abs_contour_error = max((abs(float(row["contour_error"])) for row in rows), default=0.0)
+    max_abs_linear_jerk = max((abs(float(row["jerk"])) for row in rows), default=0.0)
+    max_abs_angular_jerk = max((abs(float(row["angular_jerk"])) for row in rows), default=0.0)
+    return {
+        "path_name": str(path_cfg.get("name") or path_cfg.get("type")),
+        "score": progress * 1_000_000.0 + total_reward,
+        "reward": float(total_reward),
+        "progress": progress,
+        "steps": int(len(rows)),
+        "done_reason": str(info.get("done_reason", "unknown")),
+        "csv_rows": rows,
+        "linear_jerk_limit": float(getattr(env, "MAX_JERK", 0.0)),
+        "angular_jerk_limit": float(getattr(env, "MAX_ANG_JERK", 0.0)),
+        "max_abs_linear_jerk": float(max_abs_linear_jerk),
+        "max_abs_angular_jerk": float(max_abs_angular_jerk),
+        "max_abs_contour_error": float(max_abs_contour_error),
+    }
+
+
+def _variant_model_path(variant: dict[str, Any], path_name: str) -> Path | None:
+    rollouts_paths = variant.get("rollouts_summary", {}).get("paths", {})
+    if isinstance(rollouts_paths, dict):
+        item = rollouts_paths.get(path_name)
+        if isinstance(item, dict):
+            model_raw = str(item.get("model", "")).strip()
+            if model_raw:
+                model_path = Path(model_raw)
+                if model_path.exists():
+                    return model_path
+
+    direct_model = str(variant.get("model_path", "")).strip()
+    if direct_model:
+        direct_model_path = Path(direct_model)
+        if direct_model_path.exists():
+            return direct_model_path
+
+    state = variant.get("state", {}) if isinstance(variant.get("state", {}), dict) else {}
+    state_model = str(state.get("model_path", "")).strip()
+    if state_model:
+        state_model_path = Path(state_model)
+        if state_model_path.exists():
+            return state_model_path
+    return None
+
+
+def _variant_signature(variant: dict[str, Any], trace_tag: str) -> dict[str, Any]:
+    signature = {
+        "trace_tag": trace_tag,
+        "config_path": str(variant.get("config_path", "")),
+        "variant_name": str(variant.get("name", "")),
+        "status": str(variant.get("status", "")),
+        "models": {},
+    }
+    for path_name in TRACE_PATH_NAMES:
+        model_path = _variant_model_path(variant, path_name)
+        signature["models"][path_name] = str(model_path) if model_path is not None else ""
+    return signature
+
+
+def _build_variant_trace(variant: dict[str, Any], trace_tag: str) -> dict[str, Any]:
+    summary_path = PAPER_GENERATED_DIR / f"{trace_tag}_trace_summary.json"
+    config_raw = str(variant.get("config_path", "")).strip()
+    if not config_raw:
+        return {}
+    config_path = Path(config_raw)
+    if not config_path.exists():
+        return {}
+
+    signature = _variant_signature(variant, trace_tag)
+    if summary_path.exists():
+        cached = _read_json(summary_path)
+        if cached.get("signature") == signature:
+            return cached
+
+    config = load_yaml(config_path)
+    path_specs = build_selected_paths(list(TRACE_PATH_NAMES))
+    candidates: list[dict[str, Any]] = []
+
+    for path_cfg in path_specs:
+        path_name = str(path_cfg.get("name") or path_cfg.get("type"))
+        model_path = _variant_model_path(variant, path_name)
+        if model_path is None:
+            continue
+        trace_payload = _rollout_trace(config, path_cfg, model_path)
+        csv_path = PAPER_GENERATED_DIR / f"{trace_tag}_{path_name}_trace.csv"
+        _write_trace_csv(csv_path, trace_payload["csv_rows"])
+        candidates.append(
+            {
+                "path_name": path_name,
+                "model_path": str(model_path),
+                "csv_path": str(csv_path),
+                "score": float(trace_payload["score"]),
+                "reward": float(trace_payload["reward"]),
+                "progress": float(trace_payload["progress"]),
+                "steps": int(trace_payload["steps"]),
+                "done_reason": str(trace_payload["done_reason"]),
+                "linear_jerk_limit": float(trace_payload["linear_jerk_limit"]),
+                "angular_jerk_limit": float(trace_payload["angular_jerk_limit"]),
+                "max_abs_linear_jerk": float(trace_payload["max_abs_linear_jerk"]),
+                "max_abs_angular_jerk": float(trace_payload["max_abs_angular_jerk"]),
+                "max_abs_contour_error": float(trace_payload["max_abs_contour_error"]),
+            }
+        )
+
+    if not candidates:
+        return {}
+
+    best_candidate = max(
+        candidates,
+        key=lambda row: (
+            float(row.get("score", float("-inf"))),
+            float(row.get("progress", -1.0)),
+            -float(row.get("max_abs_contour_error", 1e9)),
+        ),
+    )
+    payload = {
+        "variant_name": str(variant.get("name", trace_tag)),
+        "variant_label": str(variant.get("label", variant.get("name", trace_tag))),
+        "signature": signature,
+        "selected_path": str(best_candidate.get("path_name", "")),
+        "selected_csv_path": str(best_candidate.get("csv_path", "")),
+        "selected_steps": int(best_candidate.get("steps", 0)),
+        "selected_done_reason": str(best_candidate.get("done_reason", "")),
+        "selected_score": float(best_candidate.get("score", float("-inf"))),
+        "candidates": candidates,
+    }
+    _write_json(summary_path, payload)
+    return payload
+
+
+def _rows_from_trace_summary(summary: dict[str, Any], path_name: str | None = None) -> list[dict[str, Any]]:
+    if not summary:
+        return []
+    csv_path = ""
+    if path_name:
+        for candidate in summary.get("candidates", []):
+            if str(candidate.get("path_name", "")) == str(path_name):
+                csv_path = str(candidate.get("csv_path", ""))
+                break
+    if not csv_path:
+        csv_path = str(summary.get("selected_csv_path", ""))
+    if not csv_path:
+        return []
+    return _load_csv_rows(Path(csv_path))
+
+
+def _candidate_by_path(summary: dict[str, Any], path_name: str) -> dict[str, Any]:
+    for candidate in summary.get("candidates", []):
+        if str(candidate.get("path_name", "")) == str(path_name):
+            return candidate
+    return {}
+
+
+def _choose_jerk_compare_path(full_trace: dict[str, Any], abl_trace: dict[str, Any]) -> str:
+    common_paths = sorted(
+        set(str(item.get("path_name", "")) for item in full_trace.get("candidates", []))
+        & set(str(item.get("path_name", "")) for item in abl_trace.get("candidates", []))
+    )
+    if not common_paths:
+        return ""
+
+    def _key(path_name: str) -> tuple[float, float, float, float]:
+        full_row = _candidate_by_path(full_trace, path_name)
+        abl_row = _candidate_by_path(abl_trace, path_name)
+        full_limit = max(float(full_row.get("linear_jerk_limit", 0.0)), 1e-6)
+        abl_limit = max(float(abl_row.get("linear_jerk_limit", 0.0)), 1e-6)
+        full_ratio = float(full_row.get("max_abs_linear_jerk", 0.0)) / full_limit
+        abl_ratio = float(abl_row.get("max_abs_linear_jerk", 0.0)) / abl_limit
+        return (
+            1.0 if full_ratio <= 1.0 else 0.0,
+            1.0 if abl_ratio > 1.0 else 0.0,
+            abl_ratio - full_ratio,
+            float(full_row.get("score", float("-inf"))),
+        )
+
+    return max(common_paths, key=_key)
+
+
 def _max_path_error(eval_payload: dict) -> float | None:
     path_results = eval_payload.get("path_results", {})
     if not isinstance(path_results, dict) or not path_results:
@@ -229,8 +575,9 @@ def _load_current_best_variant() -> dict:
         return {}
     eval_payload = _load_eval_payload(state.get("eval_summary_path", ""))
     rollouts_summary = {}
-    rollouts_path = Path(str(state.get("rollouts_summary_path", "")).strip())
-    if rollouts_path.exists():
+    rollouts_path_raw = str(state.get("rollouts_summary_path", "")).strip()
+    rollouts_path = Path(rollouts_path_raw) if rollouts_path_raw else None
+    if rollouts_path is not None and rollouts_path.exists() and not rollouts_path.is_dir():
         rollouts_summary = _read_json(rollouts_path)
     run_dir = Path(str(state.get("run_dir", "")).strip())
     training_summary = _load_training_summary(run_dir) if run_dir.exists() else {}
@@ -242,6 +589,10 @@ def _load_current_best_variant() -> dict:
         "eval_payload": eval_payload,
         "rollouts_summary": rollouts_summary,
         "training_summary": training_summary,
+        "config_path": str(state.get("config_path", "")),
+        "model_path": str(state.get("model_path", "")),
+        "latest_checkpoint": str(state.get("latest_checkpoint", "")),
+        "source_experiment_id": str(state.get("experiment_id", "")),
         "state": state,
     }
 
@@ -516,39 +867,105 @@ def _build_qualitative_figure(full_method: dict, baseline: dict) -> None:
     plt.close(fig)
 
 
-def _build_kcm_figure(full_method: dict) -> None:
-    run_dir = Path(str(full_method.get("run_dir", "")).strip())
-    training_summary = full_method.get("training_summary", {})
-    episode_idx = int(training_summary.get("episode_idx", 0) or 0)
-    if not run_dir.exists() or episode_idx <= 0:
-        _placeholder_png(KCM_FIG, "Behavior Figure Pending", "Waiting for step-level logs from the full method.")
+def _build_kcm_figure(trace_summary: dict[str, Any]) -> None:
+    rows = _rows_from_trace_summary(trace_summary)
+    if not rows:
+        _placeholder_png(KCM_FIG, "Behavior Figure Pending", "Waiting for a full-step deterministic trace from the full method.")
         return
 
-    series = _load_step_series(run_dir, episode_idx)
-    if not series["env_step"]:
-        _placeholder_png(KCM_FIG, "Behavior Figure Pending", "No step-level series was found for plotting.")
-        return
+    x = [int(float(row.get("env_step", 0))) for row in rows]
+    velocity = [float(_safe_float(row.get("velocity"), 0.0) or 0.0) for row in rows]
+    contour_error = [float(_safe_float(row.get("contour_error"), 0.0) or 0.0) for row in rows]
+    lookahead = [float(_safe_float(row.get("lookahead_dist_active"), 0.0) or 0.0) for row in rows]
+    kcm = [float(_safe_float(row.get("kcm_intervention"), 0.0) or 0.0) for row in rows]
+    cornerness = [float(_safe_float(row.get("cornerness"), 0.0) or 0.0) for row in rows]
 
-    fig, axes = plt.subplots(4, 1, figsize=(10, 9), dpi=160, sharex=True)
-    specs = [
-        ("velocity", "Velocity"),
-        ("contour_error", "Contour Error"),
-        ("lookahead_dist_active", "Lookahead Distance"),
-        ("kcm_intervention", "KCM Intervention"),
-    ]
-    x = series["env_step"]
-    for ax, (key, title) in zip(axes, specs):
-        ax.plot(x, series[key], linewidth=1.5)
-        if key == "lookahead_dist_active":
-            ax.plot(x, series["cornerness"], linewidth=1.0, linestyle="--", alpha=0.8, label="cornerness")
-            ax.legend(loc="upper right", fontsize=8)
-        ax.set_ylabel(title)
-        ax.grid(True, linestyle=":", alpha=0.4)
-    axes[-1].set_xlabel(f"env_step (episode={episode_idx})")
-    fig.tight_layout()
+    selected_path = str(trace_summary.get("selected_path", "unknown"))
+    selected_steps = int(trace_summary.get("selected_steps", len(rows)))
+    done_reason = str(trace_summary.get("selected_done_reason", "unknown"))
+
+    fig, axes = plt.subplots(4, 1, figsize=(10.5, 10.0), dpi=160, sharex=True)
+    fig.suptitle(
+        f"Selected full-step rollout | path={selected_path} | steps={selected_steps} | done={done_reason}",
+        fontsize=12,
+    )
+
+    axes[0].plot(x, velocity, color="#1f77b4", linewidth=1.3)
+    axes[0].set_ylabel("v (mm/s)")
+    axes[0].grid(True, linestyle=":", alpha=0.4)
+
+    axes[1].plot(x, contour_error, color="#d62728", linewidth=1.3)
+    axes[1].set_ylabel("e_c (mm)")
+    axes[1].grid(True, linestyle=":", alpha=0.4)
+
+    axes[2].plot(x, lookahead, color="#2ca02c", linewidth=1.3, label="lookahead")
+    ax_corner = axes[2].twinx()
+    ax_corner.plot(x, cornerness, color="#9467bd", linewidth=1.0, linestyle="--", alpha=0.85, label="cornerness")
+    axes[2].set_ylabel("L (mm)")
+    ax_corner.set_ylabel("cornerness (-)")
+    axes[2].grid(True, linestyle=":", alpha=0.4)
+    lines_left, labels_left = axes[2].get_legend_handles_labels()
+    lines_right, labels_right = ax_corner.get_legend_handles_labels()
+    axes[2].legend(lines_left + lines_right, labels_left + labels_right, loc="upper right", fontsize=8)
+
+    axes[3].plot(x, kcm, color="#ff7f0e", linewidth=1.3)
+    axes[3].set_ylabel(r"$\eta$ (-)")
+    axes[3].set_xlabel("Step (-)")
+    axes[3].grid(True, linestyle=":", alpha=0.4)
+
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.97))
     KCM_FIG.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(KCM_FIG)
     plt.close(fig)
+
+
+def _build_jerk_constraint_figure(full_trace: dict[str, Any], abl_no_kcm_trace: dict[str, Any]) -> dict[str, Any]:
+    if not full_trace or not abl_no_kcm_trace:
+        _placeholder_png(JERK_COMPARE_FIG, "Jerk Comparison Pending", "Waiting for both the full method and no-KCM ablation traces.")
+        return {}
+
+    compare_path = _choose_jerk_compare_path(full_trace, abl_no_kcm_trace)
+    if not compare_path:
+        _placeholder_png(JERK_COMPARE_FIG, "Jerk Comparison Pending", "No common path is available for the jerk-constraint comparison.")
+        return {}
+
+    full_rows = _rows_from_trace_summary(full_trace, path_name=compare_path)
+    abl_rows = _rows_from_trace_summary(abl_no_kcm_trace, path_name=compare_path)
+    full_meta = _candidate_by_path(full_trace, compare_path)
+    abl_meta = _candidate_by_path(abl_no_kcm_trace, compare_path)
+    if (not full_rows) or (not abl_rows):
+        _placeholder_png(JERK_COMPARE_FIG, "Jerk Comparison Pending", "Trace rows for the comparison path are not ready yet.")
+        return {}
+
+    fig, axes = plt.subplots(1, 2, figsize=(12.5, 4.8), dpi=160, sharey=True)
+    compare_specs = [
+        ("本文最终方法", full_rows, full_meta, "#1f77b4"),
+        ("无KCM", abl_rows, abl_meta, "#d62728"),
+    ]
+
+    for ax, (title, rows, meta, color) in zip(axes, compare_specs):
+        x = [int(float(row.get("env_step", 0))) for row in rows]
+        y = [float(_safe_float(row.get("jerk"), 0.0) or 0.0) for row in rows]
+        limit = float(meta.get("linear_jerk_limit", 0.0))
+        max_abs = float(meta.get("max_abs_linear_jerk", 0.0))
+        ratio = max_abs / max(limit, 1e-6)
+        ax.plot(x, y, color=color, linewidth=1.2)
+        ax.axhline(limit, color="#2f9e44", linestyle="--", linewidth=1.0, label="+Jmax")
+        ax.axhline(-limit, color="#2f9e44", linestyle=":", linewidth=1.0, label="-Jmax")
+        ax.set_title(f"{title} | path={compare_path}\nmax|j|/Jmax={ratio:.2f}")
+        ax.set_xlabel("Step (-)")
+        ax.grid(True, linestyle=":", alpha=0.4)
+    axes[0].set_ylabel(r"j (mm/s$^3$)")
+    axes[0].legend(loc="upper right", fontsize=8)
+    fig.tight_layout()
+    JERK_COMPARE_FIG.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(JERK_COMPARE_FIG)
+    plt.close(fig)
+    return {
+        "compare_path": compare_path,
+        "full_method_ratio": float(full_meta.get("max_abs_linear_jerk", 0.0)) / max(float(full_meta.get("linear_jerk_limit", 0.0)), 1e-6),
+        "abl_no_kcm_ratio": float(abl_meta.get("max_abs_linear_jerk", 0.0)) / max(float(abl_meta.get("linear_jerk_limit", 0.0)), 1e-6),
+    }
 
 
 def sync_once() -> dict:
@@ -560,29 +977,39 @@ def sync_once() -> dict:
     current_best_variant = _load_current_best_variant()
     full_variant, full_variant_source = _select_main_full_variant(suite_variants, current_best_variant)
     baseline_variant = _completed_variant_or_empty(suite_variants.get("baseline_policy", {}))
+    abl_no_kcm_variant = _completed_variant_or_empty(suite_variants.get("abl_no_kcm", {}))
 
     ablation_rows = [full_variant]
     for key in ["abl_fixed_lookahead", "abl_no_kcm", "abl_no_cornerness"]:
         if key in suite_variants:
             ablation_rows.append(suite_variants[key])
 
+    full_trace_summary = _build_variant_trace(full_variant, "full_method")
+    abl_no_kcm_trace_summary = _build_variant_trace(abl_no_kcm_variant, "abl_no_kcm") if abl_no_kcm_variant else {}
+    jerk_compare_summary = _build_jerk_constraint_figure(full_trace_summary, abl_no_kcm_trace_summary)
+
     _write_text(MAIN_RESULTS_TEX, _build_main_results_tex(full_variant, baseline_variant))
     _write_text(ABLATION_TEX, _build_ablation_tex([row for row in ablation_rows if row]))
     _write_text(APPENDIX_TEX, _build_appendix_tex(current_best_variant, suite_variants))
     _build_qualitative_figure(full_variant, baseline_variant)
-    _build_kcm_figure(full_variant)
+    _build_kcm_figure(full_trace_summary)
 
     summary = {
         "updated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
         "latest_suite_dir": str(suite_bundle.get("suite_dir", "")),
         "latest_long_run_status": str(_find_latest_long_run_status() or ""),
         "main_full_method_source": full_variant_source,
+        "full_method_trace": full_trace_summary,
+        "jerk_compare": jerk_compare_summary,
         "files": {
             "main_results_tex": str(MAIN_RESULTS_TEX),
             "ablation_tex": str(ABLATION_TEX),
             "appendix_tex": str(APPENDIX_TEX),
             "qualitative_figure": str(QUAL_FIG),
             "kcm_figure": str(KCM_FIG),
+            "jerk_compare_figure": str(JERK_COMPARE_FIG),
+            "full_trace_summary": str(FULL_TRACE_SUMMARY_JSON),
+            "abl_no_kcm_trace_summary": str(ABL_NO_KCM_TRACE_SUMMARY_JSON),
         },
         "suite_variants": {key: {"label": value.get("label"), "status": value.get("status")} for key, value in suite_variants.items()},
     }

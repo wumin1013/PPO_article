@@ -600,7 +600,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--eval-episodes", type=int, default=8, help="复评估阶段每条路径的评测 episode 数")
     parser.add_argument("--eval-seed", type=int, default=43, help="统一评测随机种子")
     parser.add_argument("--seed", type=int, default=42, help="训练配置中写入的基础随机种子")
-    parser.add_argument("--paths", type=str, default="square,s_shape,butterfly,trapezoid,circle", help="逗号分隔路径列表")
+    parser.add_argument("--paths", type=str, default="square,circle,butterfly", help="逗号分隔路径列表")
     parser.add_argument("--conda-env", type=str, default="PPO", help="训练与评测使用的 conda 环境名")
     parser.add_argument("--deterministic-eval", action="store_true", help="评测时使用确定性策略")
     parser.add_argument("--score-epsilon", type=float, default=1e-6, help="分数比较容差")

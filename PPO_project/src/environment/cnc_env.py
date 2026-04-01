@@ -58,8 +58,14 @@ class Env:
         lookahead_obs_scales: Optional[List[float]] = None,
         return_normalized_obs: bool = True,
         curvature_observation: Optional[Dict[str, float]] = None,
+        disable_kcm: bool = False,
+        path_name: str = "",
+        completion_progress_threshold: float = 0.99,
+        completion_distance_ratio: float = 1.0,
     ):
         self.lookahead_points = int(max(0, int(lookahead_points)))
+        self.completion_progress_threshold = float(np.clip(float(completion_progress_threshold), 0.90, 0.999))
+        self.completion_distance_ratio = max(0.5, float(completion_distance_ratio))
         
         # Phase 21: 8维核心特征
         self.core_keys = [
@@ -141,6 +147,8 @@ class Env:
             interpolation_period if interpolation_period is not None else LEGACY_INTERPOLATION_PERIOD
         )
         self.reward_weights = reward_weights or {}
+        self.disable_kcm = bool(disable_kcm)
+        self.path_name = str(path_name or "").strip()
         completion_cfg = self.reward_weights.get("completion", {}) if isinstance(self.reward_weights, dict) else {}
         if not isinstance(completion_cfg, dict):
             completion_cfg = {}
@@ -210,6 +218,21 @@ class Env:
         if not math.isfinite(mix_gain):
             mix_gain = 1.0
         self.lookahead_control_mix_gain = float(np.clip(mix_gain, 0.0, 1.0))
+
+        self.lookahead_control_residual_mode = bool(lookahead_ctrl_cfg.get("residual_mode", False))
+        residual_band_ratio = float(lookahead_ctrl_cfg.get("residual_band_ratio", 0.18))
+        if not math.isfinite(residual_band_ratio):
+            residual_band_ratio = 0.18
+        self.lookahead_control_residual_band_ratio = float(np.clip(residual_band_ratio, 0.02, 0.50))
+        self.lookahead_control_residual_corner_only = bool(lookahead_ctrl_cfg.get("residual_corner_only", False))
+        residual_gate_min = float(lookahead_ctrl_cfg.get("residual_gate_min", 0.0))
+        if not math.isfinite(residual_gate_min):
+            residual_gate_min = 0.0
+        self.lookahead_control_residual_gate_min = float(np.clip(residual_gate_min, 0.0, 1.0))
+        end_lock_progress = float(lookahead_ctrl_cfg.get("end_lock_progress", 1.01))
+        if not math.isfinite(end_lock_progress):
+            end_lock_progress = 1.01
+        self.lookahead_control_end_lock_progress = float(np.clip(end_lock_progress, 0.0, 1.10))
 
         default_u = float(lookahead_ctrl_cfg.get("action_default", 0.5))
         if not math.isfinite(default_u):
@@ -572,9 +595,38 @@ class Env:
         self._lookahead_action_u = policy_u
 
         if bool(getattr(self, "lookahead_control_policy_action", False)):
-            policy_dist = float(min_dist + policy_u * (max_dist - min_dist))
             mix_gain = float(np.clip(float(getattr(self, "lookahead_control_mix_gain", 1.0)), 0.0, 1.0))
-            active = float((1.0 - mix_gain) * base_dist + mix_gain * policy_dist)
+            if bool(getattr(self, "lookahead_control_residual_mode", False)):
+                residual_gate = 1.0
+                if bool(getattr(self, "lookahead_control_residual_corner_only", False)):
+                    residual_gate = float(region_weight)
+                residual_gate = float(
+                    np.clip(
+                        max(float(getattr(self, "lookahead_control_residual_gate_min", 0.0)), residual_gate),
+                        0.0,
+                        1.0,
+                    )
+                )
+                residual_span = float(max_dist - min_dist) * float(getattr(self, "lookahead_control_residual_band_ratio", 0.18))
+                residual_u = float(np.clip((policy_u - 0.5) * 2.0, -1.0, 1.0))
+                residual_dist = float(residual_u * residual_span * residual_gate)
+                policy_dist = float(base_dist + residual_dist)
+                active = float(base_dist + mix_gain * residual_dist)
+
+                progress_now = 0.0
+                if getattr(self, "state", None) is not None and len(self.state) > 6:
+                    try:
+                        progress_now = float(self.state[6])
+                    except Exception:
+                        progress_now = 0.0
+                end_lock_progress = float(getattr(self, "lookahead_control_end_lock_progress", 1.01))
+                if end_lock_progress < 1.0 and progress_now >= end_lock_progress:
+                    alpha = float(np.clip((progress_now - end_lock_progress) / max(1.0 - end_lock_progress, 1e-6), 0.0, 1.0))
+                    active = float((1.0 - alpha) * active + alpha * base_dist)
+                    policy_dist = float((1.0 - alpha) * policy_dist + alpha * base_dist)
+            else:
+                policy_dist = float(min_dist + policy_u * (max_dist - min_dist))
+                active = float((1.0 - mix_gain) * base_dist + mix_gain * policy_dist)
         else:
             policy_dist = float(base_dist)
             active = float(base_dist)
@@ -590,6 +642,7 @@ class Env:
             "lookahead_dist": float(active),
             "lookahead_u": float(policy_u),
             "mix_gain": float(getattr(self, "lookahead_control_mix_gain", 1.0)),
+            "residual_mode": 1.0 if bool(getattr(self, "lookahead_control_residual_mode", False)) else 0.0,
         }
         return float(active)
 
@@ -1020,19 +1073,32 @@ class Env:
             "du_l1": float(abs(du_theta_u) + abs(du_v_u)),
         })
 
-        # Apply Kinematics
-        (self.velocity, self.acceleration, self.jerk,
-         self.angular_vel, self.angular_acc, self.angular_jerk) = apply_kinematic_constraints(
-            prev_vel, prev_acc, prev_ang_vel, prev_ang_acc,
-            raw_linear_vel_intent, raw_angular_vel_intent, self.interpolation_period,
-            max_vel_cap_phys, self.MAX_ACC, self.MAX_JERK,
-            self.MAX_ANG_VEL, self.MAX_ANG_ACC, self.MAX_ANG_JERK
-        )
+        dt = max(float(self.interpolation_period), 1e-6)
+        raw_linear_acc = float(raw_linear_vel_intent - prev_vel) / dt
+        raw_linear_jerk = float(raw_linear_acc - prev_acc) / dt
+        raw_angular_acc = float(raw_angular_vel_intent - prev_ang_vel) / dt
+        raw_angular_jerk = float(raw_angular_acc - prev_ang_acc) / dt
 
-        # KCM Intervention
-        velocity_diff = abs(self.velocity - raw_linear_vel_intent) / max(float(self.MAX_VEL), 1e-6)
-        angular_vel_diff = abs(self.angular_vel - raw_angular_vel_intent) / max(float(self.MAX_ANG_VEL), 1e-6)
-        self.kcm_intervention = float(velocity_diff + angular_vel_diff)
+        if self.disable_kcm:
+            self.velocity = float(np.clip(raw_linear_vel_intent, 0.0, max_vel_cap_phys))
+            self.acceleration = float(raw_linear_acc)
+            self.jerk = float(raw_linear_jerk)
+            self.angular_vel = float(np.clip(raw_angular_vel_intent, -self.MAX_ANG_VEL, self.MAX_ANG_VEL))
+            self.angular_acc = float(raw_angular_acc)
+            self.angular_jerk = float(raw_angular_jerk)
+            self.kcm_intervention = 0.0
+        else:
+            (self.velocity, self.acceleration, self.jerk,
+             self.angular_vel, self.angular_acc, self.angular_jerk) = apply_kinematic_constraints(
+                prev_vel, prev_acc, prev_ang_vel, prev_ang_acc,
+                raw_linear_vel_intent, raw_angular_vel_intent, self.interpolation_period,
+                max_vel_cap_phys, self.MAX_ACC, self.MAX_JERK,
+                self.MAX_ANG_VEL, self.MAX_ANG_ACC, self.MAX_ANG_JERK
+            )
+
+            velocity_diff = abs(self.velocity - raw_linear_vel_intent) / max(float(self.MAX_VEL), 1e-6)
+            angular_vel_diff = abs(self.angular_vel - raw_angular_vel_intent) / max(float(self.MAX_ANG_VEL), 1e-6)
+            self.kcm_intervention = float(velocity_diff + angular_vel_diff)
 
         # Update P4 Exec Status
         v_ratio_exec = float(self.velocity / max(float(self.MAX_VEL), 1e-6))
@@ -1092,6 +1158,9 @@ class Env:
             lookahead_dist=float(getattr(self, "_lookahead_dist_active", self.lookahead_dist)),
             lookahead_dist_norm=float(self._get_active_lookahead_norm()),
             region_weight=float(getattr(self, "_lookahead_region_weight", 0.0)),
+            current_step=int(getattr(self, "current_step", 0)),
+            max_steps=int(getattr(self, "max_steps", 0)),
+            path_name=str(getattr(self, "path_name", "") or ""),
         )
         reward, components = self.reward_calculator.calculate_reward(ctx)
         p4_status["cornerness"] = float(components.get("cornerness", 0.0))
@@ -1113,7 +1182,10 @@ class Env:
             "segment_idx": self.current_segment_idx,
             "progress": ctx.progress,
             "jerk": self.jerk,
+            "raw_linear_jerk_demand": float(raw_linear_jerk),
+            "raw_angular_jerk_demand": float(raw_angular_jerk),
             "kcm_intervention": self.kcm_intervention,
+            "disable_kcm": bool(self.disable_kcm),
             "corridor_status": copy.deepcopy(getattr(self, "last_corridor_status", {})),
             "p4_status": copy.deepcopy(p4_status),
             "action_policy": action_policy.copy(),
@@ -2938,6 +3010,9 @@ class Env:
             lookahead_dist=float(getattr(self, "_lookahead_dist_active", self.lookahead_dist)),
             lookahead_dist_norm=float(self._get_active_lookahead_norm()),
             region_weight=float(getattr(self, "_lookahead_region_weight", 0.0)),
+            current_step=int(getattr(self, "current_step", 0)),
+            max_steps=int(getattr(self, "max_steps", 0)),
+            path_name=str(getattr(self, "path_name", "") or ""),
         )
         reward, components = self.reward_calculator.calculate_reward(ctx)
         self.last_reward_components = dict(components)
@@ -3426,19 +3501,31 @@ class Env:
             return True
 
         # 2) success（优先于 stall/max_steps，避免“到终点但被误判失败”）
-        if self.closed and self.lap_completed:
+        progress = float(self.state[6]) if getattr(self, "state", None) is not None and len(self.state) > 6 else 0.0
+        closed_end_distance = min(
+            float(np.linalg.norm(self.current_position - np.array(self.Pm[0]))),
+            float(np.linalg.norm(self.current_position - np.array(self.Pm[-1]))),
+        )
+        finish_distance_tol = float(self.half_epsilon) * float(self.completion_distance_ratio)
+        if self.closed and (
+            self.lap_completed
+            or (
+                progress >= float(self.completion_progress_threshold)
+                and closed_end_distance <= finish_distance_tol
+            )
+        ):
             self.reached_target = True
             self._maybe_print_episode_summary(contour_error=contour_error)
             return True
 
         if not self.closed:
-            progress = float(self.state[4]) if getattr(self, "state", None) is not None and len(self.state) > 4 else 0.0
             end_point = np.array(self.Pm[-1])
             end_distance = float(np.linalg.norm(self.current_position - end_point))
 
             # 保留跨终点线，同时加备用判据（P7.3）：progress 足够大且终点距离足够小
             if self._open_reached_target(self.current_position) or (
-                progress > 0.995 and end_distance < self.half_epsilon
+                progress >= float(self.completion_progress_threshold)
+                and end_distance <= finish_distance_tol
             ):
                 self.reached_target = True
                 self._maybe_print_episode_summary(contour_error=contour_error)
@@ -3464,6 +3551,8 @@ def create_environment_from_config(config: Dict, path_points: Iterable, device=N
     Pm = [np.array(pt) for pt in path_points]
     reward_weights = config.get("reward_weights", {})
     curvature_observation = env_cfg.get("curvature_observation") if isinstance(env_cfg, dict) else None
+    path_cfg = config.get("path", {}) if isinstance(config.get("path", {}), dict) else {}
+    path_name = str(path_cfg.get("name") or path_cfg.get("type") or "").strip()
 
     return Env(
         device=device or env_cfg.get("device"),
@@ -3482,6 +3571,10 @@ def create_environment_from_config(config: Dict, path_points: Iterable, device=N
         lookahead_obs_scales=env_cfg.get("lookahead_obs_scales", [1.0]),
         reward_weights=reward_weights,
         curvature_observation=curvature_observation,
+        disable_kcm=bool(config.get("experiment", {}).get("enable_kcm", True) is False),
+        path_name=path_name,
+        completion_progress_threshold=env_cfg.get("completion_progress_threshold", 0.99),
+        completion_distance_ratio=env_cfg.get("completion_distance_ratio", 1.0),
     )
 
 

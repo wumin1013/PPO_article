@@ -1,5 +1,6 @@
 param(
     [int]$Hours = 16,
+    [string]$DeadlineTime = "",
     [string]$RunName = "",
     [string]$CondaExe = "D:\Anaconda\Scripts\conda.exe",
     [string]$CondaEnv = "PPO",
@@ -13,6 +14,13 @@ param(
     [int]$AmpLookback = 4,
     [string]$Paths = "square,circle,butterfly",
     [string]$ScreenPaths = "",
+    [bool]$LaunchPaperSuite = $true,
+    [int]$PaperIntervalSeconds = 300,
+    [int]$PaperTotalEpisodes = 220,
+    [double]$PaperTimeBudgetSeconds = 600.0,
+    [double]$PaperProcessTimeoutSeconds = 5400.0,
+    [int]$PaperEvalEpisodes = 3,
+    [string]$PaperVariants = "full_method_snapshot",
     [switch]$DeterministicEval
 )
 
@@ -134,10 +142,24 @@ $currentBestPath = Join-Path $scriptRoot "workspace\current_best.json"
 $leaderboardMarkdownPath = Join-Path $scriptRoot "workspace\leaderboard.md"
 $leaderboardJsonPath = Join-Path $scriptRoot "workspace\leaderboard.json"
 $resultsPath = Join-Path $scriptRoot "results.tsv"
+$paperRunsDir = Join-Path $scriptRoot "paper_runs"
+$paperActiveLogsDir = Join-Path $paperRunsDir "active_logs"
+$paperProcessesPath = Join-Path $paperRunsDir "paper_processes.json"
+$paperBridgeSummaryPath = Join-Path $repoRoot "论文项目\generated\paper_bridge_summary.json"
+$null = New-Item -ItemType Directory -Force -Path $paperRunsDir, $paperActiveLogsDir
 
 $resultsLineCountBefore = Get-ResultsLineCount -Path $resultsPath
 $startTime = Get-Date
-$deadline = $startTime.AddHours($Hours)
+if (-not [string]::IsNullOrWhiteSpace($DeadlineTime)) {
+    $deadline = [datetime]::Parse($DeadlineTime, [System.Globalization.CultureInfo]::InvariantCulture)
+    if ($deadline -le $startTime) {
+        throw "DeadlineTime must be later than current time."
+    }
+}
+else {
+    $deadline = $startTime.AddHours($Hours)
+}
+$deadlineIso = $deadline.ToString("yyyy-MM-ddTHH:mm:ss")
 $branch = (& git -C $repoRoot branch --show-current).Trim()
 $gitHead = (& git -C $repoRoot rev-parse HEAD).Trim()
 $stdoutLogPath = Join-Path $runDir "train.stdout.log"
@@ -202,6 +224,70 @@ $status.status = "running"
 $status.child_pid = $process.Id
 Write-JsonFile -Path $statusPath -Value $status
 
+$paperSupervisorProcess = $null
+$paperSupervisorStdoutLog = ""
+$paperSupervisorStderrLog = ""
+$paperSupervisorStatusPath = ""
+if ($LaunchPaperSuite) {
+    $paperSupervisorStdoutLog = Join-Path $paperActiveLogsDir ("{0}_paper_supervisor.stdout.log" -f $runId)
+    $paperSupervisorStderrLog = Join-Path $paperActiveLogsDir ("{0}_paper_supervisor.stderr.log" -f $runId)
+    $paperSupervisorStatusPath = Join-Path $paperActiveLogsDir ("{0}_paper_supervisor.status.json" -f $runId)
+    $paperArgs = @(
+        "run",
+        "-n", $CondaEnv,
+        "python",
+        "trajectory_autoresearch\paper_supervisor.py",
+        "--deadline-time", $deadlineIso,
+        "--status-path", $paperSupervisorStatusPath,
+        "--suite-name-prefix", $runId,
+        "--interval-seconds", $PaperIntervalSeconds.ToString(),
+        "--paths", $Paths,
+        "--total-episodes", $PaperTotalEpisodes.ToString(),
+        "--time-budget-seconds", (To-InvariantText -Value $PaperTimeBudgetSeconds),
+        "--process-timeout-seconds", (To-InvariantText -Value $PaperProcessTimeoutSeconds),
+        "--eval-episodes", $PaperEvalEpisodes.ToString(),
+        "--conda-env", $CondaEnv
+    )
+    if (-not [string]::IsNullOrWhiteSpace($PaperVariants)) {
+        $paperArgs += @("--variants", $PaperVariants)
+    }
+    if ($DeterministicEval.IsPresent) {
+        $paperArgs += "--deterministic-eval"
+    }
+    $paperSupervisorProcess = Start-Process -FilePath $CondaExe `
+        -ArgumentList $paperArgs `
+        -WorkingDirectory $repoRoot `
+        -RedirectStandardOutput $paperSupervisorStdoutLog `
+        -RedirectStandardError $paperSupervisorStderrLog `
+        -PassThru
+}
+
+$paperProcessPayload = [ordered]@{
+    started_at = $startTime.ToString("yyyy-MM-dd HH:mm:ss")
+    updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+    branch = $branch
+    git_head = $gitHead
+    paper_window_finish = $deadline.ToString("yyyy-MM-dd HH:mm:ss")
+    long_run = [ordered]@{
+        pid = $process.Id
+        status_file = $statusPath
+        estimated_finish = $deadline.ToString("yyyy-MM-dd HH:mm:ss")
+    }
+    paper_supervisor = if ($null -ne $paperSupervisorProcess) {
+        [ordered]@{
+            pid = $paperSupervisorProcess.Id
+            stdout_log = $paperSupervisorStdoutLog
+            stderr_log = $paperSupervisorStderrLog
+            status_file = $paperSupervisorStatusPath
+            estimated_finish = $deadline.ToString("yyyy-MM-dd HH:mm:ss")
+        }
+    } else {
+        [ordered]@{}
+    }
+    paper_bridge_summary = $paperBridgeSummaryPath
+}
+Write-JsonFile -Path $paperProcessesPath -Value $paperProcessPayload
+
 while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 30
     $process.Refresh()
@@ -212,6 +298,27 @@ if (-not $process.HasExited) {
     & taskkill /PID $process.Id /T /F | Out-Null
     $exitReason = "deadline_reached"
     Start-Sleep -Seconds 5
+}
+
+$paperSupervisorExitCode = $null
+if ($null -ne $paperSupervisorProcess) {
+    try {
+        $paperSupervisorProcess.Refresh()
+        if (-not $paperSupervisorProcess.HasExited) {
+            & taskkill /PID $paperSupervisorProcess.Id /T /F | Out-Null
+            Start-Sleep -Seconds 3
+        }
+    }
+    catch {
+    }
+    try {
+        $paperSupervisorProcess.Refresh()
+        if ($paperSupervisorProcess.HasExited) {
+            $paperSupervisorExitCode = $paperSupervisorProcess.ExitCode
+        }
+    }
+    catch {
+    }
 }
 
 $exitCode = $null
@@ -241,3 +348,11 @@ $status.results_line_count_after = $resultsLineCountAfter
 $status.results_rows_added = [Math]::Max(0, $resultsLineCountAfter - $resultsLineCountBefore)
 $status.current_best_after = Read-JsonObject -Path $currentBestPath
 Write-JsonFile -Path $statusPath -Value $status
+
+$paperProcessPayload.updated_at = (Get-Date).ToString("yyyy-MM-dd HH:mm:ss")
+$paperProcessPayload.long_run.exit_reason = $exitReason
+$paperProcessPayload.long_run.exit_code = $exitCode
+if ($null -ne $paperSupervisorProcess) {
+    $paperProcessPayload.paper_supervisor.exit_code = $paperSupervisorExitCode
+}
+Write-JsonFile -Path $paperProcessesPath -Value $paperProcessPayload

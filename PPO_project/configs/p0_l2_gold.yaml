@@ -9,9 +9,9 @@ environment:
 kinematic_constraints:
   MAX_VEL: 100.0
   MAX_ACC: 2000.0
-  MAX_JERK: 20000.0
+  MAX_JERK: 62500.0
   MAX_ANG_VEL: 6.283185307179586
-  MAX_ANG_ACC: 100.0
+  MAX_ANG_ACC: 31.41592653589793
   MAX_ANG_JERK: 1000.0
 
 reward_weights:
@@ -124,8 +124,8 @@ training:
 path:
   type: square
   closed: true
-  scale: 10.0
-  num_points: 200
+  scale: 100.0
+  num_points: 1200
   square: {}
 
 experiment:

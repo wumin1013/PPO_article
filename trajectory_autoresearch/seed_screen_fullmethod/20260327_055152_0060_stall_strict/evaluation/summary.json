@@ -1,0 +1,125 @@
+{
+  "path_results": {
+    "square": {
+      "summary": {
+        "phase": "p0_eval",
+        "passed": false,
+        "episodes": 1,
+        "model_path": "c:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\runs\\20260327_055152_0060_stall_strict\\checkpoints\\best_model.pth",
+        "deterministic": true,
+        "seed_eval": 43,
+        "episode_set": null,
+        "success_rate": 0.0,
+        "stall_rate": 1.0,
+        "mean_progress_final": 6.157623283797875e-05,
+        "max_abs_contour_error": 0.0003041343678671814,
+        "has_non_finite": false,
+        "thresholds": {
+          "success_rate_ge": 0.8,
+          "stall_rate_le": 0.05,
+          "mean_progress_final_ge": 0.95,
+          "max_abs_contour_error_le": 1.25
+        },
+        "half_epsilon": 1.25,
+        "timestamp": "2026-03-27 17:37:27",
+        "config_path": "c:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\seed_screen_fullmethod\\20260327_055152_0060_stall_strict\\evaluation\\configs\\square.yaml"
+      },
+      "episodes": [
+        {
+          "episode": 0,
+          "return": -14.269002670253492,
+          "progress_final": 6.157623283797875e-05,
+          "done_reason": "stall",
+          "max_abs_contour_error": 0.0003041343678671814,
+          "steps": 249
+        }
+      ]
+    },
+    "circle": {
+      "summary": {
+        "phase": "p0_eval",
+        "passed": false,
+        "episodes": 1,
+        "model_path": "c:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\runs\\20260327_055152_0060_stall_strict\\checkpoints\\best_model.pth",
+        "deterministic": true,
+        "seed_eval": 43,
+        "episode_set": null,
+        "success_rate": 0.0,
+        "stall_rate": 1.0,
+        "mean_progress_final": 5.217723810346797e-05,
+        "max_abs_contour_error": 0.0001029062867966563,
+        "has_non_finite": false,
+        "thresholds": {
+          "success_rate_ge": 0.8,
+          "stall_rate_le": 0.05,
+          "mean_progress_final_ge": 0.95,
+          "max_abs_contour_error_le": 1.25
+        },
+        "half_epsilon": 1.25,
+        "timestamp": "2026-03-27 17:37:41",
+        "config_path": "c:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\seed_screen_fullmethod\\20260327_055152_0060_stall_strict\\evaluation\\configs\\circle.yaml"
+      },
+      "episodes": [
+        {
+          "episode": 0,
+          "return": -16.59892604243174,
+          "progress_final": 5.217723810346797e-05,
+          "done_reason": "stall",
+          "max_abs_contour_error": 0.0001029062867966563,
+          "steps": 249
+        }
+      ]
+    },
+    "butterfly": {
+      "summary": {
+        "phase": "p0_eval",
+        "passed": false,
+        "episodes": 1,
+        "model_path": "c:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\runs\\20260327_055152_0060_stall_strict\\checkpoints\\best_model.pth",
+        "deterministic": true,
+        "seed_eval": 43,
+        "episode_set": null,
+        "success_rate": 0.0,
+        "stall_rate": 1.0,
+        "mean_progress_final": 6.082433174015023e-05,
+        "max_abs_contour_error": 0.0011337091124607394,
+        "has_non_finite": false,
+        "thresholds": {
+          "success_rate_ge": 0.8,
+          "stall_rate_le": 0.05,
+          "mean_progress_final_ge": 0.95,
+          "max_abs_contour_error_le": 1.25
+        },
+        "half_epsilon": 1.25,
+        "timestamp": "2026-03-27 17:37:54",
+        "config_path": "c:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\seed_screen_fullmethod\\20260327_055152_0060_stall_strict\\evaluation\\configs\\butterfly.yaml"
+      },
+      "episodes": [
+        {
+          "episode": 0,
+          "return": -336.0260660886099,
+          "progress_final": 6.082433174015023e-05,
+          "done_reason": "stall",
+          "max_abs_contour_error": 0.0011337091124607394,
+          "steps": 249
+        }
+      ]
+    }
+  },
+  "aggregated": {
+    "path_count": 3,
+    "pass_count": 0,
+    "strict_pass_count": 0,
+    "pass_rate": 0.0,
+    "strict_pass_rate": 0.0,
+    "mean_success_rate": 0.0,
+    "mean_stall_rate": 1.0,
+    "mean_progress_final": 5.819260089386565e-05,
+    "mean_error_ratio": 0.0004108666045665539,
+    "max_error_ratio": 0.0009069672899685915,
+    "mean_completion_time_seconds": 999999.0,
+    "max_completion_time_seconds": 999999.0,
+    "score_profile": "stage2",
+    "score": -80.01735516154415
+  }
+}

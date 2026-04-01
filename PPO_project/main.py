@@ -215,6 +215,7 @@ def _init_loggers(manager: ExperimentManager, log_tag: str) -> tuple[CSVLogger, 
             "lookahead_u_policy",
             "lookahead_u_exec",
             "r_lookahead",
+            "r_teacher",
             "r_track",
             "r_smooth",
         ],
@@ -419,6 +420,8 @@ def _create_env(
     reward_weights: Mapping[str, Any],
     training_config: Mapping[str, Any],
     path_points: Sequence[np.ndarray],
+    path_name: str = "",
+    disable_kcm: bool = False,
 ) -> Env:
     """统一环境构建，便于单路径/多路径复用。"""
     use_obs_normalizer = bool(training_config.get("use_obs_normalizer", False))
@@ -440,6 +443,10 @@ def _create_env(
         reward_weights=reward_weights,
         curvature_observation=env_config.get("curvature_observation"),
         return_normalized_obs=not use_obs_normalizer,
+        path_name=path_name,
+        disable_kcm=bool(disable_kcm),
+        completion_progress_threshold=env_config.get("completion_progress_threshold", 0.99),
+        completion_distance_ratio=env_config.get("completion_distance_ratio", 1.0),
     )
 
 
@@ -480,6 +487,10 @@ def train(
     if experiment_config.get("enable_kcm") is False and experiment_mode == "train":
         experiment_mode = "ablation_no_kcm"
         experiment_config["mode"] = experiment_mode
+    disable_kcm = bool(
+        experiment_config.get("enable_kcm") is False
+        or experiment_mode in {"ablation_no_kcm", "baseline_nnc", "baseline_s_curve"}
+    )
 
     seed = int(config.get("seed", experiment_config.get("seed", 42)))
     config["seed"] = seed
@@ -541,6 +552,8 @@ def train(
         reward_weights=reward_weights,
         training_config=training_config,
         path_points=Pm,
+        path_name=initial_path_name,
+        disable_kcm=disable_kcm,
     )
 
     obs_space = getattr(env, "observation_space", None)
@@ -562,11 +575,12 @@ def train(
     if experiment_mode in ["baseline_nnc", "baseline_s_curve"]:
         baseline_type = _extract_baseline_type(experiment_mode)
         experiment_config["baseline_type"] = baseline_type
-        config["state_dim"] = obs_space.shape[0] if obs_space is not None else env.observation_dim
-        config["action_dim"] = act_space.shape[0] if act_space is not None else env.action_space_dim
-        config["observation_space"] = obs_space
-        config["action_space"] = act_space
-        agent = create_baseline_agent(baseline_type, config, device)
+        baseline_agent_config = dict(config)
+        baseline_agent_config["state_dim"] = obs_space.shape[0] if obs_space is not None else env.observation_dim
+        baseline_agent_config["action_dim"] = act_space.shape[0] if act_space is not None else env.action_space_dim
+        baseline_agent_config["observation_space"] = obs_space
+        baseline_agent_config["action_space"] = act_space
+        agent = create_baseline_agent(baseline_type, baseline_agent_config, device)
         print(f"创建基线算法智能体 {baseline_type.upper()}")
 
     elif experiment_mode == "ablation_no_kcm":
@@ -753,6 +767,8 @@ def train(
                     reward_weights=reward_weights,
                     training_config=training_config,
                     path_points=Pm,
+                    path_name=episode_path_name,
+                    disable_kcm=disable_kcm,
                 )
                 if hasattr(env, "_episode_index"):
                     env._episode_index = int(episode) - 1
@@ -848,6 +864,7 @@ def train(
                         lookahead_u_policy=float(p4_status.get("lookahead_u_policy", 0.0)),
                         lookahead_u_exec=float(p4_status.get("lookahead_u_exec", 0.0)),
                         r_lookahead=float(reward_components.get("r_lookahead", 0.0)),
+                        r_teacher=float(reward_components.get("r_teacher", 0.0)),
                         r_track=float(reward_components.get("r_track", 0.0)),
                         r_smooth=float(reward_components.get("r_smooth", 0.0)),
                     )
@@ -1055,6 +1072,10 @@ def test(
 
     experiment_config = config.setdefault("experiment", {})
     experiment_mode = mode_override or experiment_config.get("mode", "test")
+    disable_kcm = bool(
+        experiment_config.get("enable_kcm") is False
+        or experiment_mode in {"ablation_no_kcm", "baseline_nnc", "baseline_s_curve"}
+    )
 
     seed = int(config.get("seed", experiment_config.get("seed", 42)))
     config["seed"] = seed
@@ -1091,6 +1112,8 @@ def test(
         reward_weights=reward_weights,
         training_config=training_config,
         path_points=Pm,
+        path_name=str(path_config.get("name") or path_config.get("type") or "path"),
+        disable_kcm=disable_kcm,
     )
 
     obs_space = getattr(env, "observation_space", None)

@@ -74,6 +74,8 @@ def _make_env(config: dict, path_cfg: Dict[str, Any], device: torch.device) -> E
         reward_weights=reward_weights,
         curvature_observation=env_cfg.get("curvature_observation"),
         return_normalized_obs=not use_obs_normalizer,
+        path_name=str(path_cfg.get("name") or path_cfg.get("type") or ""),
+        disable_kcm=bool(config.get("experiment", {}).get("enable_kcm", True) is False),
     )
 
 
@@ -192,14 +194,14 @@ def _save_plot(path_name: str, result: dict, out_png: Path) -> None:
     ax.scatter([ref[0, 0]], [ref[0, 1]], c="green", marker="o", s=55, label="Ref Start")
     ax.scatter([ref[-1, 0]], [ref[-1, 1]], c="red", marker="x", s=55, label="Ref End")
     ax.scatter([traj[-1, 0]], [traj[-1, 1]], c="black", marker="*", s=45, label="Trajectory End")
-    cb.set_label("Velocity")
+    cb.set_label("Velocity (mm/s)")
     ax.set_title(
         f"{path_name} | best model rollout\n"
         f"steps={result['steps']} progress={result['progress']:.4f} reward={result['reward']:.2f} "
         f"done={result.get('done_reason', 'unknown')}"
     )
-    ax.set_xlabel("X")
-    ax.set_ylabel("Y")
+    ax.set_xlabel("X (mm)")
+    ax.set_ylabel("Y (mm)")
     ax.axis("equal")
     ax.grid(True, linestyle=":", alpha=0.5)
     ax.legend(loc="best", fontsize=8)

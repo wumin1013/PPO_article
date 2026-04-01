@@ -1,0 +1,251 @@
+autoresearch:
+  candidate: progress_harder
+  candidate_amplitude: 1.0
+  created_at: '2026-03-27 15:45:29'
+  description: 提高进度奖励与时间压强，优先更快到终点 | amp=1.00x
+  experiment_id: 20260327_154529_0000_progress_harder
+  git_head: '3384270'
+  parent_experiment_id: 20260327_seed_abl_fixed_lookahead
+  parent_run_dir: c:\Users\wumin\Nutstore\1\DDPG的轨迹平滑\基于强化学习的轨迹平滑\trajectory_autoresearch\paper_runs\20260327_105838_paper_main_suite_3paths\abl_fixed_lookahead
+environment:
+  epsilon: 2.5
+  interpolation_period: 0.001
+  lookahead_obs_enabled: true
+  lookahead_obs_scales:
+  - 0.5
+  - 1.0
+  - 2.0
+  lookahead_points: 8
+  max_steps: 32000
+experiment:
+  baseline_type: null
+  category: trajectory_autoresearch
+  enable_kcm: true
+  mode: train
+  model_path: null
+  name: 20260327_154529_0000_progress_harder
+  paper_description: ''
+  paper_label: ''
+  paper_variant: ''
+  seed: 42
+kinematic_constraints:
+  MAX_VEL: 100.0
+  MAX_ACC: 2000.0
+  MAX_JERK: 62500.0
+  MAX_ANG_VEL: 6.283185307179586
+  MAX_ANG_ACC: 31.41592653589793
+  MAX_ANG_JERK: 1000.0
+path:
+  name: circle
+  type: circle
+  scale: 100.0
+  num_points: 960
+  circle:
+    closed: true
+ppo:
+  actor_lr: 0.0003
+  batch_size: null
+  critic_lr: 0.0001
+  ent_coef: 0.01
+  epochs: 6
+  eps: 0.1
+  gamma: 0.99
+  hidden_dim: 256
+  lmbda: 0.95
+reward_weights:
+  control_authority:
+    blend_schedule: cosine
+    max_correction_deg: 50.0
+    mode: blend
+    progress_seg_hysteresis_ratio: 1.25
+    tangent_blend: 0.08
+    theta_ref_smooth_alpha: 0.35
+    warmup_blend: 0.2
+    warmup_episodes: 120
+  cornerness:
+    ema_tau_steps: 12
+    enabled: true
+    keep_legacy_smooth: false
+    power: 2.0
+    smooth_power: 2.0
+    smooth_source: domega
+    theta0_deg: 30.0
+    w_smooth0: 3.0
+    w_track0: 5.0
+    w_track_min: 1.0
+  corridor:
+    barrier_scale_ratio: 0.05
+    barrier_weight: 0.0
+    center_power: 1.0
+    center_weight: 0.0
+    dir_pref_beta: 2.0
+    dir_pref_weight: 0.0
+    dist_enter: 6.0
+    dist_exit: 7.0
+    enabled: true
+    exit_center_ramp_steps: 60
+    heading_weight: 2.0
+    margin_ratio: 0.1
+    outside_penalty_weight: 0.0
+    safe_margin_ratio: 0.2
+    theta_enter_deg: 10.0
+    theta_exit_deg: 8.0
+  lookahead:
+    distance: 2.222
+    enabled: true
+    ref_in_control: true
+  lookahead_control:
+    action_default: 0.5
+    corner_dist: 2.688
+    cornerness_high_deg: 30.0
+    cornerness_low_deg: 5.0
+    direction_mode: los
+    enabled: false
+    max_dist: 4.0
+    min_dist: 0.8
+    mix_gain: 0.672
+    policy_action: false
+    region_source: turn
+    straight_dist: 1.2
+  lookahead_reward:
+    corner_target: 0.8640000000000001
+    enabled: true
+    power: 2.0
+    straight_target: 0.2
+    w_corner: 1.2
+    w_straight: 0.6
+  minimal_mode: false
+  p4:
+    d_scale: null
+    debug: false
+    exit_boost_enabled: true
+    exit_progress_mult: 1.5120000000000002
+    exit_speed_target_min: 0.9974999999999999
+    exit_window_sec: 0.25
+    p7_2_k: 0.01
+    speed_cap_enabled: true
+    speed_cap_eps: 1e-12
+    speed_cap_k: 4
+    speed_cap_preview_points: 8
+    speed_cap_s_max: 30.0
+    speed_cap_s_min: 1.0
+    speed_cap_use_wddot: true
+    speed_cap_use_wdot: true
+    speed_weight: 6.0
+    stall_enabled: true
+    stall_penalty: -8.0
+    stall_progress_eps: 1e-4
+    stall_steps: 300
+    stall_v_eps: 0.05
+    theta_max_deg: 90.0
+    time_penalty: -0.016
+    v_max: 1.0
+    v_min: 0.392
+  p6_1:
+    a_ref_max_ratio: 0.5
+    du_enabled: true
+    du_mode: l1
+    j_ref_enabled: true
+    j_ref_max_ratio: 0.5
+    v_target_mode: accel
+    v_target_smoother_enabled: true
+    v_target_tau: 0.1
+    w_du: 0.01
+  p7_3:
+    kappa_dkappa_limit: null
+    kappa_smoothing_beta: 0.25
+    kappa_smoothing_enabled: true
+    stall_cap_low: 0.25
+    trace_ring_size: 200
+  p8:
+    ang_cap_min_ratio: 0.1
+    corner_exit_e_release_ratio: 0.55
+    corner_exit_hold_steps: 2
+    corner_exit_psi_release_deg: 20.0
+    corner_off_dist_scale: 3.0
+    corner_on_dist_scale: 2.0
+    use_corner_exit_hysteresis: true
+    use_recovery_cap: false
+    use_vcap_rate_limit: true
+    vcap_rate_down: 0.01
+    vcap_rate_up: 0.01
+  tube:
+    enabled: false
+    ratio: 0.5
+  w_e: 8.0
+  w_s: 15.36
+  w_smooth: 0.08
+  w_tau: 3.0
+seed: 42
+training:
+  best_trajectory_require_deterministic_start: true
+  checkpoint_interval_steps: 2048
+  enable_best_trajectory_snapshot: true
+  enable_final_visualization: false
+  enable_latest_trajectory: false
+  log_interval: 50
+  num_episodes: 432
+  path_curriculum:
+    enabled: true
+    episodes_per_path: 2
+    mode: round_robin
+    paths:
+    - closed: true
+      name: square
+      num_points: 260
+      scale: 22.0
+      square:
+        start_offset_ratio: 0.2
+      type: square
+    - circle:
+        closed: true
+      name: circle
+      num_points: 280
+      scale: 24.0
+      type: circle
+    - butterfly:
+        closed: true
+        cross_ratio: 0.1
+        long_ratio: 1.45
+        style: academic
+        wing_ratio: 1.0
+      name: butterfly
+      num_points: 420
+      scale: 40.0
+      type: butterfly
+    seed: 42
+  random_start_ratio: 0.0
+  save_interval: 100
+  smoothing_factor: 0.9
+  step_log_interval_steps: 10
+  time_budget_seconds: 90.0
+  traj_write_interval_steps: 0
+  traj_write_max_points: 2000
+  use_obs_normalizer: false
+path_curriculum:
+  enabled: true
+  paths:
+  - name: square
+    type: square
+    closed: true
+    scale: 100.0
+    num_points: 1200
+    square:
+      start_offset_ratio: 0.2
+  - name: circle
+    type: circle
+    scale: 100.0
+    num_points: 960
+    circle:
+      closed: true
+  - name: butterfly
+    type: butterfly
+    scale: 28.0
+    num_points: 720
+    butterfly:
+      style: academic
+      wing_ratio: 1.0
+      long_ratio: 1.45
+      cross_ratio: 0.1
+      closed: true
+  episodes_per_path: 1

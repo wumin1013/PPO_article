@@ -4,6 +4,7 @@ import argparse
 import json
 import shutil
 import traceback
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Sequence
@@ -36,6 +37,7 @@ from prepare import (
 
 PAPER_RUNS_DIR = RESEARCH_ROOT / "paper_runs"
 PAPER_SYNC_SCRIPT = RESEARCH_ROOT / "paper_sync.py"
+NNC_BASE_CONFIG = RESEARCH_ROOT.parent / "PPO_project" / "configs" / "p0_l2_gold.yaml"
 
 
 @dataclass(frozen=True)
@@ -52,6 +54,18 @@ def variant_specs() -> list[PaperVariantSpec]:
     def noop(cfg: dict) -> None:
         return
 
+    def nnc_baseline(cfg: dict) -> None:
+        set_nested(cfg, "environment.lookahead_points", 0)
+        set_nested(cfg, "environment.lookahead_obs_enabled", False)
+        set_nested(cfg, "reward_weights.lookahead_control.enabled", False)
+        set_nested(cfg, "reward_weights.lookahead_control.policy_action", False)
+        set_nested(cfg, "reward_weights.cornerness.enabled", False)
+        set_nested(cfg, "reward_weights.cornerness.keep_legacy_smooth", True)
+        set_nested(cfg, "experiment.enable_kcm", False)
+        set_nested(cfg, "ppo.actor_lr", max(float(get_nested(cfg, "ppo.actor_lr", 1.0e-4) or 1.0e-4), 1.0e-4))
+        set_nested(cfg, "ppo.critic_lr", max(float(get_nested(cfg, "ppo.critic_lr", 1.2e-4) or 1.2e-4), 1.2e-4))
+        set_nested(cfg, "ppo.epochs", max(8, int(get_nested(cfg, "ppo.epochs", 8) or 8)))
+
     def fixed_lookahead(cfg: dict) -> None:
         min_dist = float(get_nested(cfg, "reward_weights.lookahead_control.min_dist", 0.8) or 0.8)
         max_dist = float(get_nested(cfg, "reward_weights.lookahead_control.max_dist", 4.0) or 4.0)
@@ -64,10 +78,14 @@ def variant_specs() -> list[PaperVariantSpec]:
         set_nested(cfg, "reward_weights.lookahead_control.enabled", False)
         set_nested(cfg, "reward_weights.lookahead_control.policy_action", False)
 
+    def no_lookahead_obs(cfg: dict) -> None:
+        set_nested(cfg, "environment.lookahead_obs_enabled", False)
+
     def no_kcm(cfg: dict) -> None:
         set_nested(cfg, "experiment.enable_kcm", False)
 
-    def no_cornerness(cfg: dict) -> None:
+    def no_dual_reward(cfg: dict) -> None:
+        set_nested(cfg, "reward_weights.lookahead_reward.enabled", False)
         set_nested(cfg, "reward_weights.cornerness.enabled", False)
         set_nested(cfg, "reward_weights.cornerness.keep_legacy_smooth", True)
 
@@ -82,11 +100,11 @@ def variant_specs() -> list[PaperVariantSpec]:
         ),
         PaperVariantSpec(
             name="baseline_policy",
-            label="基线策略",
-            description="以基线配置重新训练并评测",
-            source="base_config",
+            label="NNC 基线",
+            description="以无前瞻观测、无前瞻动作且无KCM约束的普通 NNC 强化学习口径重新训练并评测",
+            source="nnc_base",
             mode="train_eval",
-            apply=noop,
+            apply=nnc_baseline,
         ),
         PaperVariantSpec(
             name="abl_fixed_lookahead",
@@ -97,20 +115,28 @@ def variant_specs() -> list[PaperVariantSpec]:
             apply=fixed_lookahead,
         ),
         PaperVariantSpec(
+            name="abl_no_lookahead_obs",
+            label="无前瞻观测",
+            description="移除多尺度前瞻观测状态，仅保留其余模块",
+            source="current_best",
+            mode="train_eval",
+            apply=no_lookahead_obs,
+        ),
+        PaperVariantSpec(
+            name="abl_no_dual_reward",
+            label="无直线/拐角双奖励",
+            description="移除直线区与拐角区的差异化奖励调度，仅保留统一跟踪奖励",
+            source="current_best",
+            mode="train_eval",
+            apply=no_dual_reward,
+        ),
+        PaperVariantSpec(
             name="abl_no_kcm",
             label="无KCM",
-            description="关闭执行侧 KCM 约束投影",
+            description="关闭执行侧 KCM 约束投影，作为主消融项检验约束模块贡献",
             source="current_best",
             mode="train_eval",
             apply=no_kcm,
-        ),
-        PaperVariantSpec(
-            name="abl_no_cornerness",
-            label="无拐角感知平滑",
-            description="关闭 cornerness 动态平滑与动态跟踪权重",
-            source="current_best",
-            mode="train_eval",
-            apply=no_cornerness,
         ),
     ]
 
@@ -126,6 +152,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--seed", type=int, default=42, help="训练配置中写入的种子")
     parser.add_argument("--paths", type=str, default="square,circle,butterfly", help="评测路径列表")
     parser.add_argument("--conda-env", type=str, default="PPO", help="使用的 conda 环境")
+    parser.add_argument("--deadline-time", type=str, default="", help="论文套件统一截止时间，格式 YYYY-MM-DD HH:MM:SS")
     parser.add_argument("--deterministic-eval", action="store_true", help="评测时使用确定性策略")
     parser.add_argument("--sync-after-each", action="store_true", help="每完成一个变体即刷新论文产物")
     parser.add_argument("--variants", type=str, default="", help="只运行指定变体，逗号分隔；为空表示运行全部")
@@ -154,6 +181,19 @@ def _run_paper_sync(conda_env: str) -> None:
     run_command(cmd, cwd=RESEARCH_ROOT.parent, check=False)
 
 
+def _parse_deadline(deadline_text: str) -> datetime | None:
+    text = str(deadline_text or "").strip()
+    if not text:
+        return None
+    return datetime.fromisoformat(text)
+
+
+def _remaining_seconds(deadline: datetime | None) -> float | None:
+    if deadline is None:
+        return None
+    return max(0.0, (deadline - datetime.now()).total_seconds())
+
+
 def _prepare_train_config(
     *,
     base_config_path: Path,
@@ -161,6 +201,7 @@ def _prepare_train_config(
     experiment_name: str,
     path_specs: Sequence[dict],
     args: argparse.Namespace,
+    time_budget_seconds: float,
 ) -> dict:
     base_cfg = load_yaml(base_config_path)
     cfg = build_train_config(
@@ -168,7 +209,7 @@ def _prepare_train_config(
         experiment_name=experiment_name,
         path_specs=path_specs,
         total_episodes=int(args.total_episodes),
-        time_budget_seconds=float(args.time_budget_seconds),
+        time_budget_seconds=float(time_budget_seconds),
         seed=int(args.seed),
     )
     cfg.setdefault("experiment", {})
@@ -182,6 +223,23 @@ def _prepare_train_config(
     cfg["training"]["traj_write_interval_steps"] = 0
     cfg["training"]["step_log_interval_steps"] = max(10, int(cfg["training"].get("step_log_interval_steps", 10) or 10))
     variant.apply(cfg)
+    training_cfg = cfg.setdefault("training", {})
+    ppo_cfg = cfg.setdefault("ppo", {})
+    if variant.name == "baseline_policy":
+        training_cfg["num_episodes"] = max(int(training_cfg.get("num_episodes", 0) or 0), max(900, int(args.total_episodes * 2.0)))
+        current_budget = float(training_cfg.get("time_budget_seconds", 0.0) or 0.0)
+        training_cfg["time_budget_seconds"] = max(current_budget, float(args.time_budget_seconds) * 2.0)
+        curriculum_cfg = training_cfg.get("path_curriculum", {})
+        if isinstance(curriculum_cfg, dict):
+            curriculum_cfg["episodes_per_path"] = max(4, int(curriculum_cfg.get("episodes_per_path", 2) or 2))
+        ppo_cfg["actor_lr"] = max(float(ppo_cfg.get("actor_lr", 1.0e-4) or 1.0e-4), 1.0e-4)
+        ppo_cfg["critic_lr"] = max(float(ppo_cfg.get("critic_lr", 1.2e-4) or 1.2e-4), 1.2e-4)
+        ppo_cfg["epochs"] = max(8, int(ppo_cfg.get("epochs", 8) or 8))
+    elif variant.name == "abl_no_kcm":
+        training_cfg["num_episodes"] = max(int(training_cfg.get("num_episodes", 0) or 0), max(700, int(args.total_episodes * 1.6)))
+        current_budget = float(training_cfg.get("time_budget_seconds", 0.0) or 0.0)
+        training_cfg["time_budget_seconds"] = max(current_budget, float(args.time_budget_seconds) * 1.5)
+        ppo_cfg["actor_lr"] = max(float(ppo_cfg.get("actor_lr", 2.5e-4) or 2.5e-4), 2.5e-4)
     return cfg
 
 
@@ -195,7 +253,36 @@ def _variant_base_path(
         return current_best_snapshot
     if variant.source == "base_config":
         return base_snapshot
+    if variant.source == "nnc_base":
+        return NNC_BASE_CONFIG
     raise ValueError(f"unsupported source: {variant.source}")
+
+
+def _variant_train_mode(variant: PaperVariantSpec) -> str:
+    if variant.name == "baseline_policy":
+        return "baseline_nnc"
+    return "train"
+
+
+def _variant_audit(cfg: dict) -> dict:
+    reward_weights = cfg.get("reward_weights", {}) if isinstance(cfg.get("reward_weights", {}), dict) else {}
+    lookahead_control = reward_weights.get("lookahead_control", {}) if isinstance(reward_weights.get("lookahead_control", {}), dict) else {}
+    cornerness = reward_weights.get("cornerness", {}) if isinstance(reward_weights.get("cornerness", {}), dict) else {}
+    lookahead_reward = reward_weights.get("lookahead_reward", {}) if isinstance(reward_weights.get("lookahead_reward", {}), dict) else {}
+    experiment_cfg = cfg.get("experiment", {}) if isinstance(cfg.get("experiment", {}), dict) else {}
+    environment_cfg = cfg.get("environment", {}) if isinstance(cfg.get("environment", {}), dict) else {}
+    return {
+        "enable_kcm": bool(experiment_cfg.get("enable_kcm", True)),
+        "lookahead_obs_enabled": bool(environment_cfg.get("lookahead_obs_enabled", True)),
+        "lookahead_points": int(environment_cfg.get("lookahead_points", 0) or 0),
+        "lookahead_control_enabled": bool(lookahead_control.get("enabled", False)),
+        "lookahead_policy_action": bool(lookahead_control.get("policy_action", False)),
+        "lookahead_distance": float(reward_weights.get("lookahead", {}).get("distance", 0.0))
+        if isinstance(reward_weights.get("lookahead", {}), dict)
+        else 0.0,
+        "cornerness_enabled": bool(cornerness.get("enabled", False)),
+        "lookahead_reward_enabled": bool(lookahead_reward.get("enabled", False)),
+    }
 
 
 def _evaluate_existing_best(
@@ -206,6 +293,7 @@ def _evaluate_existing_best(
     args: argparse.Namespace,
     current_best_state: dict,
     current_best_snapshot: Path,
+    effective_time_budget_seconds: float,
 ) -> dict:
     source_run_dir = Path(str(current_best_state.get("run_dir", "")).strip())
     source_model_path = Path(str(current_best_state.get("model_path", "")).strip())
@@ -220,6 +308,7 @@ def _evaluate_existing_best(
         experiment_name=variant_dir.name,
         path_specs=path_specs,
         args=args,
+        time_budget_seconds=effective_time_budget_seconds,
     )
     write_yaml(config_path, cfg)
 
@@ -249,6 +338,7 @@ def _evaluate_existing_best(
         "eval_summary_path": str(variant_dir / "evaluation" / "summary.json"),
         "rollouts_summary_path": str(rollouts_summary),
         "aggregated": eval_payload.get("aggregated", {}),
+        "ablation_audit": _variant_audit(cfg),
     }
 
 
@@ -260,6 +350,8 @@ def _train_and_evaluate_variant(
     args: argparse.Namespace,
     current_best_snapshot: Path,
     base_snapshot: Path,
+    effective_time_budget_seconds: float,
+    effective_process_timeout_seconds: float,
 ) -> dict:
     config_path = variant_dir / "config.yaml"
     cfg = _prepare_train_config(
@@ -268,6 +360,7 @@ def _train_and_evaluate_variant(
         experiment_name=variant_dir.name,
         path_specs=path_specs,
         args=args,
+        time_budget_seconds=effective_time_budget_seconds,
     )
     write_yaml(config_path, cfg)
     train_candidate(
@@ -275,7 +368,8 @@ def _train_and_evaluate_variant(
         run_dir=variant_dir,
         conda_env=args.conda_env,
         resume_path=None,
-        timeout_seconds=float(args.process_timeout_seconds),
+        timeout_seconds=float(effective_process_timeout_seconds),
+        mode=_variant_train_mode(variant),
     )
     model_path = find_model_checkpoint(variant_dir)
     latest_checkpoint = find_latest_checkpoint(variant_dir)
@@ -304,12 +398,14 @@ def _train_and_evaluate_variant(
         "eval_summary_path": str(variant_dir / "evaluation" / "summary.json"),
         "rollouts_summary_path": str(rollouts_summary),
         "aggregated": eval_payload.get("aggregated", {}),
+        "ablation_audit": _variant_audit(cfg),
     }
 
 
 def main() -> int:
     args = parse_args()
     ensure_workspace()
+    deadline = _parse_deadline(args.deadline_time)
     current_best_state = load_current_best_state()
     if not current_best_state:
         raise RuntimeError("current best state is missing; run trajectory_autoresearch first")
@@ -331,6 +427,7 @@ def main() -> int:
         "git_head": get_git_head(),
         "started_at": now_text(),
         "finished_at": "",
+        "deadline_time": args.deadline_time,
         "current_best_experiment_id": str(current_best_state.get("experiment_id", "")),
         "paths": [str(item.get("name") or item.get("type")) for item in path_specs],
         "variants": {},
@@ -348,7 +445,20 @@ def main() -> int:
     else:
         variants_to_run = all_variants
 
+    stopped_by_deadline = False
     for variant in variants_to_run:
+        remaining_seconds = _remaining_seconds(deadline)
+        if remaining_seconds is not None and remaining_seconds <= 180.0:
+            stopped_by_deadline = True
+            break
+
+        effective_time_budget_seconds = float(args.time_budget_seconds)
+        effective_process_timeout_seconds = float(args.process_timeout_seconds)
+        if remaining_seconds is not None:
+            # Keep the suite inside the same wall-clock window as the search loop.
+            effective_time_budget_seconds = min(effective_time_budget_seconds, max(60.0, remaining_seconds - 150.0))
+            effective_process_timeout_seconds = min(effective_process_timeout_seconds, max(180.0, remaining_seconds - 30.0))
+
         variant_dir = suite_dir / variant.name
         variant_dir.mkdir(parents=True, exist_ok=True)
         manifest = {
@@ -374,6 +484,7 @@ def main() -> int:
                     args=args,
                     current_best_state=current_best_state,
                     current_best_snapshot=current_best_snapshot,
+                    effective_time_budget_seconds=effective_time_budget_seconds,
                 )
             else:
                 payload = _train_and_evaluate_variant(
@@ -383,6 +494,8 @@ def main() -> int:
                     args=args,
                     current_best_snapshot=current_best_snapshot,
                     base_snapshot=base_snapshot,
+                    effective_time_budget_seconds=effective_time_budget_seconds,
+                    effective_process_timeout_seconds=effective_process_timeout_seconds,
                 )
             manifest.update(payload)
             manifest["status"] = "completed"
@@ -400,7 +513,7 @@ def main() -> int:
             _run_paper_sync(args.conda_env)
 
     suite_manifest = _read_json(suite_manifest_path)
-    suite_manifest["status"] = "completed"
+    suite_manifest["status"] = "deadline_reached" if stopped_by_deadline else "completed"
     suite_manifest["finished_at"] = now_text()
     _write_suite_manifest(suite_manifest_path, suite_manifest)
     _run_paper_sync(args.conda_env)

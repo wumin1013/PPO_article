@@ -49,6 +49,9 @@ class RewardContext:
     lookahead_dist: float = 0.0
     lookahead_dist_norm: float = 0.0
     region_weight: float = 0.0
+    current_step: int = 0
+    max_steps: int = 0
+    path_name: str = ""
 
 
 class RewardCalculator:
@@ -110,6 +113,129 @@ class RewardCalculator:
         self._cornerness_ema = float((1.0 - alpha) * float(self._cornerness_ema) + alpha * c_raw)
         c = float(np.clip(self._cornerness_ema, 0.0, 1.0))
         return c, c_raw
+
+    def _teacher_target_steps(self, ctx: RewardContext) -> float | None:
+        cfg = self.weights.get("teacher_progress", {})
+        if not isinstance(cfg, dict) or not bool(cfg.get("enabled", False)):
+            return None
+
+        path_name = str(getattr(ctx, "path_name", "") or "").strip()
+        raw_targets = cfg.get("path_target_steps", {})
+        if isinstance(raw_targets, dict):
+            for key in (path_name, path_name.lower()):
+                if key in raw_targets:
+                    try:
+                        target_steps = float(raw_targets[key])
+                    except (TypeError, ValueError):
+                        target_steps = 0.0
+                    if math.isfinite(target_steps) and target_steps > 1.0:
+                        return target_steps
+
+        try:
+            target_steps = float(cfg.get("default_target_steps", 0.0))
+        except (TypeError, ValueError):
+            target_steps = 0.0
+        if math.isfinite(target_steps) and target_steps > 1.0:
+            return target_steps
+        return None
+
+    def _speed_profile_reward(self, ctx: RewardContext) -> float:
+        cfg = self.weights.get("speed_profile", {})
+        if not isinstance(cfg, dict) or not bool(cfg.get("enabled", False)):
+            return 0.0
+
+        vel_ratio = float(np.clip(float(ctx.velocity) / max(float(self.max_vel), 1e-6), 0.0, 1.25))
+        region = float(np.clip(float(ctx.region_weight), 0.0, 1.0))
+
+        straight_target = float(np.clip(float(cfg.get("straight_target_ratio", 0.72)), 0.05, 1.10))
+        corner_target = float(np.clip(float(cfg.get("corner_target_ratio", 0.34)), 0.02, 0.95))
+        straight_weight = self._safe_abs(cfg.get("straight_weight", 3.5), fallback=3.5)
+        corner_weight = self._safe_abs(cfg.get("corner_weight", 1.4), fallback=1.4)
+        overspeed_weight = self._safe_abs(cfg.get("overspeed_weight", 0.6), fallback=0.6)
+        power = float(cfg.get("power", 2.0))
+        if not math.isfinite(power) or power <= 0.0:
+            power = 2.0
+
+        target_ratio = (1.0 - region) * straight_target + region * corner_target
+        deficit = max(0.0, target_ratio - vel_ratio)
+        overshoot = max(0.0, vel_ratio - max(target_ratio, corner_target))
+        reward = -((1.0 - region) * straight_weight + region * corner_weight) * (deficit**power)
+        if region >= 0.45 and overshoot > 0.0:
+            reward -= overspeed_weight * (overshoot**power)
+
+        straight_floor = float(np.clip(float(cfg.get("straight_floor_ratio", 0.55)), 0.0, 1.0))
+        corner_floor = float(np.clip(float(cfg.get("corner_floor_ratio", 0.18)), 0.0, 0.9))
+        floor_weight = self._safe_abs(cfg.get("floor_weight", 2.4), fallback=2.4)
+        floor_ratio = (1.0 - region) * straight_floor + region * corner_floor
+        floor_gap = max(0.0, floor_ratio - vel_ratio)
+        reward -= floor_weight * (floor_gap**2)
+        return float(reward)
+
+    def _finish_efficiency_reward(self, ctx: RewardContext, target_steps: float | None) -> float:
+        cfg = self.weights.get("finish_efficiency", {})
+        if not isinstance(cfg, dict) or not bool(cfg.get("enabled", False)) or target_steps is None:
+            return 0.0
+        if not bool(ctx.lap_completed):
+            return 0.0
+
+        step_now = max(1.0, float(int(getattr(ctx, "current_step", 0)) + 1))
+        margin = (float(target_steps) - step_now) / max(float(target_steps), 1.0)
+        reward_scale = self._safe_abs(cfg.get("bonus_weight", 18.0), fallback=18.0)
+        penalty_scale = self._safe_abs(cfg.get("late_penalty_weight", 8.0), fallback=8.0)
+        clip_value = float(cfg.get("margin_clip", 0.45))
+        if not math.isfinite(clip_value) or clip_value <= 0.0:
+            clip_value = 0.45
+        margin = float(np.clip(margin, -clip_value, clip_value))
+        if margin >= 0.0:
+            return float(reward_scale * margin)
+        return float(penalty_scale * margin)
+
+    def _teacher_lookahead_reward(self, ctx: RewardContext) -> float:
+        cfg = self.weights.get("teacher_lookahead", {})
+        if not isinstance(cfg, dict) or not bool(cfg.get("enabled", False)):
+            return 0.0
+
+        residual_mode = bool(cfg.get("residual_mode", False))
+        region = float(np.clip(float(ctx.region_weight), 0.0, 1.0))
+        prior_norm = float(np.clip(float(cfg.get("fixed_prior_norm", 0.5)), 0.0, 1.0))
+        straight_target = float(np.clip(float(cfg.get("straight_target_norm", prior_norm)), 0.0, 1.0))
+        corner_target = float(np.clip(float(cfg.get("corner_target_norm", straight_target)), 0.0, 1.0))
+        target = (1.0 - region) * straight_target + region * corner_target
+        lookahead_norm = float(np.clip(float(ctx.lookahead_dist_norm), 0.0, 1.0))
+
+        power = float(cfg.get("power", 2.0))
+        if not math.isfinite(power) or power <= 0.0:
+            power = 2.0
+        track_weight = self._safe_abs(cfg.get("track_weight", 1.5), fallback=1.5)
+        if residual_mode:
+            policy_u = float(np.clip(float(ctx.p4_status.get("lookahead_u_policy", 0.5)), 0.0, 1.0))
+            residual_mag = abs(policy_u - 0.5) * 2.0
+            straight_hold_weight = self._safe_abs(cfg.get("straight_hold_weight", track_weight), fallback=track_weight)
+            reward = -straight_hold_weight * max(0.0, 1.0 - region) * (residual_mag**power)
+        else:
+            reward = -track_weight * (abs(lookahead_norm - target) ** power)
+
+        settle_band = float(cfg.get("settle_band", 0.08))
+        if not math.isfinite(settle_band) or settle_band <= 0.0:
+            settle_band = 0.08
+        settle_bonus = self._safe_abs(cfg.get("settle_bonus", 0.25), fallback=0.25)
+        error = abs(lookahead_norm - target) if not residual_mode else abs(float(ctx.p4_status.get("lookahead_u_policy", 0.5)) - 0.5) * 2.0
+        if error <= settle_band:
+            reward += settle_bonus * (1.0 - error / settle_band)
+
+        smooth_weight = self._safe_abs(cfg.get("smooth_weight", 0.4), fallback=0.4)
+        du_lookahead = self._safe_abs(ctx.p4_status.get("du_lookahead_u", 0.0), fallback=0.0)
+        reward -= smooth_weight * (du_lookahead**2)
+
+        vel_ratio = float(np.clip(float(ctx.velocity) / max(float(self.max_vel), 1e-6), 0.0, 1.25))
+        straight_floor = float(np.clip(float(cfg.get("straight_speed_floor_ratio", 0.72)), 0.0, 1.0))
+        corner_floor = float(np.clip(float(cfg.get("corner_speed_floor_ratio", 0.32)), 0.0, 0.95))
+        floor_weight = self._safe_abs(cfg.get("floor_weight", 1.6), fallback=1.6)
+        floor_ratio = (1.0 - region) * straight_floor + region * corner_floor
+        floor_gap = max(0.0, floor_ratio - vel_ratio)
+        reward -= floor_weight * (floor_gap**2)
+
+        return float(reward)
 
     def calculate_reward(self, ctx: RewardContext) -> Tuple[float, Dict[str, float]]:
         """Dispatch to minimal or legacy reward calculation."""
@@ -370,7 +496,55 @@ class RewardCalculator:
             err_corner = abs(la_norm - corner_target)
             r_lookahead = -((1.0 - region) * w_straight * (err_straight**p) + region * w_corner * (err_corner**p))
 
-        total = float(r_progress + r_track + r_dir + r_time + r_smooth + r_du + r_stall + r_corridor + r_lookahead)
+        r_teacher = 0.0
+        teacher_cfg = self.weights.get("teacher_progress", {})
+        target_steps = self._teacher_target_steps(ctx)
+        if isinstance(teacher_cfg, dict) and target_steps is not None:
+            power = float(teacher_cfg.get("power", 2.0))
+            if not math.isfinite(power) or power <= 0.0:
+                power = 2.0
+            slack = float(np.clip(float(teacher_cfg.get("slack", 0.02)), 0.0, 0.25))
+            lag_weight = self._safe_abs(teacher_cfg.get("lag_weight", 24.0), fallback=24.0)
+            lead_bonus = self._safe_abs(teacher_cfg.get("lead_bonus", 3.0), fallback=3.0)
+            finish_bonus = self._safe_abs(teacher_cfg.get("finish_bonus", 16.0), fallback=16.0)
+            lag_clip = float(teacher_cfg.get("lag_clip", 0.30))
+            if not math.isfinite(lag_clip) or lag_clip <= 0.0:
+                lag_clip = 0.30
+
+            step_now = max(1.0, float(int(getattr(ctx, "current_step", 0)) + 1))
+            target_progress = float(np.clip(step_now / max(float(target_steps), 1.0), 0.0, 1.0))
+            progress_gap = float(ctx.progress) - target_progress
+            lag = max(0.0, target_progress - float(ctx.progress) - slack)
+            lag = min(lag, lag_clip)
+            on_pace = max(0.0, progress_gap + slack)
+
+            r_teacher -= lag_weight * (lag**power)
+            if on_pace > 0.0:
+                r_teacher += lead_bonus * min(on_pace, 0.20)
+
+            if ctx.lap_completed:
+                finish_margin = (float(target_steps) - step_now) / max(float(target_steps), 1.0)
+                r_teacher += finish_bonus * float(np.clip(finish_margin, -0.35, 0.35))
+
+        r_speed_profile = self._speed_profile_reward(ctx)
+        r_finish_eff = self._finish_efficiency_reward(ctx, target_steps)
+        r_teacher_lookahead = self._teacher_lookahead_reward(ctx)
+
+        total = float(
+            r_progress
+            + r_track
+            + r_dir
+            + r_time
+            + r_smooth
+            + r_du
+            + r_stall
+            + r_corridor
+            + r_lookahead
+            + r_teacher
+            + r_speed_profile
+            + r_finish_eff
+            + r_teacher_lookahead
+        )
 
         self.last_progress = progress_now
 
@@ -385,6 +559,10 @@ class RewardCalculator:
             "r_stall": float(r_stall),
             "r_corridor": float(r_corridor),
             "r_lookahead": float(r_lookahead),
+            "r_teacher": float(r_teacher),
+            "r_speed_profile": float(r_speed_profile),
+            "r_finish_eff": float(r_finish_eff),
+            "r_teacher_lookahead": float(r_teacher_lookahead),
             "cornerness": float(cornerness),
             "cornerness_raw": float(cornerness_raw),
             "w_track_dyn": float(w_track_eff),
@@ -393,6 +571,8 @@ class RewardCalculator:
             "lookahead_dist": float(ctx.lookahead_dist),
             "lookahead_dist_norm": float(ctx.lookahead_dist_norm),
             "region_weight": float(ctx.region_weight),
+            "teacher_path": str(getattr(ctx, "path_name", "") or ""),
+            "teacher_target_steps": float(target_steps or 0.0),
             "total": float(total),
         }
         return total, components

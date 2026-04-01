@@ -1,0 +1,35 @@
+{
+  "summary": {
+    "phase": "p0_eval",
+    "passed": false,
+    "episodes": 1,
+    "model_path": "c:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\runs\\20260327_154529_0000_progress_harder\\checkpoints\\best_model.pth",
+    "deterministic": true,
+    "seed_eval": 43,
+    "episode_set": null,
+    "success_rate": 0.0,
+    "stall_rate": 0.0,
+    "mean_progress_final": 0.9900000095367432,
+    "max_abs_contour_error": 0.6852795005112142,
+    "has_non_finite": false,
+    "thresholds": {
+      "success_rate_ge": 0.8,
+      "stall_rate_le": 0.05,
+      "mean_progress_final_ge": 0.95,
+      "max_abs_contour_error_le": 1.25
+    },
+    "half_epsilon": 1.25,
+    "timestamp": "2026-03-27 17:21:33",
+    "config_path": "c:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\seed_screen\\progress_harder_fixed_seed\\evaluation\\configs\\square.yaml"
+  },
+  "episodes": [
+    {
+      "episode": 0,
+      "return": -14487.522678453119,
+      "progress_final": 0.9900000095367432,
+      "done_reason": "max_steps",
+      "max_abs_contour_error": 0.6852795005112142,
+      "steps": 40000
+    }
+  ]
+}

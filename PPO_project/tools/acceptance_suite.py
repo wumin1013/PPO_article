@@ -116,6 +116,10 @@ def _build_env(config: dict, *, device: torch.device) -> Tuple[Env, float]:
         reward_weights=reward_weights,
         curvature_observation=env_cfg.get("curvature_observation"),
         return_normalized_obs=not use_obs_normalizer,
+        path_name=str(path_cfg.get("name") or path_cfg.get("type") or ""),
+        disable_kcm=bool(config.get("experiment", {}).get("enable_kcm", True) is False),
+        completion_progress_threshold=env_cfg.get("completion_progress_threshold", 0.99),
+        completion_distance_ratio=env_cfg.get("completion_distance_ratio", 1.0),
     )
     return env, float(env.half_epsilon)
 

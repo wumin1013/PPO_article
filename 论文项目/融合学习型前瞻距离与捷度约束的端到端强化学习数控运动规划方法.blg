@@ -3,51 +3,44 @@ Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
 The top-level auxiliary file: 融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.aux
 The style file: elsarticle-num.bst
 Database file #1: references.bib
-Warning--I'm ignoring Li2024's extra "volume" field
---line 50 of file references.bib
-Warning--I'm ignoring Li2024's extra "pages" field
---line 51 of file references.bib
-Warning--empty pages in Wang2025b
-Warning--empty pages in KIRL2025
 You've used 31 entries,
             2952 wiz_defined-function locations,
-            890 strings with 12169 characters,
-and the built_in function-call counts, 9779 in all, are:
-= -- 912
+            893 strings with 12164 characters,
+and the built_in function-call counts, 9864 in all, are:
+= -- 935
 > -- 418
-< -- 0
+< -- 1
 + -- 160
 - -- 129
 * -- 776
-:= -- 1410
+:= -- 1421
 add.period$ -- 40
 call.type$ -- 31
-change.case$ -- 31
+change.case$ -- 32
 chr.to.int$ -- 0
-cite$ -- 33
-duplicate$ -- 253
-empty$ -- 1013
+cite$ -- 31
+duplicate$ -- 255
+empty$ -- 1008
 format.name$ -- 159
-if$ -- 2422
+if$ -- 2445
 int.to.chr$ -- 0
 int.to.str$ -- 31
-missing$ -- 31
+missing$ -- 30
 newline$ -- 110
 num.names$ -- 31
-pop$ -- 164
+pop$ -- 161
 preamble$ -- 1
 purify$ -- 0
 quote$ -- 0
-skip$ -- 578
+skip$ -- 585
 stack$ -- 0
-substring$ -- 614
-swap$ -- 47
-text.length$ -- 0
+substring$ -- 632
+swap$ -- 53
+text.length$ -- 1
 text.prefix$ -- 0
 top$ -- 0
 type$ -- 0
-warning$ -- 2
-while$ -- 78
+warning$ -- 0
+while$ -- 81
 width$ -- 33
-write$ -- 272
-(There were 4 warnings)
+write$ -- 274

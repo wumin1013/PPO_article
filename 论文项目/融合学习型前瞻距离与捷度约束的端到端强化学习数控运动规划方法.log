@@ -1,9 +1,9 @@
-This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.12.2)  1 APR 2026 11:46
+This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.12.10)  11 MAY 2026 23:53
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
  %&-line parsing enabled.
-**融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.tex
+**融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法
 (./融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.tex
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
@@ -688,11 +688,11 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 ]
 
 [2]
+
+[3]
 File: ./figures/fig1.pdf Graphic file (type pdf)
 <use ./figures/fig1.pdf>
 
-
-[3]
 
 [4]
 
@@ -730,7 +730,7 @@ File: figures/generated/jerk_constraint_comparison.pdf Graphic file (type pdf)
 [16]
 
 [17]
-Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on input line 452.
+Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on input line 433.
 
 
 [18]
@@ -780,15 +780,15 @@ LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2022/07/14>
  ***********
 Package rerunfilecheck Info: File `融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.out' has not changed.
-(rerunfilecheck)             Checksum: EFDDF3CA14A6D5DCB8D851B467FE2A53;2920.
+(rerunfilecheck)             Checksum: B2DFD2D8A02CE1A66BA2C8C5FFDA3DF9;2782.
  ) 
 Here is how much of TeX's memory you used:
- 18851 strings out of 473832
- 391390 string characters out of 5733158
- 820833 words of memory out of 5000000
- 41612 multiletter control sequences out of 15000+600000
+ 18854 strings out of 473832
+ 391555 string characters out of 5733157
+ 815679 words of memory out of 5000000
+ 41615 multiletter control sequences out of 15000+600000
  573420 words of font info for 98 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 93i,11n,111p,814b,574s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 93i,11n,111p,1536b,574s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
-Output written on 融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.xdv (25 pages, 288228 bytes).
+Output written on 融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.pdf (25 pages).

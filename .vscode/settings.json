@@ -9,7 +9,6 @@
                 "-synctex=1",
                 "-interaction=nonstopmode",
                 "-file-line-error",
-                "-output-directory=%OUTDIR%",
                 "%DOCFILE%"
             ]
         },
@@ -20,7 +19,6 @@
                 "-synctex=1",
                 "-interaction=nonstopmode",
                 "-file-line-error",
-                "-output-directory=%OUTDIR%",
                 "%DOCFILE%"
             ]
         },

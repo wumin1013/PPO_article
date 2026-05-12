@@ -8,12 +8,6 @@
 \bibitem{Sun2022}
 Y.~Sun, J.~Jia, J.~Xu, M.~Chen, J.~Niu, Path, feedrate and trajectory planning for free-form surface machining: A state-of-the-art review, Chinese Journal of Aeronautics 35~(8) (2022) 12--29.
 
-\bibitem{Yan2023}
-G.~Yan, D.~Zhang, J.~Xu, Y.~Sun, Corner smoothing for cnc machining of linear tool path: A review, Journal of Advanced Manufacturing Science and Technology 3~(2) (2023) 2023001.
-
-\bibitem{Erkorkmaz2001}
-K.~Erkorkmaz, Y.~Altintas, High speed cnc system design. part i: jerk limited trajectory generation and quintic spline interpolation, International Journal of Machine Tools and Manufacture 41~(9) (2001) 1323--1345.
-
 \bibitem{Xu2022}
 B.~Xu, Y.~Ding, W.~Ji, An interpolation method based on adaptive smooth feedrate scheduling and parameter increment compensation for nurbs curve, ISA Transactions 128 (2022) 633--645.
 
@@ -26,6 +20,9 @@ Y.~Hu, X.~Jiang, G.~Huo, C.~Su, H.~Li, L.~Shen, Z.~Zheng, Enhancing five-axis cn
 
 \bibitem{Li2023}
 H.~Li, X.~Jiang, G.~Huo, C.~Su, S.~Zhou, B.~Wang, Y.~Hu, Z.~Zheng, An integrated trajectory smoothing method for lines and arcs mixed toolpath based on motion overlapping strategy, Journal of Manufacturing Processes 95 (2023) 242--265.
+
+\bibitem{Yan2023}
+G.~Yan, D.~Zhang, J.~Xu, Y.~Sun, Corner smoothing for cnc machining of linear tool path: A review, Journal of Advanced Manufacturing Science and Technology 3~(2) (2023) 2023001.
 
 \bibitem{Zhao2013}
 H.~Zhao, L.~Zhu, H.~Ding, A real-time look-ahead interpolation methodology with curvature-continuous b-spline transition scheme for cnc machining of short line segments, International Journal of Machine Tools and Manufacture 65 (2013) 88--98.
@@ -55,18 +52,21 @@ D.-N. Song, J.-W. Ma, Y.-G. Zhong, J.-J. Yao, Global smoothing of short line seg
 \bibitem{Sun2024}
 S.~Sun, P.~Zhao, T.~Zhang, B.~Li, D.~Yu, Smoothing interpolation of five-axis tool path with less feedrate fluctuation and higher computation efficiency, Journal of Manufacturing Processes 109 (2024) 669--693.
 
+\bibitem{Erkorkmaz2001}
+K.~Erkorkmaz, Y.~Altintas, High speed cnc system design. part i: jerk limited trajectory generation and quintic spline interpolation, International Journal of Machine Tools and Manufacture 41~(9) (2001) 1323--1345.
+
 \bibitem{Lee2011}
 A.~C. Lee, M.~T. Lin, Y.~R. Pan, W.~Y. Lin, The feedrate scheduling of {NURBS} interpolator for cnc machine tools, Computer-Aided Design 43~(6) (2011) 612--628.
 \newblock \href {https://doi.org/10.1016/j.cad.2011.02.014} {\path{doi:10.1016/j.cad.2011.02.014}}.
+
+\bibitem{Wu2022}
+B.~Wu, J.~Ma, L.~Wei, X.~Liao, J.~Lu, Nurbs interpolator with scheduling scheme combining cubic and quartic s-shaped feedrate profiles under drive and chord error constraints, Computer-Aided Design 152 (2022) 103380.
 
 \bibitem{Song2020}
 D.-N. Song, Y.-G. Zhong, J.-W. Ma, Look-ahead-window-based interval adaptive feedrate scheduling for long five-axis spline toolpaths under axial drive constraints, Proceedings of the Institution of Mechanical Engineers, Part B: Journal of Engineering Manufacture 234~(13) (2020) 1656--1670.
 
 \bibitem{Zhang2021}
 Y.~Zhang, H.~Zhang, J.~Shi, J.~Jiang, M.~Zhao, Development of an adaptive-feedrate planning and iterative interpolator for parametric toolpath with normal jerk constraint, International Journal of Precision Engineering and Manufacturing 22 (2021) 73--81.
-
-\bibitem{Wu2022}
-B.~Wu, J.~Ma, L.~Wei, X.~Liao, J.~Lu, Nurbs interpolator with scheduling scheme combining cubic and quartic s-shaped feedrate profiles under drive and chord error constraints, Computer-Aided Design 152 (2022) 103380.
 
 \bibitem{Zhang2026}
 H.~Zhang, J.~Yang, W.~Zhu, C.~Zhang, Z.~Hu, Jerk-constrained feedrate scheduling for cnc machining based on constraint-guided sampling, The International Journal of Advanced Manufacturing Technology (2026) 1--25.

@@ -12,6 +12,11 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+$docBase = [System.IO.Path]::GetFileNameWithoutExtension($DocFile)
+if (-not $docBase) {
+    throw "DocFile is empty or invalid: $DocFile"
+}
+
 $previousBibInputs = $env:BIBINPUTS
 $previousBstInputs = $env:BSTINPUTS
 
@@ -22,7 +27,7 @@ try {
     $env:BSTINPUTS = "$SourceDir;$previousBstInputs"
 
     Push-Location -LiteralPath $OutDir
-    & bibtex $DocFile
+    & bibtex $docBase
     exit $LASTEXITCODE
 }
 finally {

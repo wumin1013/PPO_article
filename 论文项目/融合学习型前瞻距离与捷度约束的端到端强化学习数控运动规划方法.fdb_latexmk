@@ -1,18 +1,10 @@
 # Fdb version 4
-["bibtex 融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法"] 1778572795.2521 "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.aux" "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.bbl" "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法" 1778572802.82988 0
-  "./references.bib" 1775013348 10977 bca66dd98bbebf4ac2b4f3eb736b123f ""
-  "d:/texlive/2025/texmf-dist/bibtex/bst/elsarticle/elsarticle-num.bst" 1765368835 29462 3b2a1af2ce1e224a3b46ee048ffd4b98 ""
-  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.aux" 1778572798 9935 9e08ee3819d5a2307f62d4c1756d3100 "xelatex"
-  (generated)
-  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.bbl"
-  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.blg"
-  (rewritten before read)
-["xdvipdfmx"] 1778572799.88199 "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.xdv" "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.pdf" "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法" 1778572802.83762 0
-  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.xdv" 1778572798 300728 62df0041e13693f505227b1a5b57c868 "xelatex"
+["xdvipdfmx"] 1778672536.3239 "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.xdv" "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.pdf" "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法" 1778672539.3494 0
+  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.xdv" 1778672536 184980 e661151f1a14bf2ce4019a2b018a8155 "xelatex"
   (generated)
   "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.pdf"
   (rewritten before read)
-["xelatex"] 1778572796.11456 "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.tex" "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.xdv" "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法" 1778572802.83025 0
+["xelatex"] 1778672534.25382 "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.tex" "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.xdv" "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法" 1778672539.34219 0
   "c:/Windows/Fonts/msyh.ttc" 1768117832 19704352 1e10e74402e59d54499af795caf0b135 ""
   "d:/texlive/2025/texmf-dist/fonts/map/fontname/texfonts.map" 1765369016 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "d:/texlive/2025/texmf-dist/fonts/tfm/adobe/zapfding/pzdr.tfm" 1765371117 1528 7e12f4c0fcf5a072cebdcfbfc610f54c ""
@@ -130,18 +122,18 @@
   "d:/texlive/2025/texmf-var/web2c/xetex/xelatex.fmt" 1765371425 5639836 0ce711861b2a6af5bcd6adab7efa9c44 ""
   "d:/texlive/2025/texmf.cnf" 1765371137 713 e69b156964470283e0530f5060668171 ""
   "figures/fig1.pdf" 1767932051 346236 99356fed5cf735fbcb97fb79640148b6 ""
+  "figures/fig2.pdf" 1778659419 375043 962534174667ebb6cf606fe106d67c1e ""
+  "figures/fig3.pdf" 1778669266 171755 c3a63ce2ed2954889b02961660e35ae6 ""
   "figures/generated/jerk_constraint_comparison.pdf" 1775728758 332985 2ef67346ca17b791ed353da6daf8fdfc ""
   "figures/generated/kcm_analysis.pdf" 1775728941 142519 902ec0485d0fccec96198085c20b83f0 ""
   "figures/generated/qualitative_results.pdf" 1775728863 1182972 1b0e03f36ce2f8eba56f91b9b319fe4a ""
   "figures/generated/square_corner_zoom.pdf" 1775728899 12718 f4a6c2d9390c4bd646f0180a508a9d83 ""
-  "generated/ablation_table.tex" 1775728760 677 101903b73b1025da022ed4b8d0764552 ""
-  "generated/appendix_autosearch.tex" 1775728760 1398 7773f5d3355dbada34f12567888693fd ""
+  "generated/ablation_table.tex" 1778672338 677 7d836e8831febad4b4284c6f421a913a ""
   "generated/main_results_table.tex" 1778572792 1032 33735416b5fb58ab8be0888db34ba82e ""
-  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.aux" 1778572798 9935 9e08ee3819d5a2307f62d4c1756d3100 "xelatex"
-  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.bbl" 1778572796 8439 0 "bibtex 融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法"
-  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.out" 1778572798 2782 b2dfd2d8a02ce1a66ba2c8c5ffda3df9 "xelatex"
-  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.spl" 1778572796 0 d41d8cd98f00b204e9800998ecf8427e "xelatex"
-  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.tex" 1778568736 39970 3e31488737f733f8fb31c4964a44776d ""
+  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.aux" 1778672536 7448 6ac3b4247dc4c90eb2104e8c958f63d8 "xelatex"
+  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.out" 1778672536 1634 6c95cbc4cfc96f974343f75df1a87a55 "xelatex"
+  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.spl" 1778672535 0 d41d8cd98f00b204e9800998ecf8427e "xelatex"
+  "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.tex" 1778672530 35918 d2838cda17e85d229e9c6c12919d5f8f ""
   (generated)
   "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.aux"
   "融合学习型前瞻距离与捷度约束的端到端强化学习数控运动规划方法.log"

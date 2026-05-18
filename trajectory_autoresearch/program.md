@@ -22,7 +22,7 @@
 D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py --setup-only
 ```
 
-6. 确认 `trajectory_autoresearch/results.tsv` 已初始化。
+6. 确认 `trajectory_autoresearch/_local_results/results.tsv` 已初始化。
 
 ## Ground Rules
 
@@ -69,7 +69,7 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
 
 每轮实验遵循以下流程：
 
-1. 读取当前最优状态与 `results.tsv`
+1. 读取当前最优状态与 `_local_results/results.tsv`
 2. 基于当前最优配置提出一批候选，并根据最近 N 次完整评测的真实得分增益自动调节每个候选的调参幅度
 3. 运行：
 
@@ -78,11 +78,11 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
 ```
 
 4. 训练完成后检查：
-   - `trajectory_autoresearch/runs/<experiment_id>/train.log`
-   - `trajectory_autoresearch/runs/<experiment_id>/evaluation/stage1/summary.json`
-   - `trajectory_autoresearch/runs/<experiment_id>/evaluation/stage2/summary.json`
-   - `trajectory_autoresearch/runs/<experiment_id>/best_rollouts/summary.json`
-5. 将结果写入 `results.tsv`
+   - `trajectory_autoresearch/_local_results/runs/<experiment_id>/train.log`
+   - `trajectory_autoresearch/_local_results/runs/<experiment_id>/evaluation/stage1/summary.json`
+   - `trajectory_autoresearch/_local_results/runs/<experiment_id>/evaluation/stage2/summary.json`
+   - `trajectory_autoresearch/_local_results/runs/<experiment_id>/best_rollouts/summary.json`
+5. 将结果写入 `_local_results/results.tsv`
 6. 如果得分变好，则晋升为新的当前最优；否则丢弃并继续下一轮
 
 ## Never Stop Rule

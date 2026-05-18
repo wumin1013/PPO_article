@@ -27,10 +27,10 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
 
 这一步会创建：
 
-- `trajectory_autoresearch\workspace\base_config.yaml`
-- `trajectory_autoresearch\workspace\current_best.yaml`
-- `trajectory_autoresearch\workspace\leaderboard.md`
-- `trajectory_autoresearch\results.tsv`
+- `trajectory_autoresearch\_local_results\workspace\base_config.yaml`
+- `trajectory_autoresearch\_local_results\workspace\current_best.yaml`
+- `trajectory_autoresearch\_local_results\workspace\leaderboard.md`
+- `trajectory_autoresearch\_local_results\results.tsv`
 
 ## 跑一轮实验
 
@@ -54,9 +54,14 @@ D:\Anaconda\Scripts\conda.exe run -n PPO python trajectory_autoresearch\train.py
   4. 用较少路径和较少 episode 做 `stage1` 粗筛，采用偏 `pass_rate/稳定性` 的评分权重
   5. 仅对 `top-k` 候选做更贵的 `stage2` 全量复评估，采用偏 `pass_count/全量路径` 的评分权重
   6. 对进入 `stage2` 的候选导出每条路径的最佳轨迹图与 CSV
-  7. 写入 `results.tsv`
-  8. 刷新 `workspace/leaderboard.{md,json}`
-  9. 若得分提升，则晋升为新的当前最优，并封存到 `archives/promoted/<experiment_id>/`
+  7. 写入 `_local_results/results.tsv`
+  8. 刷新 `_local_results/workspace/leaderboard.{md,json}`
+  9. 若得分提升，则晋升为新的当前最优，并封存到 `_local_results/archives/promoted/<experiment_id>/`
+
+## 结果目录约定
+
+- `论文项目/generated/` 与 `论文项目/figures/generated/`：论文最终表格、图、轨迹 CSV、摘要和对应配置，可随论文一起提交。
+- `trajectory_autoresearch/_local_results/`：自治搜索、粗筛、长跑、论文套件复现实验的中间产物；该目录只保存在本地，不提交到 GitHub。
 
 ## 当前阶段说明
 

@@ -29,10 +29,11 @@ $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
+$localResultsDir = Join-Path $scriptRoot "_local_results"
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $label = if ([string]::IsNullOrWhiteSpace($RunName)) { "{0}h" -f $Hours } else { $RunName }
 $runId = "{0}_{1}" -f $timestamp, $label
-$runDir = Join-Path $scriptRoot "long_runs\$runId"
+$runDir = Join-Path $localResultsDir "long_runs\$runId"
 $null = New-Item -ItemType Directory -Force -Path $runDir
 
 function Write-JsonFile {
@@ -138,11 +139,11 @@ function To-InvariantText {
     return $Value.ToString([System.Globalization.CultureInfo]::InvariantCulture)
 }
 
-$currentBestPath = Join-Path $scriptRoot "workspace\current_best.json"
-$leaderboardMarkdownPath = Join-Path $scriptRoot "workspace\leaderboard.md"
-$leaderboardJsonPath = Join-Path $scriptRoot "workspace\leaderboard.json"
-$resultsPath = Join-Path $scriptRoot "results.tsv"
-$paperRunsDir = Join-Path $scriptRoot "paper_runs"
+$currentBestPath = Join-Path $localResultsDir "workspace\current_best.json"
+$leaderboardMarkdownPath = Join-Path $localResultsDir "workspace\leaderboard.md"
+$leaderboardJsonPath = Join-Path $localResultsDir "workspace\leaderboard.json"
+$resultsPath = Join-Path $localResultsDir "results.tsv"
+$paperRunsDir = Join-Path $localResultsDir "paper_runs"
 $paperActiveLogsDir = Join-Path $paperRunsDir "active_logs"
 $paperProcessesPath = Join-Path $paperRunsDir "paper_processes.json"
 $paperBridgeSummaryPath = Join-Path $repoRoot "论文项目\generated\paper_bridge_summary.json"

@@ -11,6 +11,7 @@ from typing import Callable, Mapping, Sequence
 
 from prepare import (
     CURRENT_BEST_CONFIG,
+    PAPER_RUNS_DIR,
     RUNS_DIR,
     ExperimentResult,
     archive_promoted_result,
@@ -153,7 +154,7 @@ def _path_names_from_cfg(cfg: Mapping[str, object]) -> list[str]:
 
 def _load_teacher_target_steps(path_names: Sequence[str]) -> dict[str, int]:
     targets = dict(DEFAULT_TEACHER_TARGET_STEPS)
-    paper_runs_root = RUNS_DIR.parent / "paper_runs"
+    paper_runs_root = PAPER_RUNS_DIR
     if paper_runs_root.exists():
         summaries = sorted(
             paper_runs_root.glob("*/abl_fixed_lookahead/best_rollouts/summary.json"),
@@ -196,7 +197,7 @@ def _load_teacher_target_steps(path_names: Sequence[str]) -> dict[str, int]:
 
 
 def _load_latest_fixed_lookahead_config() -> dict | None:
-    paper_runs_root = RUNS_DIR.parent / "paper_runs"
+    paper_runs_root = PAPER_RUNS_DIR
     if not paper_runs_root.exists():
         return None
     config_paths = sorted(

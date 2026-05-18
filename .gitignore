@@ -9,5 +9,4 @@ PPO_project/saved_models/
 save_models/
 saved_models/
 artifacts/
-论文项目/generated/
-论文项目/figures/generated/
+trajectory_autoresearch/_local_results/

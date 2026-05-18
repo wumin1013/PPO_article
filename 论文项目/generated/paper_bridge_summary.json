@@ -1,0 +1,180 @@
+{
+  "updated_at": "2026-05-17 20:22:29",
+  "latest_suite_dir": "trajectory_autoresearch/_local_results/paper_runs/20260331_115320_20260331_115142_residual_teacher12h_v1_20260328_140725_0028_teacher_progress_stable",
+  "suite_dirs": [
+    "trajectory_autoresearch/_local_results/paper_runs/20260331_115320_20260331_115142_residual_teacher12h_v1_20260328_140725_0028_teacher_progress_stable",
+    "trajectory_autoresearch/_local_results/paper_runs/20260331_003426_20260331_003312_fullmethod_fixed_distill12h_v1_20260328_140725_0028_teacher_progress_stable",
+    "trajectory_autoresearch/_local_results/paper_runs/20260330_120220_20260330_103259_dual_stage_research24h_v1_stage2_20260328_140725_0028_teacher_progress_stable",
+    "trajectory_autoresearch/_local_results/paper_runs/20260330_104554_20260330_103259_dual_stage_research24h_v1_stage2_20260328_140725_0028_teacher_progress_stable",
+    "trajectory_autoresearch/_local_results/paper_runs/20260330_001058_20260329_222832_dual_stage_research24h_v1_stage1_20260328_140725_0028_teacher_progress_stable",
+    "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_fixed_lookahead",
+    "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_no_kcm",
+    "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_no_dual_reward",
+    "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_no_lookahead_obs",
+    "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy",
+    "trajectory_autoresearch/_local_results/paper_runs/20260329_005429_20260329_005338_reward_redesign12h_parallel_coarse_v2_20260328_140725_0028_teacher_progress_stable",
+    "trajectory_autoresearch/_local_results/paper_runs/20260329_004211_20260329_004114_reward_redesign12h_parallel_coarse_20260328_140725_0028_teacher_progress_stable",
+    "trajectory_autoresearch/_local_results/paper_runs/20260329_004115_paper_suite_ablations_12h",
+    "trajectory_autoresearch/_local_results/paper_runs/20260329_003835_20260329_003300_reward_redesign10h_multi_try_20260328_140725_0028_teacher_progress_stable",
+    "trajectory_autoresearch/_local_results/paper_runs/20260329_003301_paper_suite_ablations_10h",
+    "trajectory_autoresearch/_local_results/paper_runs/20260328_175322_20260328_175217_reward_teacher_until_midnight_20260328_140725_0028_teacher_progress_stable",
+    "trajectory_autoresearch/_local_results/paper_runs/20260328_154111_20260328_110725_reward_teacher8h_v1_20260328_113759_0026_teacher_progress_aggressive",
+    "trajectory_autoresearch/_local_results/paper_runs/20260327_181608_paper_main_suite_3paths_fullmethod8h"
+  ],
+  "latest_long_run_status": "trajectory_autoresearch/_local_results/long_runs/20260331_003312_fullmethod_fixed_distill12h_v1/status.json",
+  "main_full_method_source": "paper_suite",
+  "variant_audits": {
+    "full_method_snapshot": {
+      "enable_kcm": true,
+      "lookahead_obs_enabled": true,
+      "lookahead_points": 8,
+      "lookahead_control_enabled": true,
+      "lookahead_policy_action": true,
+      "lookahead_distance": 2.3125,
+      "cornerness_enabled": true,
+      "lookahead_reward_enabled": true
+    },
+    "abl_fixed_lookahead": {
+      "enable_kcm": true,
+      "lookahead_obs_enabled": true,
+      "lookahead_points": 8,
+      "lookahead_control_enabled": false,
+      "lookahead_policy_action": false,
+      "lookahead_distance": 2.28125,
+      "cornerness_enabled": true,
+      "lookahead_reward_enabled": true
+    },
+    "abl_no_kcm": {
+      "enable_kcm": false,
+      "lookahead_obs_enabled": true,
+      "lookahead_points": 8,
+      "lookahead_control_enabled": true,
+      "lookahead_policy_action": true,
+      "lookahead_distance": 2.3125,
+      "cornerness_enabled": true,
+      "lookahead_reward_enabled": true
+    },
+    "abl_no_dual_reward": {
+      "enable_kcm": true,
+      "lookahead_obs_enabled": true,
+      "lookahead_points": 8,
+      "lookahead_control_enabled": true,
+      "lookahead_policy_action": true,
+      "lookahead_distance": 2.3125,
+      "cornerness_enabled": false,
+      "lookahead_reward_enabled": false
+    },
+    "abl_no_lookahead_obs": {
+      "enable_kcm": true,
+      "lookahead_obs_enabled": false,
+      "lookahead_points": 8,
+      "lookahead_control_enabled": true,
+      "lookahead_policy_action": true,
+      "lookahead_distance": 2.3125,
+      "cornerness_enabled": true,
+      "lookahead_reward_enabled": true
+    },
+    "baseline_policy": {
+      "enable_kcm": false,
+      "lookahead_obs_enabled": false,
+      "lookahead_points": 0,
+      "lookahead_control_enabled": false,
+      "lookahead_policy_action": false,
+      "lookahead_distance": 0.0,
+      "cornerness_enabled": false,
+      "lookahead_reward_enabled": false
+    }
+  },
+  "full_method_trace": {},
+  "baseline_trace": {},
+  "jerk_compare": {
+    "compare_path": "square",
+    "full_method_ratio": 1.0,
+    "abl_no_kcm_ratio": 3200.0
+  },
+  "final_configs": {
+    "updated_at": "2026-05-17 20:22:29",
+    "config_count": 8,
+    "configs": [
+      {
+        "label": "current_best",
+        "source": "trajectory_autoresearch/_local_results/workspace/current_best.yaml",
+        "paper_config": "论文项目/generated/configs/current_best.yaml"
+      },
+      {
+        "label": "current_best_source",
+        "source": "trajectory_autoresearch/_local_results/runs/20260328_140725_0028_teacher_progress_stable/config.yaml",
+        "paper_config": "论文项目/generated/configs/current_best_source.yaml"
+      },
+      {
+        "label": "abl_fixed_lookahead",
+        "source": "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_fixed_lookahead/abl_fixed_lookahead/config.yaml",
+        "paper_config": "论文项目/generated/configs/abl_fixed_lookahead.yaml"
+      },
+      {
+        "label": "abl_no_dual_reward",
+        "source": "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_no_dual_reward/abl_no_dual_reward/config.yaml",
+        "paper_config": "论文项目/generated/configs/abl_no_dual_reward.yaml"
+      },
+      {
+        "label": "abl_no_kcm",
+        "source": "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_no_kcm/abl_no_kcm/config.yaml",
+        "paper_config": "论文项目/generated/configs/abl_no_kcm.yaml"
+      },
+      {
+        "label": "abl_no_lookahead_obs",
+        "source": "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_no_lookahead_obs/abl_no_lookahead_obs/config.yaml",
+        "paper_config": "论文项目/generated/configs/abl_no_lookahead_obs.yaml"
+      },
+      {
+        "label": "baseline_policy",
+        "source": "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy/baseline_policy/config.yaml",
+        "paper_config": "论文项目/generated/configs/baseline_policy.yaml"
+      },
+      {
+        "label": "full_method_snapshot",
+        "source": "trajectory_autoresearch/_local_results/paper_runs/20260331_115320_20260331_115142_residual_teacher12h_v1_20260328_140725_0028_teacher_progress_stable/full_method_snapshot/config.yaml",
+        "paper_config": "论文项目/generated/configs/full_method_snapshot.yaml"
+      }
+    ]
+  },
+  "files": {
+    "main_results_tex": "论文项目/generated/main_results_table.tex",
+    "ablation_tex": "论文项目/generated/ablation_table.tex",
+    "appendix_tex": "论文项目/generated/appendix_autosearch.tex",
+    "final_configs_manifest": "论文项目/generated/configs/manifest.json",
+    "qualitative_figure": "论文项目/figures/generated/qualitative_results.png",
+    "square_corner_zoom_figure": "论文项目/figures/generated/square_corner_zoom.png",
+    "kcm_figure": "论文项目/figures/generated/kcm_analysis.png",
+    "jerk_compare_figure": "论文项目/figures/generated/jerk_constraint_comparison.png",
+    "full_trace_summary": "论文项目/generated/full_method_trace_summary.json",
+    "baseline_trace_summary": "论文项目/generated/baseline_trace_summary.json",
+    "abl_no_kcm_trace_summary": "论文项目/generated/abl_no_kcm_trace_summary.json"
+  },
+  "suite_variants": {
+    "full_method_snapshot": {
+      "label": "本文最终方法",
+      "status": "completed"
+    },
+    "abl_fixed_lookahead": {
+      "label": "固定前瞻",
+      "status": "completed"
+    },
+    "abl_no_kcm": {
+      "label": "无KCM",
+      "status": "completed"
+    },
+    "abl_no_dual_reward": {
+      "label": "无直线/拐角双奖励",
+      "status": "completed"
+    },
+    "abl_no_lookahead_obs": {
+      "label": "无前瞻观测",
+      "status": "completed"
+    },
+    "baseline_policy": {
+      "label": "NNC 基线",
+      "status": "completed"
+    }
+  }
+}

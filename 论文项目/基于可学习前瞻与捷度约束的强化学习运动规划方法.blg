@@ -1,0 +1,46 @@
+This is BibTeX, Version 0.99d (TeX Live 2025)
+Capacity: max_strings=200000, hash_size=200000, hash_prime=170003
+The top-level auxiliary file: 基于可学习前瞻与捷度约束的强化学习运动规划方法.aux
+The style file: unsrt.bst
+Database file #1: references.bib
+You've used 22 entries,
+            1791 wiz_defined-function locations,
+            606 strings with 9050 characters,
+and the built_in function-call counts, 6186 in all, are:
+= -- 540
+> -- 344
+< -- 3
++ -- 122
+- -- 100
+* -- 497
+:= -- 1000
+add.period$ -- 68
+call.type$ -- 22
+change.case$ -- 22
+chr.to.int$ -- 0
+cite$ -- 22
+duplicate$ -- 233
+empty$ -- 549
+format.name$ -- 100
+if$ -- 1337
+int.to.chr$ -- 0
+int.to.str$ -- 22
+missing$ -- 22
+newline$ -- 113
+num.names$ -- 22
+pop$ -- 37
+preamble$ -- 1
+purify$ -- 0
+quote$ -- 0
+skip$ -- 104
+stack$ -- 0
+substring$ -- 520
+swap$ -- 52
+text.length$ -- 3
+text.prefix$ -- 0
+top$ -- 0
+type$ -- 0
+warning$ -- 0
+while$ -- 62
+width$ -- 24
+write$ -- 245

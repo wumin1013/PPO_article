@@ -1,0 +1,46 @@
+{
+  "updated_at": "2026-05-17 20:22:29",
+  "config_count": 8,
+  "configs": [
+    {
+      "label": "current_best",
+      "source": "trajectory_autoresearch/_local_results/workspace/current_best.yaml",
+      "paper_config": "论文项目/generated/configs/current_best.yaml"
+    },
+    {
+      "label": "current_best_source",
+      "source": "trajectory_autoresearch/_local_results/runs/20260328_140725_0028_teacher_progress_stable/config.yaml",
+      "paper_config": "论文项目/generated/configs/current_best_source.yaml"
+    },
+    {
+      "label": "abl_fixed_lookahead",
+      "source": "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_fixed_lookahead/abl_fixed_lookahead/config.yaml",
+      "paper_config": "论文项目/generated/configs/abl_fixed_lookahead.yaml"
+    },
+    {
+      "label": "abl_no_dual_reward",
+      "source": "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_no_dual_reward/abl_no_dual_reward/config.yaml",
+      "paper_config": "论文项目/generated/configs/abl_no_dual_reward.yaml"
+    },
+    {
+      "label": "abl_no_kcm",
+      "source": "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_no_kcm/abl_no_kcm/config.yaml",
+      "paper_config": "论文项目/generated/configs/abl_no_kcm.yaml"
+    },
+    {
+      "label": "abl_no_lookahead_obs",
+      "source": "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_abl_no_lookahead_obs/abl_no_lookahead_obs/config.yaml",
+      "paper_config": "论文项目/generated/configs/abl_no_lookahead_obs.yaml"
+    },
+    {
+      "label": "baseline_policy",
+      "source": "trajectory_autoresearch/_local_results/paper_runs/20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy/baseline_policy/config.yaml",
+      "paper_config": "论文项目/generated/configs/baseline_policy.yaml"
+    },
+    {
+      "label": "full_method_snapshot",
+      "source": "trajectory_autoresearch/_local_results/paper_runs/20260331_115320_20260331_115142_residual_teacher12h_v1_20260328_140725_0028_teacher_progress_stable/full_method_snapshot/config.yaml",
+      "paper_config": "论文项目/generated/configs/full_method_snapshot.yaml"
+    }
+  ]
+}

@@ -22,10 +22,11 @@ $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
+$localResultsDir = Join-Path $scriptRoot "_local_results"
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $stage1Deadline = (Get-Date).AddHours($StageHours)
 $stage2Deadline = (Get-Date).AddHours($TotalHours)
-$activeLogsDir = Join-Path $scriptRoot "paper_runs\active_logs"
+$activeLogsDir = Join-Path $localResultsDir "paper_runs\active_logs"
 $null = New-Item -ItemType Directory -Force -Path $activeLogsDir
 $statusPath = Join-Path $activeLogsDir ("{0}_{1}.status.json" -f $timestamp, $RunPrefix)
 

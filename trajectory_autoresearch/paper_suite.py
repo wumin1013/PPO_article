@@ -12,6 +12,7 @@ from typing import Callable, Sequence
 from prepare import (
     BASE_CONFIG_COPY,
     CURRENT_BEST_CONFIG,
+    PAPER_RUNS_DIR,
     RESEARCH_ROOT,
     build_selected_paths,
     build_train_config,
@@ -26,6 +27,7 @@ from prepare import (
     load_yaml,
     now_tag,
     now_text,
+    resolve_artifact_path,
     resolve_python_command,
     run_command,
     set_nested,
@@ -35,7 +37,6 @@ from prepare import (
 )
 
 
-PAPER_RUNS_DIR = RESEARCH_ROOT / "paper_runs"
 PAPER_SYNC_SCRIPT = RESEARCH_ROOT / "paper_sync.py"
 NNC_BASE_CONFIG = RESEARCH_ROOT.parent / "PPO_project" / "configs" / "p0_l2_gold.yaml"
 
@@ -295,9 +296,9 @@ def _evaluate_existing_best(
     current_best_snapshot: Path,
     effective_time_budget_seconds: float,
 ) -> dict:
-    source_run_dir = Path(str(current_best_state.get("run_dir", "")).strip())
-    source_model_path = Path(str(current_best_state.get("model_path", "")).strip())
-    source_latest = Path(str(current_best_state.get("latest_checkpoint", "")).strip())
+    source_run_dir = resolve_artifact_path(current_best_state.get("run_dir", ""))
+    source_model_path = resolve_artifact_path(current_best_state.get("model_path", ""))
+    source_latest = resolve_artifact_path(current_best_state.get("latest_checkpoint", ""))
     if not source_run_dir.exists() or not source_model_path.exists():
         raise FileNotFoundError("current best run/model path missing; cannot build paper full-method snapshot")
 

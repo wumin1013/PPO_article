@@ -17,6 +17,7 @@ $ErrorActionPreference = "Stop"
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
+$localResultsDir = Join-Path $scriptRoot "_local_results"
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $deadline = if ([string]::IsNullOrWhiteSpace($DeadlineTime)) {
     (Get-Date).AddHours($Hours)
@@ -24,7 +25,7 @@ $deadline = if ([string]::IsNullOrWhiteSpace($DeadlineTime)) {
     [datetime]::Parse($DeadlineTime)
 }
 $deadlineIso = $deadline.ToString("s")
-$activeLogsDir = Join-Path $scriptRoot "paper_runs\active_logs"
+$activeLogsDir = Join-Path $localResultsDir "paper_runs\active_logs"
 $null = New-Item -ItemType Directory -Force -Path $activeLogsDir
 $statusPath = Join-Path $activeLogsDir ("{0}_{1}.status.json" -f $timestamp, $SuitePrefix)
 

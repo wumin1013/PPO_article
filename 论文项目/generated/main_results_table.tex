@@ -1,0 +1,30 @@
+\begin{table}[H]
+\centering
+\caption{本文最终方法与基线策略在代表性路径 best rollout 上的对比结果。}
+\label{tab:main_results}
+\resizebox{0.92\textwidth}{!}{
+\begin{tabular}{llcc}
+\toprule
+\textbf{路径} & \textbf{指标} & \textbf{本文最终方法} & \textbf{NNC 基线}\\
+\midrule
+\multirow{5}{*}{square} & 终止状态 & success & success\\
+& 最终进度 & 1.000 & 1.000\\
+& 最大轮廓误差 & 0.834 & 0.676\\
+& 线捷度最大相对超限 & 0.000 & 3199.000\\
+& 终止时间 (s) & 12.192 & 8.672\\
+\midrule
+\multirow{5}{*}{circle} & 终止状态 & success & max\_steps\\
+& 最终进度 & 1.000 & 0.990\\
+& 最大轮廓误差 & 0.096 & 6.259\\
+& 线捷度最大相对超限 & 0.000 & 3199.000\\
+& 终止时间 (s) & 9.117 & 60.000\\
+\midrule
+\multirow{5}{*}{butterfly} & 终止状态 & success & success\\
+& 最终进度 & 1.000 & 1.000\\
+& 最大轮廓误差 & 0.745 & 0.207\\
+& 线捷度最大相对超限 & 0.000 & 3199.000\\
+& 终止时间 (s) & 10.480 & 5.807\\
+\bottomrule
+\end{tabular}
+}
+\end{table}

@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from prepare import (
     CURRENT_BEST_CONFIG,
     RESEARCH_ROOT,
+    WORKSPACE_DIR,
     archive_promoted_result,
     build_selected_paths,
     load_current_best_state,
@@ -21,7 +22,7 @@ from prepare import (
 from train import refine_experiment_result, should_keep, should_upgrade_candidate, upgrade_promising_experiment
 
 
-STATE_PATH = RESEARCH_ROOT / "workspace" / "refine_worker_state.json"
+STATE_PATH = WORKSPACE_DIR / "refine_worker_state.json"
 
 
 def parse_args() -> argparse.Namespace:

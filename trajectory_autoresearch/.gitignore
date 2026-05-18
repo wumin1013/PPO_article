@@ -1,9 +1,16 @@
+_local_results/
 runs/
 archives/
 workspace/
 long_runs/
 paper_runs/
 results.tsv
+backups/
+seed_screen/
+seed_screen_fullmethod/
+seed_runtime_screen/
+temp_teacher_smoke/
+temp_teacher_smoke_run/
 *.log
 __pycache__/
 *.pyc

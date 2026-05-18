@@ -116,7 +116,20 @@ def _rollout_with_model(config: dict, path_cfg: Dict[str, Any], model_path: Path
     total_reward = 0.0
     trajectory = [np.asarray(env.current_position, dtype=float).copy()]
     velocities = [float(getattr(env, "velocity", 0.0))]
-    rows: List[Tuple[int, float, float, float]] = [(0, trajectory[-1][0], trajectory[-1][1], velocities[-1])]
+    rows: List[Dict[str, float]] = [
+        {
+            "step": 0,
+            "x": float(trajectory[-1][0]),
+            "y": float(trajectory[-1][1]),
+            "velocity": velocities[-1],
+            "acceleration": float(getattr(env, "acceleration", 0.0)),
+            "jerk": float(getattr(env, "jerk", 0.0)),
+            "contour_error": float(env.get_contour_error(env.current_position)),
+            "kcm_intervention": float(getattr(env, "kcm_intervention", 0.0)),
+            "raw_linear_jerk_demand": 0.0,
+            "disable_kcm": float(bool(getattr(env, "disable_kcm", False))),
+        }
+    ]
 
     step = 0
     with torch.no_grad():
@@ -135,7 +148,20 @@ def _rollout_with_model(config: dict, path_cfg: Dict[str, Any], model_path: Path
             vel = float(getattr(env, "velocity", 0.0))
             trajectory.append(pos)
             velocities.append(vel)
-            rows.append((step, float(pos[0]), float(pos[1]), vel))
+            rows.append(
+                {
+                    "step": step,
+                    "x": float(pos[0]),
+                    "y": float(pos[1]),
+                    "velocity": vel,
+                    "acceleration": float(getattr(env, "acceleration", 0.0)),
+                    "jerk": float(info.get("jerk", getattr(env, "jerk", 0.0))),
+                    "contour_error": float(info.get("contour_error", 0.0)),
+                    "kcm_intervention": float(info.get("kcm_intervention", 0.0)),
+                    "raw_linear_jerk_demand": float(info.get("raw_linear_jerk_demand", 0.0)),
+                    "disable_kcm": float(bool(info.get("disable_kcm", getattr(env, "disable_kcm", False)))),
+                }
+            )
 
             if step > int(config["environment"]["max_steps"]) + 5:
                 break
@@ -211,12 +237,24 @@ def _save_plot(path_name: str, result: dict, out_png: Path) -> None:
     plt.close(fig)
 
 
-def _save_csv(rows: List[Tuple[int, float, float, float]], out_csv: Path) -> None:
+def _save_csv(rows: List[Dict[str, float]], out_csv: Path) -> None:
     out_csv.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "step",
+        "x",
+        "y",
+        "velocity",
+        "acceleration",
+        "jerk",
+        "contour_error",
+        "kcm_intervention",
+        "raw_linear_jerk_demand",
+        "disable_kcm",
+    ]
     with out_csv.open("w", encoding="utf-8") as f:
-        f.write("step,x,y,velocity\n")
-        for step, x, y, v in rows:
-            f.write(f"{step},{x:.10f},{y:.10f},{v:.10f}\n")
+        f.write(",".join(fieldnames) + "\n")
+        for row in rows:
+            f.write(",".join(f"{float(row.get(name, 0.0)):.10f}" for name in fieldnames) + "\n")
 
 
 def main() -> int:

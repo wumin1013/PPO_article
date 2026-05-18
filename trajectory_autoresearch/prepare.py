@@ -19,11 +19,14 @@ import yaml
 
 RESEARCH_ROOT = Path(__file__).resolve().parent
 PPO_ROOT = RESEARCH_ROOT.parent / "PPO_project"
-WORKSPACE_DIR = RESEARCH_ROOT / "workspace"
-RUNS_DIR = RESEARCH_ROOT / "runs"
-ARCHIVES_DIR = RESEARCH_ROOT / "archives"
-RESULTS_TSV = RESEARCH_ROOT / "results.tsv"
-RESULTS_LOCK = RESEARCH_ROOT / "results.tsv.lock"
+LOCAL_RESULTS_DIR = RESEARCH_ROOT / "_local_results"
+WORKSPACE_DIR = LOCAL_RESULTS_DIR / "workspace"
+RUNS_DIR = LOCAL_RESULTS_DIR / "runs"
+ARCHIVES_DIR = LOCAL_RESULTS_DIR / "archives"
+PAPER_RUNS_DIR = LOCAL_RESULTS_DIR / "paper_runs"
+LONG_RUNS_DIR = LOCAL_RESULTS_DIR / "long_runs"
+RESULTS_TSV = LOCAL_RESULTS_DIR / "results.tsv"
+RESULTS_LOCK = LOCAL_RESULTS_DIR / "results.tsv.lock"
 LEADERBOARD_JSON = WORKSPACE_DIR / "leaderboard.json"
 LEADERBOARD_MD = WORKSPACE_DIR / "leaderboard.md"
 CURRENT_BEST_ARCHIVE = ARCHIVES_DIR / "current_best.json"
@@ -37,6 +40,15 @@ DEFAULT_BASE_CONFIG_SOURCE = PPO_ROOT / "configs" / "default.yaml"
 CURRENT_BEST_CONFIG = WORKSPACE_DIR / "current_best.yaml"
 CURRENT_BEST_STATE = WORKSPACE_DIR / "current_best.json"
 BASE_CONFIG_COPY = WORKSPACE_DIR / "base_config.yaml"
+LOCAL_ARTIFACT_ENTRY_NAMES = {
+    "workspace",
+    "runs",
+    "archives",
+    "paper_runs",
+    "long_runs",
+    "results.tsv",
+    "results.tsv.lock",
+}
 
 DEFAULT_PATH_NAMES = ("square", "s_shape", "butterfly", "trapezoid", "circle")
 PATH_MAX_STEPS_HINTS: Dict[str, int] = {
@@ -208,6 +220,36 @@ def write_json(path: Path, payload: Mapping[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
         json.dump(dict(payload), f, ensure_ascii=False, indent=2)
+
+
+def resolve_artifact_path(path_like: Any) -> Path:
+    """Resolve old in-repo artifact paths after moving run outputs to _local_results."""
+    raw = str(path_like or "").strip()
+    if not raw:
+        return Path(raw)
+
+    path = Path(raw)
+    if path.exists():
+        return path
+
+    normalized = raw.replace("/", "\\")
+    lower = normalized.lower()
+    marker = "\\trajectory_autoresearch\\"
+    suffix = ""
+    marker_index = lower.find(marker)
+    if marker_index >= 0:
+        suffix = normalized[marker_index + len(marker) :]
+    elif lower.startswith("trajectory_autoresearch\\"):
+        suffix = normalized[len("trajectory_autoresearch\\") :]
+
+    if suffix:
+        parts = Path(suffix).parts
+        if parts and str(parts[0]).lower() in LOCAL_ARTIFACT_ENTRY_NAMES:
+            candidate = LOCAL_RESULTS_DIR.joinpath(*parts)
+            if candidate.exists():
+                return candidate
+
+    return path
 
 
 class _ResultsLock:
@@ -1007,7 +1049,7 @@ def latest_checkpoint_from_state(state: Mapping[str, Any]) -> Optional[Path]:
     raw_path = str(state.get("latest_checkpoint", "")).strip()
     if not raw_path:
         return None
-    path = Path(raw_path)
+    path = resolve_artifact_path(raw_path)
     return path if path.exists() else None
 
 

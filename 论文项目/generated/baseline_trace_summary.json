@@ -1,0 +1,148 @@
+{
+  "variant_name": "baseline_policy",
+  "variant_label": "NNC 方法",
+  "signature": {
+    "trace_tag": "baseline",
+    "trace_schema_version": 6,
+    "config_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\config.yaml",
+    "variant_name": "baseline_policy",
+    "status": "completed",
+    "paths": {
+      "square": {
+        "model_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\checkpoints\\best_model.pth",
+        "config_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\evaluation\\configs\\square.yaml",
+        "deterministic": false,
+        "seed_eval": 43,
+        "episode_set": "",
+        "selected_episode": 0
+      },
+      "circle": {
+        "model_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\checkpoints\\best_model.pth",
+        "config_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\evaluation\\configs\\circle.yaml",
+        "deterministic": false,
+        "seed_eval": 43,
+        "episode_set": "",
+        "selected_episode": 0
+      },
+      "butterfly": {
+        "model_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\checkpoints\\best_model.pth",
+        "config_path": "C:\\Users\\wumin\\Nutstore\\1\\DDPG的轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\evaluation\\configs\\butterfly.yaml",
+        "deterministic": false,
+        "seed_eval": 43,
+        "episode_set": "",
+        "selected_episode": 0
+      }
+    },
+    "trace_paths": [
+      "square",
+      "circle",
+      "butterfly"
+    ],
+    "rich_trace_paths": []
+  },
+  "selected_path": "square",
+  "selected_csv_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\best_rollouts\\square_best.csv",
+  "selected_episode": 0,
+  "selected_steps": 8672,
+  "selected_done_reason": "success",
+  "selected_score": -3141771578.2713428,
+  "candidates": [
+    {
+      "path_name": "square",
+      "config_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\evaluation\\configs\\square.yaml",
+      "model_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\checkpoints\\best_model.pth",
+      "csv_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\best_rollouts\\square_best.csv",
+      "selected_episode": 0,
+      "score": -3141771578.2713428,
+      "reward": -3142771578.2713428,
+      "progress": 1.0,
+      "steps": 8672,
+      "done_reason": "success",
+      "linear_jerk_limit": 62500.0,
+      "angular_jerk_limit": 1000.0,
+      "max_abs_linear_jerk": 50000000.0,
+      "max_abs_angular_jerk": 0.0,
+      "max_abs_contour_error": 0.6770502193823233,
+      "half_epsilon": 0.75,
+      "trace_has_rich_rows": false,
+      "audit": {
+        "enable_kcm": false,
+        "lookahead_obs_enabled": false,
+        "lookahead_points": 0,
+        "lookahead_control_enabled": false,
+        "lookahead_policy_action": false,
+        "lookahead_distance": 0.0,
+        "cornerness_enabled": false,
+        "lookahead_reward_enabled": false
+      }
+    },
+    {
+      "path_name": "circle",
+      "config_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\evaluation\\configs\\circle.yaml",
+      "model_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\checkpoints\\best_model.pth",
+      "csv_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\best_rollouts\\circle_best.csv",
+      "selected_episode": 0,
+      "score": -23758647948.149483,
+      "reward": -23759637948.15902,
+      "progress": 0.9900000095367432,
+      "steps": 60000,
+      "done_reason": "max_steps",
+      "linear_jerk_limit": 62500.0,
+      "angular_jerk_limit": 1000.0,
+      "max_abs_linear_jerk": 100000000.0,
+      "max_abs_angular_jerk": 0.0,
+      "max_abs_contour_error": 6.214531498323549,
+      "half_epsilon": 0.75,
+      "trace_has_rich_rows": false,
+      "audit": {
+        "enable_kcm": false,
+        "lookahead_obs_enabled": false,
+        "lookahead_points": 0,
+        "lookahead_control_enabled": false,
+        "lookahead_policy_action": false,
+        "lookahead_distance": 0.0,
+        "cornerness_enabled": false,
+        "lookahead_reward_enabled": false
+      }
+    },
+    {
+      "path_name": "butterfly",
+      "config_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\evaluation\\configs\\butterfly.yaml",
+      "model_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\checkpoints\\best_model.pth",
+      "csv_path": "D:\\轨迹平滑\\基于强化学习的轨迹平滑\\trajectory_autoresearch\\paper_runs\\20260329_222832_20260329_222831_paper_matrix_24h_v1_baseline_policy\\baseline_policy\\best_rollouts\\butterfly_best.csv",
+      "selected_episode": 0,
+      "score": -6715755731.5280485,
+      "reward": -6716755731.5280485,
+      "progress": 1.0,
+      "steps": 5807,
+      "done_reason": "success",
+      "linear_jerk_limit": 62500.0,
+      "angular_jerk_limit": 1000.0,
+      "max_abs_linear_jerk": 70830775.797375,
+      "max_abs_angular_jerk": 0.0,
+      "max_abs_contour_error": 0.25010611593453336,
+      "half_epsilon": 0.75,
+      "trace_has_rich_rows": false,
+      "audit": {
+        "enable_kcm": false,
+        "lookahead_obs_enabled": false,
+        "lookahead_points": 0,
+        "lookahead_control_enabled": false,
+        "lookahead_policy_action": false,
+        "lookahead_distance": 0.0,
+        "cornerness_enabled": false,
+        "lookahead_reward_enabled": false
+      }
+    }
+  ],
+  "audit": {
+    "enable_kcm": false,
+    "lookahead_obs_enabled": false,
+    "lookahead_points": 0,
+    "lookahead_control_enabled": false,
+    "lookahead_policy_action": false,
+    "lookahead_distance": 0.0,
+    "cornerness_enabled": false,
+    "lookahead_reward_enabled": false
+  }
+}

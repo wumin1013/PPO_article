@@ -6,10 +6,19 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-from prepare import RESEARCH_ROOT, get_git_head, load_current_best_state, now_tag, now_text, resolve_python_command, run_command, write_json
+from prepare import (
+    PAPER_RUNS_DIR,
+    RESEARCH_ROOT,
+    get_git_head,
+    load_current_best_state,
+    now_tag,
+    now_text,
+    resolve_python_command,
+    run_command,
+    write_json,
+)
 
 
-PAPER_RUNS_DIR = RESEARCH_ROOT / "paper_runs"
 ACTIVE_LOGS_DIR = PAPER_RUNS_DIR / "active_logs"
 PAPER_SUITE_SCRIPT = RESEARCH_ROOT / "paper_suite.py"
 PAPER_SYNC_SCRIPT = RESEARCH_ROOT / "paper_sync.py"

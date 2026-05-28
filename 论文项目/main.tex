@@ -1,0 +1,105 @@
+% !TeX program = xelatex
+% !TeX encoding = UTF-8
+\documentclass[preprint,12pt]{elsarticle}
+
+\ifdefined\synctex
+  \synctex=1
+\fi
+
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{subcaption}
+\usepackage{caption}
+\usepackage{float}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{figures/}{figures/generated/}}
+\journal{Engineering Applications of Artificial Intelligence}
+
+\biboptions{numbers,sort&compress}
+
+% Temporary aux-only BibTeX placeholder for editor recipes that run BibTeX
+% before the English manuscript contains real citations. It turns itself off
+% when a real \bibliography{...} command is enabled.
+\newif\ifdraftbibplaceholder
+\draftbibplaceholdertrue
+\let\DraftBibPlaceholderOriginalBibliography\bibliography
+\renewcommand{\bibliography}[1]{%
+  \global\draftbibplaceholderfalse
+  \DraftBibPlaceholderOriginalBibliography{#1}%
+}
+\makeatletter
+\AtEndDocument{%
+  \ifdraftbibplaceholder
+    \if@filesw
+      \immediate\write\@auxout{\string\citation{Li2020}}%
+      \immediate\write\@auxout{\string\bibstyle{elsarticle-num}}%
+      \immediate\write\@auxout{\string\bibdata{references}}%
+    \fi
+  \fi
+}
+\makeatother
+
+\renewcommand{\algorithmicrequire}{\textbf{Require:}}
+\renewcommand{\algorithmicensure}{\textbf{Ensure:}}
+
+\begin{document}
+
+\begin{frontmatter}
+
+\title{Reinforcement Learning-Based CNC Motion Planning with Learnable Preview Distance and Jerk-Constrained Action Projection}
+
+\author[1]{Author Name}
+\affiliation[1]{
+  organization={Organization Name},
+  addressline={Address Line},
+  city={City},
+  postcode={Postcode},
+  country={Country}
+}
+
+\begin{abstract}
+% TODO: Add the English abstract.
+\end{abstract}
+
+\begin{keyword}
+% TODO: Add 3--6 keywords separated by \sep.
+\end{keyword}
+
+\end{frontmatter}
+
+\section{Introduction}
+\label{sec:introduction}
+% TODO: Add content.
+
+\section{Problem Formulation}
+\label{sec:problem_formulation}
+% TODO: Add content.
+
+\section{Methodology}
+\label{sec:methodology}
+% TODO: Add content.
+
+\section{Experimental Setup}
+\label{sec:experimental_setup}
+% TODO: Add content.
+
+\section{Results and Discussion}
+\label{sec:results_discussion}
+% TODO: Add content.
+
+\section*{Acknowledgements}
+% TODO: Add acknowledgements or remove this section if not needed.
+
+% Uncomment the bibliography block after adding citation commands such as \cite{...}.
+% \bibliographystyle{elsarticle-num}
+% \bibliography{references}
+
+\end{document}

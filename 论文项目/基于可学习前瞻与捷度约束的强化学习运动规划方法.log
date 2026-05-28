@@ -1,10 +1,10 @@
-This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.12.10)  26 MAY 2026 20:19
+This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.12.2)  28 MAY 2026 03:28
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
  %&-line parsing enabled.
-**d:/轨迹平滑/基于强化学习的轨迹平滑/论文项目/基于可学习前瞻与捷度约束的强化学习运动规划方法
-(d:/轨迹平滑/基于强化学习的轨迹平滑/论文项目/基于可学习前瞻与捷度约束的强化学习运动规划方法.tex
+**c:/Users/wumin/Nutstore/1/DDPG的轨迹平滑/基于强化学习的轨迹平滑/论文项目/基于可学习前瞻与捷度约束的强化学习运动规划方法
+(c:/Users/wumin/Nutstore/1/DDPG的轨迹平滑/基于强化学习的轨迹平滑/论文项目/基于可学习前瞻与捷度约束的强化学习运动规划方法.tex
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2025-01-18>
 (d:/texlive/2025/texmf-dist/tex/latex/elsarticle/elsarticle.cls
@@ -693,11 +693,11 @@ File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 ]
 
 [2]
+
+[3]
 File: ./figures/fig1.pdf Graphic file (type pdf)
 <use ./figures/fig1.pdf>
 
-
-[3]
 
 [4]
 File: ./figures/fig2.pdf Graphic file (type pdf)
@@ -705,11 +705,11 @@ File: ./figures/fig2.pdf Graphic file (type pdf)
 
 
 [5]
+
+[6]
 File: ./figures/fig3.pdf Graphic file (type pdf)
 <use ./figures/fig3.pdf>
 
-
-[6]
 
 [7]
 
@@ -722,47 +722,47 @@ File: ./figures/fig3.pdf Graphic file (type pdf)
 [11] (./generated/main_results_table.tex)
 
 [12]
+
+[13]
 File: figures/generated/qualitative_results.pdf Graphic file (type pdf)
 <use figures/generated/qualitative_results.pdf>
 
 
-[13]
-
 [14]
+
+[15]
 File: figures/generated/square_corner_zoom.pdf Graphic file (type pdf)
 <use figures/generated/square_corner_zoom.pdf>
 File: figures/generated/kcm_analysis.pdf Graphic file (type pdf)
 <use figures/generated/kcm_analysis.pdf>
 
 
-[15]
+[16]
 
-[16] (./generated/ablation_table.tex)
+[17] (./generated/ablation_table.tex)
 File: figures/generated/jerk_constraint_comparison.pdf Graphic file (type pdf)
 <use figures/generated/jerk_constraint_comparison.pdf>
 
-
-[17]
 
 [18]
 
 [19]
 
 [20]
-Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on input line 490.
+
+[21]
+Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on input line 493.
 
 
-[21
-
-]
-
-[22] (./基于可学习前瞻与捷度约束的强化学习运动规划方法.bbl
-
-[23
+[22
 
 ]
 
-[24]
+[23] (./基于可学习前瞻与捷度约束的强化学习运动规划方法.bbl
+
+[24
+
+]
 
 [25])
 
@@ -775,12 +775,12 @@ Package rerunfilecheck Info: File `基于可学习前瞻与捷度约束的强化
 (rerunfilecheck)             Checksum: E79D16E335BF552F78395B6C2F917C97;1605.
  ) 
 Here is how much of TeX's memory you used:
- 18785 strings out of 473832
- 387775 string characters out of 5733157
- 812355 words of memory out of 5000000
- 41547 multiletter control sequences out of 15000+600000
+ 18773 strings out of 473832
+ 387685 string characters out of 5733158
+ 814292 words of memory out of 5000000
+ 41535 multiletter control sequences out of 15000+600000
  574984 words of font info for 106 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 93i,12n,111p,1231b,541s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 93i,12n,111p,1259b,513s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
 Output written on 基于可学习前瞻与捷度约束的强化学习运动规划方法.pdf (26 pages).

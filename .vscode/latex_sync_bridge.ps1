@@ -93,6 +93,57 @@ function Resolve-AppPath {
     throw "Unable to locate $ExecutableName on this machine."
 }
 
+function Resolve-CodeCliPath {
+    $command = Get-Command "code" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command -and $command.Source -and (Test-Path $command.Source)) {
+        return $command.Source
+    }
+
+    $fallbackPaths = @(
+        "D:\Microsoft VS Code\bin\code.cmd",
+        "C:\Program Files\Microsoft VS Code\bin\code.cmd",
+        "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd"
+    )
+
+    foreach ($candidate in $fallbackPaths) {
+        if (Test-Path $candidate) {
+            return $candidate
+        }
+    }
+
+    throw "Unable to locate the VS Code command line launcher code.cmd."
+}
+
+function Resolve-WScriptPath {
+    $candidate = Join-Path $env:WINDIR "System32\wscript.exe"
+    if (Test-Path $candidate) {
+        return $candidate
+    }
+
+    $command = Get-Command "wscript.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command -and $command.Source -and (Test-Path $command.Source)) {
+        return $command.Source
+    }
+
+    throw "Unable to locate wscript.exe on this machine."
+}
+
+function Install-InverseSearchLauncher {
+    $sourcePath = Join-Path $PSScriptRoot "vscode_inverse_search.vbs"
+    if (-not (Test-Path $sourcePath)) {
+        throw "Unable to locate vscode_inverse_search.vbs beside this script."
+    }
+
+    $targetDir = Join-Path $env:LOCALAPPDATA "VSCodeLatexSync"
+    $targetPath = Join-Path $targetDir "vscode_inverse_search.vbs"
+    if (-not (Test-Path $targetDir)) {
+        New-Item -ItemType Directory -Path $targetDir | Out-Null
+    }
+
+    Copy-Item -LiteralPath $sourcePath -Destination $targetPath -Force
+    return $targetPath
+}
+
 function Start-ResolvedProcess {
     param(
         [Parameter(Mandatory = $true)]
@@ -102,7 +153,34 @@ function Start-ResolvedProcess {
         [string[]]$Arguments
     )
 
-    Start-Process -FilePath $FilePath -ArgumentList $Arguments | Out-Null
+    $argumentLine = ($Arguments | ForEach-Object { ConvertTo-ProcessArgument $_ }) -join " "
+    Start-Process -FilePath $FilePath -ArgumentList $argumentLine | Out-Null
+}
+
+function ConvertTo-ProcessArgument {
+    param(
+        [AllowEmptyString()]
+        [string]$Argument
+    )
+
+    if ($null -eq $Argument) {
+        return '""'
+    }
+
+    if ($Argument -notmatch '[\s"]') {
+        return $Argument
+    }
+
+    $escaped = $Argument -replace '(\\*)"', '$1$1\"'
+    $escaped = $escaped -replace '(\\+)$', '$1$1'
+    return '"' + $escaped + '"'
+}
+
+function Get-InverseSearchCommand {
+    $codePath = Resolve-CodeCliPath
+    $launcherPath = Install-InverseSearchLauncher
+    $wscriptPath = Resolve-WScriptPath
+    return "`"$wscriptPath`" `"$launcherPath`" `"$codePath`" `"%f`" `"%l`""
 }
 
 try {
@@ -124,6 +202,8 @@ try {
 
             Start-ResolvedProcess -FilePath $sumatraPath -Arguments @(
                 "-reuse-instance",
+                "-inverse-search",
+                (Get-InverseSearchCommand),
                 $Arg1
             )
         }
@@ -145,6 +225,8 @@ try {
 
             Start-ResolvedProcess -FilePath $sumatraPath -Arguments @(
                 "-reuse-instance",
+                "-inverse-search",
+                (Get-InverseSearchCommand),
                 "-forward-search",
                 $Arg1,
                 $Arg2,
@@ -157,14 +239,7 @@ try {
                 throw "Missing file or line argument."
             }
 
-            $codePath = Resolve-AppPath `
-                -CommandNames @("code", "Code.exe") `
-                -ExecutableName "Code.exe" `
-                -FallbackPaths @(
-                    "D:\Microsoft VS Code\Code.exe",
-                    "C:\Program Files\Microsoft VS Code\Code.exe",
-                    "$env:LOCALAPPDATA\Programs\Microsoft VS Code\Code.exe"
-                )
+            $codePath = Resolve-CodeCliPath
 
             Start-ResolvedProcess -FilePath $codePath -Arguments @(
                 "-r",

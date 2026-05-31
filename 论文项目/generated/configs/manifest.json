@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-05-17 20:22:29",
+  "updated_at": "2026-05-30 23:54:15",
   "config_count": 8,
   "configs": [
     {
@@ -9,7 +9,7 @@
     },
     {
       "label": "current_best_source",
-      "source": "trajectory_autoresearch/_local_results/runs/20260328_140725_0028_teacher_progress_stable/config.yaml",
+      "source": "trajectory_autoresearch/_local_results/runs/20260519_070708_0237_p8_recovery_cap_sweep/config.yaml",
       "paper_config": "论文项目/generated/configs/current_best_source.yaml"
     },
     {

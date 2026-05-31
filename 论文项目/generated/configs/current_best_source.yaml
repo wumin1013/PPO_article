@@ -1,12 +1,12 @@
 autoresearch:
-  candidate: teacher_progress_stable
+  candidate: p8_recovery_cap_sweep
   candidate_amplitude: 1.0
-  created_at: '2026-03-28 14:07:25'
-  description: 沿教师节奏重训完整方法，但保留更稳的角区平滑权重 | amp=1.00x
-  experiment_id: 20260328_140725_0028_teacher_progress_stable
-  git_head: '3384270'
-  parent_experiment_id: 20260328_113759_0026_teacher_progress_aggressive
-  parent_run_dir: C:\Users\wumin\Nutstore\1\DDPG的轨迹平滑\基于强化学习的轨迹平滑\trajectory_autoresearch\runs\20260328_113759_0026_teacher_progress_aggressive
+  created_at: '2026-05-19 07:07:08'
+  description: 显式搜索P8恢复限速、出弯释放角和误差释放阈值，压缩完成时间但保留KCM硬约束 | amp=1.00x
+  experiment_id: 20260519_070708_0237_p8_recovery_cap_sweep
+  git_head: 136ceb8
+  parent_experiment_id: 20260519_044511_0230_kcm_margin_release
+  parent_run_dir: C:\Users\wumin\Nutstore\1\DDPG的轨迹平滑\基于强化学习的轨迹平滑\trajectory_autoresearch\_local_results\runs\20260519_044511_0230_kcm_margin_release
 environment:
   epsilon: 2.5
   interpolation_period: 0.001
@@ -24,7 +24,7 @@ experiment:
   force_fresh_start: true
   mode: train
   model_path: null
-  name: 20260328_140725_0028_teacher_progress_stable
+  name: 20260519_070708_0237_p8_recovery_cap_sweep
   paper_description: ''
   paper_label: ''
   paper_variant: ''
@@ -72,15 +72,15 @@ path_curriculum:
     scale: 28.0
     type: butterfly
 ppo:
-  actor_lr: 0.0003
+  actor_lr: 0.000255443087910213
   batch_size: null
-  critic_lr: 0.00015
+  critic_lr: 0.0001386370178842568
   ent_coef: 0.01
-  epochs: 8
+  epochs: 12
   eps: 0.1
-  gamma: 0.99
+  gamma: 0.9945936639360363
   hidden_dim: 256
-  lmbda: 0.95
+  lmbda: 0.9647332169017517
 reward_weights:
   control_authority:
     blend_schedule: cosine
@@ -119,12 +119,17 @@ reward_weights:
     safe_margin_ratio: 0.2
     theta_enter_deg: 10.0
     theta_exit_deg: 8.0
+  finish_efficiency:
+    bonus_weight: 30.159999999999997
+    enabled: true
+    late_penalty_weight: 14.16
+    margin_clip: 0.42
   lookahead:
-    distance: 2.3125
+    distance: 2.28125
     enabled: true
     ref_in_control: true
   lookahead_control:
-    action_default: 0.3980263157894737
+    action_default: 0.3898026315789474
     corner_dist: 3.0
     cornerness_high_deg: 30.0
     cornerness_low_deg: 5.0
@@ -132,7 +137,7 @@ reward_weights:
     enabled: true
     max_dist: 4.6
     min_dist: 0.8
-    mix_gain: 0.7
+    mix_gain: 0.77
     policy_action: true
     region_source: turn
     straight_dist: 1.5
@@ -187,35 +192,47 @@ reward_weights:
     stall_cap_low: 0.25
     trace_ring_size: 200
   p8:
-    ang_cap_min_ratio: 0.1456
-    corner_exit_e_release_ratio: 0.55
+    ang_cap_min_ratio: 0.2165170361002659
+    corner_exit_e_release_ratio: 0.8194192732610317
     corner_exit_hold_steps: 2
-    corner_exit_psi_release_deg: 20.0
+    corner_exit_psi_release_deg: 29.803030383743387
     corner_off_dist_scale: 3.0
     corner_on_dist_scale: 2.0
     use_corner_exit_hysteresis: true
-    use_recovery_cap: false
+    use_recovery_cap: true
     use_vcap_rate_limit: true
-    vcap_rate_down: 0.05
-    vcap_rate_up: 0.2015
-  teacher_progress:
-    default_target_steps: 7043
+    vcap_rate_down: 0.06596202945215045
+    vcap_rate_up: 0.36
+  speed_profile:
+    corner_floor_ratio: 0.3643200000000001
+    corner_target_ratio: 0.5060000000000001
+    corner_weight: 3.136
     enabled: true
-    finish_bonus: 16.0
-    lag_clip: 0.3
-    lag_weight: 22.0
-    lead_bonus: 2.0
-    path_target_steps:
-      butterfly: 6593
-      circle: 5893
-      square: 8643
+    floor_weight: 3.24
+    overspeed_weight: 0.75
     power: 2.0
-    slack: 0.022
+    straight_floor_ratio: 0.690768
+    straight_target_ratio: 0.8856
+    straight_weight: 6.612
+  teacher_progress:
+    default_target_steps: 5052
+    enabled: true
+    finish_bonus: 22.0
+    lag_clip: 0.3
+    lag_weight: 30.0
+    lead_bonus: 3.2
+    path_target_steps:
+      butterfly: 4611
+      circle: 4176
+      square: 6368
+    power: 2.0
+    slack: 0.016
+    target_step_scale: 0.9131578947368421
   tube:
     enabled: false
     ratio: 0.5
   w_e: 4.158
-  w_s: 16.0
+  w_s: 17.75126265989308
   w_smooth: 0.0944
   w_tau: 2.2
 seed: 42
@@ -226,10 +243,10 @@ training:
   enable_final_visualization: false
   enable_latest_trajectory: false
   log_interval: 50
-  num_episodes: 210
+  num_episodes: 398
   path_curriculum:
     enabled: true
-    episodes_per_path: 4
+    episodes_per_path: 2
     mode: round_robin
     paths:
     - closed: true
@@ -260,7 +277,7 @@ training:
   save_interval: 100
   smoothing_factor: 0.9
   step_log_interval_steps: 10
-  time_budget_seconds: 1080.0
+  time_budget_seconds: 2400.0
   traj_write_interval_steps: 0
   traj_write_max_points: 2000
   use_obs_normalizer: false

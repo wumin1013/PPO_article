@@ -1,15 +1,15 @@
 \begin{table}[H]
 \centering
-\caption{Summary of structured ablation results based on the path-level best rollout.}
+\caption{Path-level best-rollout results of the structured ablation study.}
 \label{tab:ablation}
 \resizebox{0.98\textwidth}{!}{
 \begin{tabular}{llccccc}
 \toprule
 \textbf{Model configuration} & \textbf{Path} & \textbf{Termination status} & \textbf{Final progress} & \textbf{Maximum contour error} & \textbf{Maximum relative linear-jerk violation} & \textbf{Termination time (s)}\\
 \midrule
-Final proposed method & square & success & 1.000 & 0.834 & 0.000 & 12.192\\
-Final proposed method & circle & success & 1.000 & 0.096 & 0.000 & 9.117\\
-Final proposed method & butterfly & success & 1.000 & 0.745 & 0.000 & 10.480\\
+J-NNC & square & success & 1.000 & 0.834 & 0.000 & 12.192\\
+J-NNC & circle & success & 1.000 & 0.096 & 0.000 & 9.117\\
+J-NNC & butterfly & success & 1.000 & 0.745 & 0.000 & 10.480\\
 \midrule
 Fixed look-ahead & square & success & 1.000 & 0.699 & 0.000 & 8.680\\
 Fixed look-ahead & circle & success & 1.000 & 0.046 & 0.000 & 4.804\\

@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-05-17 20:22:29",
+  "updated_at": "2026-05-30 23:54:15",
   "latest_suite_dir": "trajectory_autoresearch/_local_results/paper_runs/20260331_115320_20260331_115142_residual_teacher12h_v1_20260328_140725_0028_teacher_progress_stable",
   "suite_dirs": [
     "trajectory_autoresearch/_local_results/paper_runs/20260331_115320_20260331_115142_residual_teacher12h_v1_20260328_140725_0028_teacher_progress_stable",
@@ -93,7 +93,7 @@
     "abl_no_kcm_ratio": 3200.0
   },
   "final_configs": {
-    "updated_at": "2026-05-17 20:22:29",
+    "updated_at": "2026-05-30 23:54:15",
     "config_count": 8,
     "configs": [
       {
@@ -103,7 +103,7 @@
       },
       {
         "label": "current_best_source",
-        "source": "trajectory_autoresearch/_local_results/runs/20260328_140725_0028_teacher_progress_stable/config.yaml",
+        "source": "trajectory_autoresearch/_local_results/runs/20260519_070708_0237_p8_recovery_cap_sweep/config.yaml",
         "paper_config": "论文项目/generated/configs/current_best_source.yaml"
       },
       {
@@ -153,27 +153,27 @@
   },
   "suite_variants": {
     "full_method_snapshot": {
-      "label": "本文最终方法",
+      "label": "J-NNC",
       "status": "completed"
     },
     "abl_fixed_lookahead": {
-      "label": "固定前瞻",
+      "label": "Fixed look-ahead",
       "status": "completed"
     },
     "abl_no_kcm": {
-      "label": "无KCM",
+      "label": "Without KCM",
       "status": "completed"
     },
     "abl_no_dual_reward": {
-      "label": "无直线/拐角双奖励",
+      "label": "Without straight-line/corner dual rewards",
       "status": "completed"
     },
     "abl_no_lookahead_obs": {
-      "label": "无前瞻观测",
+      "label": "Without look-ahead observation",
       "status": "completed"
     },
     "baseline_policy": {
-      "label": "NNC 基线",
+      "label": "NNC baseline",
       "status": "completed"
     }
   }

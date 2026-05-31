@@ -68,12 +68,12 @@ TRACE_SCHEMA_VERSION = 3
 TRACE_ROLLOUT_RETRIES = 1
 
 VARIANT_LABELS = {
-    "full_method_snapshot": "本文最终方法",
-    "baseline_policy": "NNC 基线",
-    "abl_fixed_lookahead": "固定前瞻",
-    "abl_no_lookahead_obs": "无前瞻观测",
-    "abl_no_dual_reward": "无直线/拐角双奖励",
-    "abl_no_kcm": "无KCM",
+    "full_method_snapshot": "J-NNC",
+    "baseline_policy": "NNC baseline",
+    "abl_fixed_lookahead": "Fixed look-ahead",
+    "abl_no_lookahead_obs": "Without look-ahead observation",
+    "abl_no_dual_reward": "Without straight-line/corner dual rewards",
+    "abl_no_kcm": "Without KCM",
 }
 
 PLOT_DPI = 400
@@ -90,6 +90,7 @@ FIG67_LABEL_FONT_SIZE = 15
 FIG67_TICK_FONT_SIZE = 13
 FIG67_LEGEND_FONT_SIZE = 15
 FIG67_NOTE_FONT_SIZE = 14
+PANEL_LABEL_FONT_SIZE = 14
 PAPER_COMPLETION_PROGRESS_THRESHOLD = 0.90
 BEST_ROLLOUT_STATS_CACHE: dict[tuple[str, str, str, str], dict[str, Any]] = {}
 
@@ -110,6 +111,10 @@ matplotlib.rcParams.update(
         "axes.unicode_minus": False,
     }
 )
+
+
+def _xlabel_with_panel(axis_label: str, panel_label: str) -> str:
+    return f"{axis_label}\n{panel_label}"
 
 
 def parse_args() -> argparse.Namespace:
@@ -848,6 +853,7 @@ def _max_path_error(eval_payload: dict) -> float | None:
 
 
 def _variant_payload_from_manifest(manifest: dict, *, suite_dir: Path | None = None, suite_mtime: float = 0.0) -> dict:
+    name = str(manifest.get("name", ""))
     run_dir = _resolve_existing_path(str(manifest.get("run_dir", "")).strip())
     eval_payload = _load_eval_payload(manifest.get("eval_summary_path", ""))
     rollouts_summary = {}
@@ -857,8 +863,8 @@ def _variant_payload_from_manifest(manifest: dict, *, suite_dir: Path | None = N
         rollouts_summary = _read_json(rollouts_path)
     training_summary = _load_training_summary(run_dir) if run_dir.exists() else {}
     return {
-        "name": str(manifest.get("name", "")),
-        "label": str(manifest.get("label", manifest.get("name", ""))),
+        "name": name,
+        "label": VARIANT_LABELS.get(name, str(manifest.get("label", name))),
         "status": str(manifest.get("status", "")),
         "run_dir": str(run_dir),
         "eval_payload": eval_payload,
@@ -1337,16 +1343,10 @@ def _completed_variant_or_empty(payload: dict) -> dict:
 
 
 def _select_main_full_variant(suite_variants: dict[str, dict], current_best_variant: dict) -> tuple[dict, str]:
-    current_best_state = current_best_variant.get("state", {}) if isinstance(current_best_variant, dict) else {}
-    current_best_experiment_id = str(current_best_state.get("experiment_id", "")).strip()
     suite_full = _completed_variant_or_empty(suite_variants.get("full_method_snapshot", {}))
-    suite_source_experiment_id = str(suite_full.get("source_experiment_id", "")).strip()
-
-    if not suite_full:
-        return current_best_variant, "current_best"
-    if current_best_experiment_id and suite_source_experiment_id and suite_source_experiment_id != current_best_experiment_id:
-        return current_best_variant, "current_best"
-    return suite_full, "paper_suite"
+    if suite_full:
+        return suite_full, "paper_suite"
+    return current_best_variant, "current_best"
 
 
 def _build_main_results_tex(
@@ -1356,16 +1356,16 @@ def _build_main_results_tex(
     baseline_trace_summary: dict[str, Any] | None = None,
 ) -> str:
     targets = [("square", "square"), ("circle", "circle"), ("butterfly", "butterfly")]
-    baseline_label = _latex_escape(str(baseline.get("label", "NNC 基线")) or "NNC 基线")
+    baseline_label = _latex_escape(str(baseline.get("label", "NNC baseline")) or "NNC baseline")
     lines = [
         r"\begin{table}[H]",
         r"\centering",
-        r"\caption{本文最终方法与基线策略在代表性路径 best rollout 上的对比结果。}",
+        r"\caption{Comparison between J-NNC and the NNC baseline on representative best rollouts.}",
         r"\label{tab:main_results}",
         r"\resizebox{0.92\textwidth}{!}{",
         r"\begin{tabular}{llcc}",
         r"\toprule",
-        rf"\textbf{{路径}} & \textbf{{指标}} & \textbf{{本文最终方法}} & \textbf{{{baseline_label}}}\\",
+        rf"\textbf{{Path}} & \textbf{{Metric}} & \textbf{{J-NNC}} & \textbf{{{baseline_label}}}\\",
         r"\midrule",
     ]
     for idx, (path_key, path_label) in enumerate(targets):
@@ -1375,23 +1375,23 @@ def _build_main_results_tex(
         baseline_stats = _best_rollout_stats(baseline, path_key)
         lines.append(
             rf"\multirow{{5}}{{*}}{{{_latex_escape(path_label)}}}"
-            rf" & 终止状态 & {_latex_escape(str(full_stats.get('done_reason', '待完成')))}"
-            rf" & {_latex_escape(str(baseline_stats.get('done_reason', '待完成')))}\\"
+            rf" & Termination status & {_latex_escape(str(full_stats.get('done_reason', 'pending')))}"
+            rf" & {_latex_escape(str(baseline_stats.get('done_reason', 'pending')))}\\"
         )
         lines.append(
-            rf"& 最终进度 & {_fmt(full_stats.get('progress'))}"
+            rf"& Final progress & {_fmt(full_stats.get('progress'))}"
             rf" & {_fmt(baseline_stats.get('progress'))}\\"
         )
         lines.append(
-            rf"& 最大轮廓误差 & {_fmt(full_stats.get('max_abs_contour_error'))}"
+            rf"& Maximum contour error & {_fmt(full_stats.get('max_abs_contour_error'))}"
             rf" & {_fmt(baseline_stats.get('max_abs_contour_error'))}\\"
         )
         lines.append(
-            rf"& 线捷度最大相对超限 & {_fmt(full_stats.get('linear_jerk_overlimit'))}"
+            rf"& Maximum relative linear-jerk exceedance & {_fmt(full_stats.get('linear_jerk_overlimit'))}"
             rf" & {_fmt(baseline_stats.get('linear_jerk_overlimit'))}\\"
         )
         lines.append(
-            rf"& 终止时间 (s) & {_fmt(full_stats.get('time_seconds'))}"
+            rf"& Termination time (s) & {_fmt(full_stats.get('time_seconds'))}"
             rf" & {_fmt(baseline_stats.get('time_seconds'))}\\"
         )
     lines.extend(
@@ -1410,12 +1410,12 @@ def _build_ablation_tex(rows: list[dict], trace_summaries: dict[str, dict[str, A
     lines = [
         r"\begin{table}[H]",
         r"\centering",
-        r"\caption{结构化消融路径级 best rollout 结果汇总。}",
+        r"\caption{Path-level best-rollout results of the structured ablation study.}",
         r"\label{tab:ablation}",
         r"\resizebox{0.98\textwidth}{!}{",
         r"\begin{tabular}{llccccc}",
         r"\toprule",
-        r"\textbf{模型配置} & \textbf{路径} & \textbf{终止状态} & \textbf{最终进度} & \textbf{最大轮廓误差} & \textbf{线捷度最大相对超限} & \textbf{终止时间 (s)}\\",
+        r"\textbf{Model configuration} & \textbf{Path} & \textbf{Termination status} & \textbf{Final progress} & \textbf{Maximum contour error} & \textbf{Maximum relative linear-jerk violation} & \textbf{Termination time (s)}\\",
         r"\midrule",
     ]
     for row_idx, row in enumerate(rows):
@@ -1427,7 +1427,7 @@ def _build_ablation_tex(rows: list[dict], trace_summaries: dict[str, dict[str, A
             lines.append(
                 rf"{label}"
                 rf" & {_latex_escape(path_name)}"
-                rf" & {_latex_escape(str(stats.get('done_reason', '待完成')))}"
+                rf" & {_latex_escape(str(stats.get('done_reason', 'pending')))}"
                 rf" & {_fmt(stats.get('progress'))}"
                 rf" & {_fmt(stats.get('max_abs_contour_error'))}"
                 rf" & {_fmt(stats.get('linear_jerk_overlimit'))}"
@@ -1818,14 +1818,14 @@ def _build_square_corner_zoom_figure(full_method: dict, baseline: dict) -> None:
     x_min, x_max, y_min, y_max, corner = zoom_window
     fig, axes = plt.subplots(1, 2, figsize=(11.8, 5.2), dpi=PLOT_DPI, facecolor=PLOT_FACE_COLOR)
     panel_specs = [
-        ("Full Method", full_series, "#0b7285"),
-        ("NNC Baseline", baseline_series, "#d9480f"),
+        ("J-NNC", full_series, "#0b7285"),
+        ("NNC baseline", baseline_series, "#d9480f"),
     ]
-    for ax, (title, series, traj_color) in zip(np.atleast_1d(axes), panel_specs):
+    for ax, panel_label, (title, series, traj_color) in zip(np.atleast_1d(axes), ["(a)", "(b)"], panel_specs):
         ax.set_facecolor(PLOT_FACE_COLOR)
         ax.grid(True, **GRID_STYLE)
         ax.set_aspect("equal", adjustable="box")
-        ax.set_xlabel("X (mm)")
+        ax.set_xlabel(_xlabel_with_panel("X (mm)", panel_label), fontsize=PANEL_LABEL_FONT_SIZE)
         ax.set_ylabel("Y (mm)")
         _plot_reference_geometry(ax, geometry)
         ax.scatter([corner[0]], [corner[1]], s=30, color="#212529", marker="s", zorder=5, label="Corner")
@@ -1858,8 +1858,9 @@ def _build_qualitative_figure(full_method: dict, baseline: dict) -> None:
         _placeholder_png(QUAL_FIG, "Qualitative Figure Pending", "Waiting for vector rollout traces from the full method and baseline.")
         return
 
-    fig, axes = plt.subplots(len(panels), 2, figsize=(12.4, 4.7 * len(panels)), dpi=PLOT_DPI, facecolor=PLOT_FACE_COLOR)
+    fig, axes = plt.subplots(len(panels), 2, figsize=(12.4, 4.9 * len(panels)), dpi=PLOT_DPI, facecolor=PLOT_FACE_COLOR)
     axes = np.atleast_2d(axes)
+    panel_labels = iter(["(a)", "(b)", "(c)", "(d)", "(e)", "(f)"])
     for row_axes, (label, path_key, full_series, base_series) in zip(axes, panels):
         vmax = max(
             float(np.max(full_series.get("velocity", [0.0]))) if full_series else 0.0,
@@ -1867,14 +1868,14 @@ def _build_qualitative_figure(full_method: dict, baseline: dict) -> None:
             1.0,
         )
         titles_and_series = [
-            (f"{label} | Full Method", full_method, full_series),
-            (f"{label} | Baseline", baseline, base_series),
+            (f"{label} | J-NNC", full_method, full_series),
+            (f"{label} | NNC baseline", baseline, base_series),
         ]
-        for ax, (title, variant, series) in zip(row_axes, titles_and_series):
+        for ax, panel_label, (title, variant, series) in zip(row_axes, panel_labels, titles_and_series):
             ax.set_facecolor(PLOT_FACE_COLOR)
             ax.grid(True, **GRID_STYLE)
             ax.set_aspect("equal", adjustable="box")
-            ax.set_xlabel("X (mm)")
+            ax.set_xlabel(_xlabel_with_panel("X (mm)", panel_label), fontsize=PANEL_LABEL_FONT_SIZE)
             ax.set_ylabel("Y (mm)")
             if series:
                 geometry = _reference_geometry(variant, path_key)
@@ -1901,7 +1902,7 @@ def _build_qualitative_figure(full_method: dict, baseline: dict) -> None:
             else:
                 ax.text(0.5, 0.5, "Pending", ha="center", va="center", fontsize=13, transform=ax.transAxes)
                 ax.set_title(title, fontsize=11)
-    fig.tight_layout(pad=1.0)
+    fig.tight_layout(pad=1.0, h_pad=2.0)
     QUAL_FIG.parent.mkdir(parents=True, exist_ok=True)
     _save_figure_outputs(fig, QUAL_FIG, dpi=PLOT_DPI, facecolor=PLOT_FACE_COLOR)
     plt.close(fig)
@@ -1926,7 +1927,7 @@ def _build_kcm_figure(full_method: dict[str, Any]) -> None:
     fig, axes = plt.subplots(
         3,
         1,
-        figsize=(13.8, 10.0),
+        figsize=(13.8, 10.8),
         dpi=PLOT_DPI,
         sharex=True,
         facecolor=PLOT_FACE_COLOR,
@@ -1943,11 +1944,13 @@ def _build_kcm_figure(full_method: dict[str, Any]) -> None:
     if half_epsilon > 0.0:
         axes[0].axhline(half_epsilon, color="#7048e8", linewidth=1.4, linestyle="--", label=r"$\epsilon/2$")
     axes[0].set_ylabel(r"$e_c$ (mm)")
+    axes[0].set_xlabel("(a)", fontsize=PANEL_LABEL_FONT_SIZE, labelpad=8)
     axes[0].legend(loc="upper right", fontsize=FIG67_LEGEND_FONT_SIZE)
     _decorate_time_axis(axes[0])
 
     axes[1].plot(x, velocity_s, color="#0b7285", linewidth=SMOOTH_LINE_WIDTH, label="velocity")
     axes[1].set_ylabel(r"$v$ (mm/s)")
+    axes[1].set_xlabel("(b)", fontsize=PANEL_LABEL_FONT_SIZE, labelpad=8)
     axes[1].legend(loc="upper right", fontsize=FIG67_LEGEND_FONT_SIZE)
     _decorate_time_axis(axes[1])
 
@@ -1971,13 +1974,13 @@ def _build_kcm_figure(full_method: dict[str, Any]) -> None:
         axes[2].axhline(1.0, color="#2f9e44", linewidth=1.4, linestyle="--", label=r"$|j|=J_{max}$", zorder=2)
     axes[2].set_ylim(-0.03, 1.10)
     axes[2].set_ylabel(r"$|j|/J_{max}$")
-    axes[2].set_xlabel("Step")
+    axes[2].set_xlabel(_xlabel_with_panel("Step", "(c)"), fontsize=PANEL_LABEL_FONT_SIZE, labelpad=8)
     axes[2].legend(loc="upper right", fontsize=FIG67_LEGEND_FONT_SIZE)
     _decorate_time_axis(axes[2])
     for ax in axes:
         _style_axis_text(ax)
 
-    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.982))
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.982), h_pad=1.2)
     KCM_FIG.parent.mkdir(parents=True, exist_ok=True)
     _save_figure_outputs(fig, KCM_FIG, dpi=PLOT_DPI, facecolor=PLOT_FACE_COLOR)
     plt.close(fig)
@@ -1990,7 +1993,7 @@ def _build_jerk_constraint_figure(full_method: dict[str, Any], abl_no_kcm: dict[
 
     compare_path = "square"
     compare_specs = [
-        ("Full method", full_method, "#1f77b4"),
+        ("J-NNC", full_method, "#1f77b4"),
         ("No KCM", abl_no_kcm, "#d62728"),
     ]
 
@@ -2028,7 +2031,7 @@ def _build_jerk_constraint_figure(full_method: dict[str, Any], abl_no_kcm: dict[
         )
 
     fig, axes = plt.subplots(1, 2, figsize=(15.0, 5.0), dpi=PLOT_DPI, sharey=False, facecolor=PLOT_FACE_COLOR)
-    for ax, spec in zip(axes, plot_specs):
+    for ax, panel_label, spec in zip(axes, ["(a)", "(b)"], plot_specs):
         ax.axhline(1.0, color="#2f9e44", linestyle="--", linewidth=1.6, label=r"$+J_{max}$")
         ax.axhline(-1.0, color="#2f9e44", linestyle=":", linewidth=1.6, label=r"$-J_{max}$")
         ax.plot(spec["x"], spec["ratio"], color=spec["color"], linewidth=2.0, label=spec["title"])
@@ -2044,7 +2047,7 @@ def _build_jerk_constraint_figure(full_method: dict[str, Any], abl_no_kcm: dict[
         ax.yaxis.set_major_locator(FixedLocator(tick_values))
         ax.yaxis.set_major_formatter(FuncFormatter(lambda value, _pos: f"{value:g}"))
         ax.set_title(f"{spec['title']} | steps={spec['terminal_steps']} | {spec['done_reason']}", fontsize=FIG67_TITLE_FONT_SIZE)
-        ax.set_xlabel("Step")
+        ax.set_xlabel(_xlabel_with_panel("Step", panel_label), fontsize=PANEL_LABEL_FONT_SIZE)
         ax.grid(True, which="both", **GRID_STYLE)
         ax.text(
             0.02,

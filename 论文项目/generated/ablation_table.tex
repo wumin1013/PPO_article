@@ -1,31 +1,31 @@
 \begin{table}[H]
 \centering
-\caption{结构化消融路径级 best rollout 结果汇总。}
+\caption{Summary of structured ablation results based on the path-level best rollout.}
 \label{tab:ablation}
 \resizebox{0.98\textwidth}{!}{
 \begin{tabular}{llccccc}
 \toprule
-\textbf{模型配置} & \textbf{路径} & \textbf{终止状态} & \textbf{最终进度} & \textbf{最大轮廓误差} & \textbf{线捷度最大相对超限} & \textbf{终止时间 (s)}\\
+\textbf{Model configuration} & \textbf{Path} & \textbf{Termination status} & \textbf{Final progress} & \textbf{Maximum contour error} & \textbf{Maximum relative linear-jerk violation} & \textbf{Termination time (s)}\\
 \midrule
-本文最终方法 & square & success & 1.000 & 0.834 & 0.000 & 12.192\\
-本文最终方法 & circle & success & 1.000 & 0.096 & 0.000 & 9.117\\
-本文最终方法 & butterfly & success & 1.000 & 0.745 & 0.000 & 10.480\\
+Final proposed method & square & success & 1.000 & 0.834 & 0.000 & 12.192\\
+Final proposed method & circle & success & 1.000 & 0.096 & 0.000 & 9.117\\
+Final proposed method & butterfly & success & 1.000 & 0.745 & 0.000 & 10.480\\
 \midrule
-固定前瞻 & square & success & 1.000 & 0.699 & 0.000 & 8.680\\
-固定前瞻 & circle & success & 1.000 & 0.046 & 0.000 & 4.804\\
-固定前瞻 & butterfly & success & 1.000 & 0.638 & 0.000 & 5.049\\
+Fixed look-ahead & square & success & 1.000 & 0.699 & 0.000 & 8.680\\
+Fixed look-ahead & circle & success & 1.000 & 0.046 & 0.000 & 4.804\\
+Fixed look-ahead & butterfly & success & 1.000 & 0.638 & 0.000 & 5.049\\
 \midrule
-无KCM & square & success & 1.000 & 0.722 & 3199.000 & 10.301\\
-无KCM & circle & success & 1.000 & 0.061 & 3199.000 & 5.926\\
-无KCM & butterfly & success & 1.000 & 0.707 & 3199.000 & 7.446\\
+Without KCM & square & success & 1.000 & 0.722 & 3199.000 & 10.301\\
+Without KCM & circle & success & 1.000 & 0.061 & 3199.000 & 5.926\\
+Without KCM & butterfly & success & 1.000 & 0.707 & 3199.000 & 7.446\\
 \midrule
-无前瞻观测 & square & success & 1.000 & 0.805 & 0.000 & 8.151\\
-无前瞻观测 & circle & success & 1.000 & 0.077 & 0.000 & 4.573\\
-无前瞻观测 & butterfly & success & 1.000 & 0.820 & 0.000 & 6.044\\
+Without look-ahead observation & square & success & 1.000 & 0.805 & 0.000 & 8.151\\
+Without look-ahead observation & circle & success & 1.000 & 0.077 & 0.000 & 4.573\\
+Without look-ahead observation & butterfly & success & 1.000 & 0.820 & 0.000 & 6.044\\
 \midrule
-无直线/拐角双奖励 & square & success & 1.000 & 0.824 & 0.000 & 15.132\\
-无直线/拐角双奖励 & circle & success & 1.000 & 0.030 & 0.000 & 10.388\\
-无直线/拐角双奖励 & butterfly & success & 1.000 & 0.918 & 0.000 & 9.623\\
+Without straight-line/corner dual rewards & square & success & 1.000 & 0.824 & 0.000 & 15.132\\
+Without straight-line/corner dual rewards & circle & success & 1.000 & 0.030 & 0.000 & 10.388\\
+Without straight-line/corner dual rewards & butterfly & success & 1.000 & 0.918 & 0.000 & 9.623\\
 \bottomrule
 \end{tabular}
 }

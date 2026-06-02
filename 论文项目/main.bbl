@@ -55,11 +55,6 @@ Bingran Li, Hui Zhang, Peiqing Ye, and Jinsong Wang.
 \newblock Trajectory smoothing method using reinforcement learning for computer numerical control machine tools.
 \newblock {\em Robotics and Computer-Integrated Manufacturing}, 61:101847, 2020.
 
-\bibitem{Zhao2013}
-Huan Zhao, Limin Zhu, and Han Ding.
-\newblock A real-time look-ahead interpolation methodology with curvature-continuous {B}-spline transition scheme for {CNC} machining of short line segments.
-\newblock {\em International Journal of Machine Tools and Manufacture}, 65:88--98, 2013.
-
 \bibitem{Song2021}
 De-Ning Song, Jian-Wei Ma, Yu-Guang Zhong, and Jian-Jun Yao.
 \newblock Global smoothing of short line segment toolpaths by control-point-assigning-based geometric smoothing and {FIR} filtering-based motion smoothing.
@@ -75,11 +70,6 @@ Bingcai Wu, Junyan Ma, Lutao Wei, Xiaoping Liao, and Juan Lu.
 \newblock {NURBS} interpolator with scheduling scheme combining cubic and quartic {S}-shaped feedrate profiles under drive and chord error constraints.
 \newblock {\em Computer-Aided Design}, 152:103380, 2022.
 
-\bibitem{Zhang2026}
-Haiming Zhang, Jianzhong Yang, Wanqiang Zhu, Chenglei Zhang, and Zifang Hu.
-\newblock Jerk-constrained feedrate scheduling for {CNC} machining based on constraint-guided sampling.
-\newblock {\em The International Journal of Advanced Manufacturing Technology}, 2026.
-
 \bibitem{Tsai2010}
 M.~Tsai, H.~Nien, and H.~Yau.
 \newblock Development of a real-time look-ahead interpolation methodology with spline-fitting technique for high-speed machining.
@@ -90,6 +80,11 @@ De-Ning Song, Yu-Guang Zhong, and Jian-Wei Ma.
 \newblock Look-ahead-window-based interval adaptive feedrate scheduling for long five-axis spline toolpaths under axial drive constraints.
 \newblock {\em Proceedings of the Institution of Mechanical Engineers, Part B: Journal of Engineering Manufacture}, 234(13):1656--1670, 2020.
 
+\bibitem{Zhao2013}
+Huan Zhao, Limin Zhu, and Han Ding.
+\newblock A real-time look-ahead interpolation methodology with curvature-continuous {B}-spline transition scheme for {CNC} machining of short line segments.
+\newblock {\em International Journal of Machine Tools and Manufacture}, 65:88--98, 2013.
+
 \bibitem{Tsai2016}
 M.~Tsai and Y.~Huang.
 \newblock A novel integrated dynamic acceleration/deceleration interpolation algorithm for a {CNC} controller.
@@ -99,11 +94,6 @@ M.~Tsai and Y.~Huang.
 Molong Duan and Chinedum Okwudire.
 \newblock Minimum-time cornering for {CNC} machines using an optimal control method with {NURBS} parameterization.
 \newblock {\em The International Journal of Advanced Manufacturing Technology}, 85:1405--1418, 2016.
-
-\bibitem{ZhangCorner2017}
-Q.~Zhang, X.~Gao, H.~Li, and M.~Zhao.
-\newblock Minimum time corner transition algorithm with confined feedrate and axial acceleration for {NC} machining along linear tool path.
-\newblock {\em The International Journal of Advanced Manufacturing Technology}, 89:941--956, 2017.
 
 \bibitem{LiDriving2017}
 B.~Li, H.~Zhang, and P.~Ye.

@@ -5,45 +5,25 @@ Yuwen Sun, Jinjie Jia, Jinting Xu, Mansen Chen, and Jinbo Niu.
 \newblock Path, feedrate and trajectory planning for free-form surface machining: A state-of-the-art review.
 \newblock {\em Chinese Journal of Aeronautics}, 35(8):12--29, 2022.
 
-\bibitem{Li2020}
-Bingran Li, Hui Zhang, Peiqing Ye, and Jinsong Wang.
-\newblock Trajectory smoothing method using reinforcement learning for computer numerical control machine tools.
-\newblock {\em Robotics and Computer-Integrated Manufacturing}, 61:101847, 2020.
-
 \bibitem{Yan2023}
 Guangwen Yan, Desheng Zhang, Jinting Xu, and Yuwen Sun.
 \newblock Corner smoothing for {CNC} machining of linear tool path: A review.
 \newblock {\em Journal of Advanced Manufacturing Science and Technology}, 3(2):2023001, 2023.
-
-\bibitem{Wu2022}
-Bingcai Wu, Junyan Ma, Lutao Wei, Xiaoping Liao, and Juan Lu.
-\newblock {NURBS} interpolator with scheduling scheme combining cubic and quartic {S}-shaped feedrate profiles under drive and chord error constraints.
-\newblock {\em Computer-Aided Design}, 152:103380, 2022.
 
 \bibitem{Hu2024}
 Yifei Hu, Xin Jiang, Guanying Huo, Cheng Su, Hexiong Li, Li-Yong Shen, and Zhiming Zheng.
 \newblock Enhancing five-axis {CNC} toolpath smoothing: Overlap elimination with asymmetrical {B}-splines.
 \newblock {\em CIRP Journal of Manufacturing Science and Technology}, 52:36--57, 2024.
 
-\bibitem{Li2023}
-Hexiong Li, Xin Jiang, Guanying Huo, Cheng Su, Shiwei Zhou, Bolun Wang, Yifei Hu, and Zhiming Zheng.
-\newblock An integrated trajectory smoothing method for lines and arcs mixed toolpath based on motion overlapping strategy.
-\newblock {\em Journal of Manufacturing Processes}, 95:242--265, 2023.
+\bibitem{Li2020}
+Bingran Li, Hui Zhang, Peiqing Ye, and Jinsong Wang.
+\newblock Trajectory smoothing method using reinforcement learning for computer numerical control machine tools.
+\newblock {\em Robotics and Computer-Integrated Manufacturing}, 61:101847, 2020.
 
-\bibitem{Zhao2013}
-Huan Zhao, Limin Zhu, and Han Ding.
-\newblock A real-time look-ahead interpolation methodology with curvature-continuous {B}-spline transition scheme for {CNC} machining of short line segments.
-\newblock {\em International Journal of Machine Tools and Manufacture}, 65:88--98, 2013.
-
-\bibitem{Song2021}
-De-Ning Song, Jian-Wei Ma, Yu-Guang Zhong, and Jian-Jun Yao.
-\newblock Global smoothing of short line segment toolpaths by control-point-assigning-based geometric smoothing and {FIR} filtering-based motion smoothing.
-\newblock {\em Mechanical Systems and Signal Processing}, 160:107908, 2021.
-
-\bibitem{Sun2024}
-S.~Sun, P.~Zhao, T.~Zhang, B.~Li, and D.~Yu.
-\newblock Smoothing interpolation of five-axis tool path with less feedrate fluctuation and higher computation efficiency.
-\newblock {\em Journal of Manufacturing Processes}, 109:669--693, 2024.
+\bibitem{Wu2022}
+Bingcai Wu, Junyan Ma, Lutao Wei, Xiaoping Liao, and Juan Lu.
+\newblock {NURBS} interpolator with scheduling scheme combining cubic and quartic {S}-shaped feedrate profiles under drive and chord error constraints.
+\newblock {\em Computer-Aided Design}, 152:103380, 2022.
 
 \bibitem{Lee2011}
 A.~C. Lee, M.~T. Lin, Y.~R. Pan, and W.~Y. Lin.

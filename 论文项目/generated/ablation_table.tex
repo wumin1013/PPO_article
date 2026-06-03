@@ -1,32 +1,35 @@
 \begin{table}[H]
 \centering
-\caption{Path-level best-rollout results of the structured ablation study.}
+\caption{Path-level reported evaluation results of the structured ablation study.}
 \label{tab:ablation}
-\resizebox{0.98\textwidth}{!}{
-\begin{tabular}{llccccc}
+\begingroup
+\small
+\setlength{\tabcolsep}{3pt}
+\renewcommand{\arraystretch}{1.16}
+\begin{tabular}{>{\raggedright\arraybackslash}p{0.23\textwidth}lccccc}
 \toprule
-\textbf{Model configuration} & \textbf{Path} & \textbf{Termination status} & \textbf{Final progress} & \textbf{Maximum contour error} & \textbf{Maximum relative linear-jerk violation} & \textbf{Termination time (s)}\\
+\textbf{Configuration} & \textbf{Path} & \textbf{Status} & \textbf{Progress} & \begin{tabular}[c]{@{}c@{}}\textbf{Max contour}\\\textbf{error [mm]}\end{tabular} & \begin{tabular}[c]{@{}c@{}}\textbf{Max jerk}\\\textbf{exceedance}\end{tabular} & \textbf{Time [s]}\\
 \midrule
-J-NNC & square & success & 1.000 & 0.834 & 0.000 & 12.192\\
-J-NNC & circle & success & 1.000 & 0.096 & 0.000 & 9.117\\
-J-NNC & butterfly & success & 1.000 & 0.745 & 0.000 & 10.480\\
-\midrule
-Fixed look-ahead & square & success & 1.000 & 0.699 & 0.000 & 8.680\\
-Fixed look-ahead & circle & success & 1.000 & 0.046 & 0.000 & 4.804\\
-Fixed look-ahead & butterfly & success & 1.000 & 0.638 & 0.000 & 5.049\\
-\midrule
-Without KCM & square & success & 1.000 & 0.722 & 3199.000 & 10.301\\
-Without KCM & circle & success & 1.000 & 0.061 & 3199.000 & 5.926\\
-Without KCM & butterfly & success & 1.000 & 0.707 & 3199.000 & 7.446\\
-\midrule
-Without look-ahead observation & square & success & 1.000 & 0.805 & 0.000 & 8.151\\
-Without look-ahead observation & circle & success & 1.000 & 0.077 & 0.000 & 4.573\\
-Without look-ahead observation & butterfly & success & 1.000 & 0.820 & 0.000 & 6.044\\
-\midrule
-Without straight-line/corner dual rewards & square & success & 1.000 & 0.824 & 0.000 & 15.132\\
-Without straight-line/corner dual rewards & circle & success & 1.000 & 0.030 & 0.000 & 10.388\\
-Without straight-line/corner dual rewards & butterfly & success & 1.000 & 0.918 & 0.000 & 9.623\\
+\multirow{3}{0.23\textwidth}{J-NNC} & square & success & 1.000 & 0.834 & 0.000 & 12.192\\
+& circle & success & 1.000 & 0.096 & 0.000 & 9.117\\
+& butterfly & success & 1.000 & 0.745 & 0.000 & 10.480\\
+\addlinespace[0.35em]
+\multirow{3}{0.23\textwidth}{Fixed Adaptive Preview} & square & success & 1.000 & 0.699 & 0.000 & 8.680\\
+& circle & success & 1.000 & 0.046 & 0.000 & 4.804\\
+& butterfly & success & 1.000 & 0.638 & 0.000 & 5.049\\
+\addlinespace[0.35em]
+\multirow{3}{0.23\textwidth}{Without KCM} & square & success & 1.000 & 0.722 & 3199.000 & 10.301\\
+& circle & success & 1.000 & 0.061 & 3199.000 & 5.926\\
+& butterfly & success & 1.000 & 0.707 & 3199.000 & 7.446\\
+\addlinespace[0.35em]
+\multirow{3}{0.23\textwidth}{Without Adaptive Preview observation} & square & success & 1.000 & 0.805 & 0.000 & 8.151\\
+& circle & success & 1.000 & 0.077 & 0.000 & 4.573\\
+& butterfly & success & 1.000 & 0.820 & 0.000 & 6.044\\
+\addlinespace[0.35em]
+\multirow{3}{0.23\textwidth}{Without straight-line/corner dual rewards} & square & success & 1.000 & 0.824 & 0.000 & 15.132\\
+& circle & success & 1.000 & 0.030 & 0.000 & 10.388\\
+& butterfly & success & 1.000 & 0.918 & 0.000 & 9.623\\
 \bottomrule
 \end{tabular}
-}
+\endgroup
 \end{table}

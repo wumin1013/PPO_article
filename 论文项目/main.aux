@@ -54,27 +54,30 @@
 \@writefile{toc}{\contentsline {subsection}{\numberline {3.5}PPO Training Configuration}{9}{subsection.3.5}\protected@file@percent }
 \newlabel{sec:ppo_training_configuration}{{3.5}{9}{PPO Training Configuration}{subsection.3.5}{}}
 \citation{Li2020}
+\citation{Sencer2014}
 \@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces PPO hyperparameters and training protocol.}}{10}{table.caption.4}\protected@file@percent }
 \newlabel{tab:ppo_params}{{1}{10}{PPO hyperparameters and training protocol}{table.caption.4}{}}
 \@writefile{toc}{\contentsline {section}{\numberline {4}Experiments and Results}{10}{section.4}\protected@file@percent }
 \newlabel{sec:experiments_results}{{4}{10}{Experiments and Results}{section.4}{}}
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Experimental Settings}{10}{subsection.4.1}\protected@file@percent }
 \@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Main Comparative Results}{11}{subsection.4.2}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Comparison between J-NNC and the NNC baseline on representative best rollouts.}}{11}{table.caption.5}\protected@file@percent }
-\newlabel{tab:main_results}{{2}{11}{Comparison between J-NNC and the NNC baseline on representative best rollouts}{table.caption.5}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Trajectory comparison between J-NNC and the NNC baseline on representative paths: (a) square path, J-NNC; (b) square path, NNC baseline; (c) circular path, J-NNC; (d) circular path, NNC baseline; (e) butterfly-shaped path, J-NNC; (f) butterfly-shaped path, NNC baseline.}}{13}{figure.caption.6}\protected@file@percent }
-\newlabel{fig:qualitative_results}{{4}{13}{Trajectory comparison between J-NNC and the NNC baseline on representative paths: (a) square path, J-NNC; (b) square path, NNC baseline; (c) circular path, J-NNC; (d) circular path, NNC baseline; (e) butterfly-shaped path, J-NNC; (f) butterfly-shaped path, NNC baseline}{figure.caption.6}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Local zoomed-in comparison in the square-corner region: (a) J-NNC; (b) NNC baseline.}}{14}{figure.caption.7}\protected@file@percent }
-\newlabel{fig:square_corner_zoom}{{5}{14}{Local zoomed-in comparison in the square-corner region: (a) J-NNC; (b) NNC baseline}{figure.caption.7}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Representative best-rollout behavior of J-NNC: (a) contour error; (b) velocity; (c) normalized linear jerk.}}{14}{figure.caption.8}\protected@file@percent }
-\newlabel{fig:kcm_analysis}{{6}{14}{Representative best-rollout behavior of J-NNC: (a) contour error; (b) velocity; (c) normalized linear jerk}{figure.caption.8}{}}
-\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Ablation Results}{15}{subsection.4.3}\protected@file@percent }
-\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Path-level best-rollout results of the structured ablation study.}}{15}{table.caption.9}\protected@file@percent }
-\newlabel{tab:ablation}{{3}{15}{Path-level best-rollout results of the structured ablation study}{table.caption.9}{}}
-\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Linear-jerk constraint comparison on the same representative path: (a) J-NNC with KCM; (b) ablated configuration without KCM.}}{16}{figure.caption.10}\protected@file@percent }
-\newlabel{fig:jerk_constraint_comparison}{{7}{16}{Linear-jerk constraint comparison on the same representative path: (a) J-NNC with KCM; (b) ablated configuration without KCM}{figure.caption.10}{}}
-\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion}{17}{section.5}\protected@file@percent }
-\newlabel{sec:conclusion}{{5}{17}{Conclusion}{section.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces Comparison among J-NNC, the NNC baseline, and the traditional two-step baseline on representative evaluation trajectories.}}{11}{table.caption.5}\protected@file@percent }
+\newlabel{tab:main_results}{{2}{11}{Comparison among J-NNC, the NNC baseline, and the traditional two-step baseline on representative evaluation trajectories}{table.caption.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {3}{\ignorespaces Efficiency and dynamic-constraint utilization metrics of J-NNC and the traditional two-step baseline.}}{11}{table.caption.6}\protected@file@percent }
+\newlabel{tab:efficiency_utilization}{{3}{11}{Efficiency and dynamic-constraint utilization metrics of J-NNC and the traditional two-step baseline}{table.caption.6}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces Square-path comparison between J-NNC and the traditional two-step baseline: (a) trajectory within the tolerance band; (b) zoomed corner transition; (c) path-travel-aligned feedrate utilization $v/V_{\max }$; (d) path-travel-aligned signed linear-jerk utilization $j/J_{\max }$.}}{12}{figure.caption.7}\protected@file@percent }
+\newlabel{fig:two_step_comparison}{{4}{12}{Square-path comparison between J-NNC and the traditional two-step baseline: (a) trajectory within the tolerance band; (b) zoomed corner transition; (c) path-travel-aligned feedrate utilization $v/V_{\max }$; (d) path-travel-aligned signed linear-jerk utilization $j/J_{\max }$}{figure.caption.7}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Trajectory comparison between J-NNC and the NNC baseline on representative paths: (a) square path, J-NNC; (b) square path, NNC baseline; (c) circular path, J-NNC; (d) circular path, NNC baseline; (e) butterfly-shaped path, J-NNC; (f) butterfly-shaped path, NNC baseline.}}{13}{figure.caption.8}\protected@file@percent }
+\newlabel{fig:qualitative_results}{{5}{13}{Trajectory comparison between J-NNC and the NNC baseline on representative paths: (a) square path, J-NNC; (b) square path, NNC baseline; (c) circular path, J-NNC; (d) circular path, NNC baseline; (e) butterfly-shaped path, J-NNC; (f) butterfly-shaped path, NNC baseline}{figure.caption.8}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Local zoomed-in comparison in the square-corner region: (a) J-NNC; (b) NNC baseline.}}{14}{figure.caption.9}\protected@file@percent }
+\newlabel{fig:square_corner_zoom}{{6}{14}{Local zoomed-in comparison in the square-corner region: (a) J-NNC; (b) NNC baseline}{figure.caption.9}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Ablation Results}{14}{subsection.4.3}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {4}{\ignorespaces Path-level reported evaluation results of the structured ablation study.}}{15}{table.caption.10}\protected@file@percent }
+\newlabel{tab:ablation}{{4}{15}{Path-level reported evaluation results of the structured ablation study}{table.caption.10}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {7}{\ignorespaces Linear-jerk constraint comparison on the same representative path: (a) J-NNC with KCM; (b) ablated configuration without KCM.}}{15}{figure.caption.11}\protected@file@percent }
+\newlabel{fig:jerk_constraint_comparison}{{7}{15}{Linear-jerk constraint comparison on the same representative path: (a) J-NNC with KCM; (b) ablated configuration without KCM}{figure.caption.11}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion}{16}{section.5}\protected@file@percent }
+\newlabel{sec:conclusion}{{5}{16}{Conclusion}{section.5}{}}
 \bibstyle{unsrt}
 \bibdata{references}
 \bibcite{Sun2022}{{1}{}{{}}{{}}}
@@ -100,5 +103,6 @@
 \bibcite{Li2023}{{21}{}{{}}{{}}}
 \bibcite{Sun2024}{{22}{}{{}}{{}}}
 \bibcite{Schulman2017PPO}{{23}{}{{}}{{}}}
+\bibcite{Sencer2014}{{24}{}{{}}{{}}}
 \providecommand\NAT@force@numbers{}\NAT@force@numbers
-\gdef \@abspage@last{19}
+\gdef \@abspage@last{18}

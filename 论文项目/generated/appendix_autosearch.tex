@@ -6,4 +6,4 @@
 \subsection{选择准则}
 当前 autoresearch 流程采用两阶段筛选。第一阶段使用较低成本的路径子集与 episode 数进行粗筛，重点关注完成路径数、成功率与稳定性；第二阶段仅对入围候选进行全路径复评估，并将平均完成时间显式纳入综合得分。候选的晋升规则为：先比较完成路径数，再比较包含完成时间项的综合得分；若得分接近，则继续比较平均完成时间、成功率、平均进度与停滞率。
 
-论文专用复现实验已完成的配置包括：J-NNC、Fixed look-ahead、Without KCM、Without straight-line/corner dual rewards、Without look-ahead observation、NNC baseline。
+论文专用复现实验已完成的配置包括：J-NNC、Fixed Adaptive Preview、Without KCM、Without straight-line/corner dual rewards、Without Adaptive Preview observation、NNC baseline。

@@ -2457,7 +2457,7 @@ L 793.513406 549.554755
    </g>
   </g>
   <g id="text_38">
-   <text style="font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle" x="487.512938" y="20.191719" transform="rotate(-0 487.512938 20.191719)">Best rollout behavior | path=square | terminal_steps=12192 | done=success</text>
+   <text style="font-size: 17px; font-family: 'DejaVu Sans'; text-anchor: middle" x="487.512938" y="20.191719" transform="rotate(-0 487.512938 20.191719)">Reported evaluation behavior | path=square | terminal_steps=12192 | done=success</text>
   </g>
  </g>
  <defs>

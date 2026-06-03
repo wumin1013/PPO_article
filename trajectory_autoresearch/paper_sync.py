@@ -70,8 +70,8 @@ TRACE_ROLLOUT_RETRIES = 1
 VARIANT_LABELS = {
     "full_method_snapshot": "J-NNC",
     "baseline_policy": "NNC baseline",
-    "abl_fixed_lookahead": "Fixed look-ahead",
-    "abl_no_lookahead_obs": "Without look-ahead observation",
+    "abl_fixed_lookahead": "Fixed Adaptive Preview",
+    "abl_no_lookahead_obs": "Without Adaptive Preview observation",
     "abl_no_dual_reward": "Without straight-line/corner dual rewards",
     "abl_no_kcm": "Without KCM",
 }
@@ -1360,7 +1360,7 @@ def _build_main_results_tex(
     lines = [
         r"\begin{table}[H]",
         r"\centering",
-        r"\caption{Comparison between J-NNC and the NNC baseline on representative best rollouts.}",
+        r"\caption{Comparison between J-NNC and the NNC baseline on representative evaluation trajectories.}",
         r"\label{tab:main_results}",
         r"\resizebox{0.92\textwidth}{!}{",
         r"\begin{tabular}{llcc}",
@@ -1410,7 +1410,7 @@ def _build_ablation_tex(rows: list[dict], trace_summaries: dict[str, dict[str, A
     lines = [
         r"\begin{table}[H]",
         r"\centering",
-        r"\caption{Path-level best-rollout results of the structured ablation study.}",
+        r"\caption{Path-level reported evaluation results of the structured ablation study.}",
         r"\label{tab:ablation}",
         r"\resizebox{0.98\textwidth}{!}{",
         r"\begin{tabular}{llccccc}",
@@ -1912,7 +1912,7 @@ def _build_kcm_figure(full_method: dict[str, Any]) -> None:
     example_path = "square"
     series = _best_rollout_time_series(full_method, example_path)
     if not series:
-        _placeholder_png(KCM_FIG, "Behavior Figure Pending", "Waiting for the best-rollout square trace from the full method.")
+        _placeholder_png(KCM_FIG, "Behavior Figure Pending", "Waiting for the reported square evaluation trace from the full method.")
         return
 
     stats = _best_rollout_stats(full_method, example_path)
@@ -1934,7 +1934,7 @@ def _build_kcm_figure(full_method: dict[str, Any]) -> None:
         gridspec_kw={"height_ratios": [1.1, 1.0, 1.15]},
     )
     fig.suptitle(
-        f"Best rollout behavior | path={example_path} | terminal_steps={int(stats.get('steps') or 0)} | done={stats.get('done_reason', 'unknown')}",
+        f"Reported evaluation behavior | path={example_path} | terminal_steps={int(stats.get('steps') or 0)} | done={stats.get('done_reason', 'unknown')}",
         fontsize=FIG67_SUPTITLE_FONT_SIZE,
         y=0.995,
     )
@@ -1988,7 +1988,7 @@ def _build_kcm_figure(full_method: dict[str, Any]) -> None:
 
 def _build_jerk_constraint_figure(full_method: dict[str, Any], abl_no_kcm: dict[str, Any]) -> dict[str, Any]:
     if not full_method or not abl_no_kcm:
-        _placeholder_png(JERK_COMPARE_FIG, "Jerk Comparison Pending", "Waiting for both full-method and no-KCM best rollouts.")
+        _placeholder_png(JERK_COMPARE_FIG, "Jerk Comparison Pending", "Waiting for both full-method and no-KCM reported evaluation traces.")
         return {}
 
     compare_path = "square"
@@ -2001,7 +2001,7 @@ def _build_jerk_constraint_figure(full_method: dict[str, Any], abl_no_kcm: dict[
     for title, variant, color in compare_specs:
         series = _best_rollout_time_series(variant, compare_path)
         if not series:
-            _placeholder_png(JERK_COMPARE_FIG, "Jerk Comparison Pending", "Best-rollout rows for the comparison path are not ready yet.")
+            _placeholder_png(JERK_COMPARE_FIG, "Jerk Comparison Pending", "Reported evaluation rows for the comparison path are not ready yet.")
             return {}
         stats = _best_rollout_stats(variant, compare_path)
         x = np.asarray(series.get("step", []), dtype=float)

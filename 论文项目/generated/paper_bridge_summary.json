@@ -25,64 +25,64 @@
   "main_full_method_source": "paper_suite",
   "variant_audits": {
     "full_method_snapshot": {
-      "enable_kcm": true,
-      "lookahead_obs_enabled": true,
+      "enable_kcm": 1,
+      "lookahead_obs_enabled": 1,
       "lookahead_points": 8,
-      "lookahead_control_enabled": true,
-      "lookahead_policy_action": true,
+      "lookahead_control_enabled": 1,
+      "lookahead_policy_action": 1,
       "lookahead_distance": 2.3125,
-      "cornerness_enabled": true,
-      "lookahead_reward_enabled": true
+      "cornerness_enabled": 1,
+      "lookahead_reward_enabled": 1
     },
     "abl_fixed_lookahead": {
-      "enable_kcm": true,
-      "lookahead_obs_enabled": true,
+      "enable_kcm": 1,
+      "lookahead_obs_enabled": 1,
       "lookahead_points": 8,
-      "lookahead_control_enabled": false,
-      "lookahead_policy_action": false,
+      "lookahead_control_enabled": 0,
+      "lookahead_policy_action": 0,
       "lookahead_distance": 2.28125,
-      "cornerness_enabled": true,
-      "lookahead_reward_enabled": true
+      "cornerness_enabled": 1,
+      "lookahead_reward_enabled": 1
     },
     "abl_no_kcm": {
-      "enable_kcm": false,
-      "lookahead_obs_enabled": true,
+      "enable_kcm": 0,
+      "lookahead_obs_enabled": 1,
       "lookahead_points": 8,
-      "lookahead_control_enabled": true,
-      "lookahead_policy_action": true,
+      "lookahead_control_enabled": 1,
+      "lookahead_policy_action": 1,
       "lookahead_distance": 2.3125,
-      "cornerness_enabled": true,
-      "lookahead_reward_enabled": true
+      "cornerness_enabled": 1,
+      "lookahead_reward_enabled": 1
     },
     "abl_no_dual_reward": {
-      "enable_kcm": true,
-      "lookahead_obs_enabled": true,
+      "enable_kcm": 1,
+      "lookahead_obs_enabled": 1,
       "lookahead_points": 8,
-      "lookahead_control_enabled": true,
-      "lookahead_policy_action": true,
+      "lookahead_control_enabled": 1,
+      "lookahead_policy_action": 1,
       "lookahead_distance": 2.3125,
-      "cornerness_enabled": false,
-      "lookahead_reward_enabled": false
+      "cornerness_enabled": 0,
+      "lookahead_reward_enabled": 0
     },
     "abl_no_lookahead_obs": {
-      "enable_kcm": true,
-      "lookahead_obs_enabled": false,
+      "enable_kcm": 1,
+      "lookahead_obs_enabled": 0,
       "lookahead_points": 8,
-      "lookahead_control_enabled": true,
-      "lookahead_policy_action": true,
+      "lookahead_control_enabled": 1,
+      "lookahead_policy_action": 1,
       "lookahead_distance": 2.3125,
-      "cornerness_enabled": true,
-      "lookahead_reward_enabled": true
+      "cornerness_enabled": 1,
+      "lookahead_reward_enabled": 1
     },
     "baseline_policy": {
-      "enable_kcm": false,
-      "lookahead_obs_enabled": false,
+      "enable_kcm": 0,
+      "lookahead_obs_enabled": 0,
       "lookahead_points": 0,
-      "lookahead_control_enabled": false,
-      "lookahead_policy_action": false,
+      "lookahead_control_enabled": 0,
+      "lookahead_policy_action": 0,
       "lookahead_distance": 0.0,
-      "cornerness_enabled": false,
-      "lookahead_reward_enabled": false
+      "cornerness_enabled": 0,
+      "lookahead_reward_enabled": 0
     }
   },
   "full_method_trace": {},
@@ -157,7 +157,7 @@
       "status": "completed"
     },
     "abl_fixed_lookahead": {
-      "label": "Fixed look-ahead",
+      "label": "Fixed Adaptive Preview",
       "status": "completed"
     },
     "abl_no_kcm": {
@@ -169,12 +169,77 @@
       "status": "completed"
     },
     "abl_no_lookahead_obs": {
-      "label": "Without look-ahead observation",
+      "label": "Without Adaptive Preview observation",
       "status": "completed"
     },
     "baseline_policy": {
       "label": "NNC baseline",
       "status": "completed"
     }
+  },
+  "two_step_baseline": {
+    "updated_at": "2026-06-03 06:27:34",
+    "summary_json": "论文项目/generated/two_step_baseline_summary.json",
+    "paths": {
+      "square": {
+        "termination_status": "success",
+        "final_progress": 1.0,
+        "max_contour_error_mm": 0.3089077970725505,
+        "mean_contour_error_mm": 0.00501791784081911,
+        "max_relative_linear_jerk_exceedance": 0.0,
+        "termination_time_s": 24.78,
+        "mean_feedrate_utilization": 0.16066277919784258,
+        "jerk_reach_rate_80_active": 0.0,
+        "effective_path_speed_mm_s": 16.142050040354746,
+        "max_smoothed_path_error_mm": 0.30935921676911454,
+        "smoothed_path_length_mm": 398.12215253429264,
+        "original_path_length_mm": 399.9999999999907
+      },
+      "circle": {
+        "termination_status": "success",
+        "final_progress": 1.0,
+        "max_contour_error_mm": 2.2469334198890888e-14,
+        "mean_contour_error_mm": 4.142498787188116e-15,
+        "max_relative_linear_jerk_exceedance": 0.0,
+        "termination_time_s": 17.499,
+        "mean_feedrate_utilization": 0.1795296198482217,
+        "jerk_reach_rate_80_active": 0.0,
+        "effective_path_speed_mm_s": 17.952951794761706,
+        "max_smoothed_path_error_mm": 3.552713678800501e-15,
+        "smoothed_path_length_mm": 314.15870345653474,
+        "original_path_length_mm": 314.1587034565351
+      },
+      "butterfly": {
+        "termination_status": "success",
+        "final_progress": 1.0,
+        "max_contour_error_mm": 0.012450392357679974,
+        "mean_contour_error_mm": 5.270884224188635e-05,
+        "max_relative_linear_jerk_exceedance": 0.0,
+        "termination_time_s": 15.36,
+        "mean_feedrate_utilization": 0.1504722967366129,
+        "jerk_reach_rate_80_active": 0.0,
+        "effective_path_speed_mm_s": 15.049119010073928,
+        "max_smoothed_path_error_mm": 0.013076488854224522,
+        "smoothed_path_length_mm": 231.1252375339614,
+        "original_path_length_mm": 231.15446799473554
+      }
+    },
+    "trace_paths": {
+      "square": "PPO_project/results/two_step_baseline/traces/square_trajectory.csv",
+      "circle": "PPO_project/results/two_step_baseline/traces/circle_trajectory.csv",
+      "butterfly": "PPO_project/results/two_step_baseline/traces/butterfly_trajectory.csv"
+    },
+    "files": {
+      "main_results_table": "论文项目/generated/main_results_table.tex",
+      "efficiency_utilization_table": "论文项目/generated/efficiency_utilization_table.tex",
+      "comparison_metrics_csv": "PPO_project/results/two_step_baseline/comparison_metrics.csv",
+      "comparison_metrics_json": "PPO_project/results/two_step_baseline/comparison_metrics.json",
+      "two_step_results_csv": "PPO_project/results/two_step_baseline/two_step_results.csv",
+      "two_step_results_json": "PPO_project/results/two_step_baseline/two_step_results.json",
+      "two_step_comparison_png": "论文项目/figures/generated/two_step_comparison.png",
+      "two_step_comparison_pdf": "论文项目/figures/generated/two_step_comparison.pdf",
+      "two_step_comparison_svg": "论文项目/figures/generated/two_step_comparison.svg"
+    },
+    "preserved_existing_main_results": 1
   }
 }

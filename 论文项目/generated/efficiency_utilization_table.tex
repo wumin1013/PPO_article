@@ -1,0 +1,21 @@
+\begin{table}[H]
+\centering
+\caption{Efficiency and dynamic-constraint utilization metrics of J-NNC and the traditional two-step baseline.}
+\label{tab:efficiency_utilization}
+\resizebox{0.98\textwidth}{!}{
+\begin{tabular}{llccc}
+\toprule
+\textbf{Path} & \textbf{Method} & \textbf{Mean feedrate utilization} & \textbf{P95 linear-jerk utilization} & \textbf{Active jerk reach rate}\\
+\midrule
+\multirow{2}{*}{square} & J-NNC & 0.328 & 1.000 & 0.991\\
+& Traditional two-step & 0.161 & 0.000 & 0.000\\
+\midrule
+\multirow{2}{*}{circle} & J-NNC & 0.345 & 1.000 & 0.929\\
+& Traditional two-step & 0.180 & 0.000 & 0.000\\
+\midrule
+\multirow{2}{*}{butterfly} & J-NNC & 0.221 & 1.000 & 0.635\\
+& Traditional two-step & 0.150 & 0.250 & 0.000\\
+\bottomrule
+\end{tabular}
+}
+\end{table}

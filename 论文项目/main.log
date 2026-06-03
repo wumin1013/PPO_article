@@ -1,4 +1,4 @@
-This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.12.2)  1 JUN 2026 23:47
+This is XeTeX, Version 3.141592653-2.6-0.999997 (TeX Live 2025) (preloaded format=xelatex 2025.12.2)  3 JUN 2026 10:00
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
@@ -664,16 +664,16 @@ File: ./figures/fig3.pdf Graphic file (type pdf)
 [6]
 
 [7]
-Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on input line 225.
+Package hyperref Info: bookmark level for unknown algorithm defaults to 0 on input line 227.
 
-Underfull \hbox (badness 6078) in paragraph at lines 228--229
+Underfull \hbox (badness 6078) in paragraph at lines 230--231
 []\TU/lmr/m/n/12 Policy output $\OML/cmm/m/it/12 a[] \OT1/cmr/m/n/12 = [\OML/cmm/m/it/12 u[]; u[]; u[]\OT1/cmr/m/n/12 ]$\TU/lmr/m/n/12 ; previous-step kinematic state
  []
 
 
 
 [8]
-Overfull \hbox (21.83493pt too wide) in paragraph at lines 307--321
+Overfull \hbox (21.83493pt too wide) in paragraph at lines 309--323
  [][] 
  []
 
@@ -681,37 +681,36 @@ Overfull \hbox (21.83493pt too wide) in paragraph at lines 307--321
 
 [9]
 
-[10] (./generated/main_results_table.tex)
+[10] (./generated/main_results_table.tex) (./generated/efficiency_utilization_table.tex)
 
 [11]
+File: figures/generated/two_step_comparison.pdf Graphic file (type pdf)
+<use figures/generated/two_step_comparison.pdf>
 File: figures/generated/qualitative_results.pdf Graphic file (type pdf)
 <use figures/generated/qualitative_results.pdf>
-File: figures/generated/square_corner_zoom.pdf Graphic file (type pdf)
-<use figures/generated/square_corner_zoom.pdf>
-File: figures/generated/kcm_analysis.pdf Graphic file (type pdf)
-<use figures/generated/kcm_analysis.pdf>
 
 
 [12]
 
 [13]
+File: figures/generated/square_corner_zoom.pdf Graphic file (type pdf)
+<use figures/generated/square_corner_zoom.pdf>
+ (./generated/ablation_table.tex)
 
-[14] (./generated/ablation_table.tex)
+[14]
 File: figures/generated/jerk_constraint_comparison.pdf Graphic file (type pdf)
 <use figures/generated/jerk_constraint_comparison.pdf>
 
 
 [15]
 
-[16]
+[16] (./main.bbl
 
-[17] (./main.bbl
-
-[18
+[17
 
 ])
 
-[19] (./main.aux)
+[18] (./main.aux)
  ***********
 LaTeX2e <2024-11-01> patch level 2
 L3 programming layer <2022/08/05>
@@ -720,12 +719,12 @@ Package rerunfilecheck Info: File `main.out' has not changed.
 (rerunfilecheck)             Checksum: D4FA1958D4257B334B3A6D2B0DE045E5;2496.
  ) 
 Here is how much of TeX's memory you used:
- 17236 strings out of 473832
- 341748 string characters out of 5733158
- 789602 words of memory out of 5000000
- 40050 multiletter control sequences out of 15000+600000
- 573796 words of font info for 93 fonts, out of 8000000 for 9000
+ 17252 strings out of 473832
+ 342325 string characters out of 5733158
+ 785962 words of memory out of 5000000
+ 40060 multiletter control sequences out of 15000+600000
+ 573820 words of font info for 96 fonts, out of 8000000 for 9000
  1348 hyphenation exceptions out of 8191
- 72i,12n,92p,1528b,505s stack positions out of 10000i,1000n,20000p,200000b,200000s
+ 72i,14n,92p,1528b,505s stack positions out of 10000i,1000n,20000p,200000b,200000s
 
-Output written on main.pdf (19 pages).
+Output written on main.pdf (18 pages).

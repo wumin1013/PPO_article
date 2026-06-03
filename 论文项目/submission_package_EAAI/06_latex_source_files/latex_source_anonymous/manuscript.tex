@@ -321,7 +321,7 @@ The main comparative experiment compares J-NNC with the NNC baseline. J-NNC adop
 
 The ablation experiments are constructed by modifying the proposed method. In the fixed-look-ahead configuration, the learnable look-ahead distance is replaced with a fixed look-ahead length. In the no-KCM configuration, the execution-layer kinematic-constraint projection is removed, so that the policy output is directly executed in the environment. In the no-look-ahead-observation configuration, the multi-scale forward geometric input is removed. In the no-straight/corner-dual-reward configuration, the differentiated reward scheduling for straight and corner segments is disabled. These configurations allow the effects of look-ahead distance, execution constraints, forward geometric information, and reward structure on the experimental results to be examined separately.
 
-For evaluation, the best rollout exported from each configuration is used as the statistical sample instead of an average over multiple evaluation episodes. The metrics include the terminal state, final progress, maximum contour error, maximum relative violation of the linear-jerk limit, and termination time. The terminal state and final progress characterize path advancement, the maximum contour error measures the deviation of the trajectory from the reference path, and the maximum relative violation of the linear-jerk limit indicates whether the executed control commands satisfy the jerk constraint. The termination time is obtained by multiplying the terminal step of the best rollout by the interpolation period. Since this work studies constrained motion planning, the subsequent analysis jointly considers efficiency, error, and dynamic feasibility.
+For evaluation, the reported trajectory exported from each configuration is used as the path-level evaluation sample instead of an average over multiple evaluation episodes. The metrics include the terminal state, final progress, maximum contour error, maximum relative violation of the linear-jerk limit, and termination time. The terminal state and final progress characterize path advancement, the maximum contour error measures the deviation of the trajectory from the reference path, and the maximum relative violation of the linear-jerk limit indicates whether the executed control commands satisfy the jerk constraint. The termination time is obtained by multiplying the terminal step of the reported trajectory by the interpolation period. Since this work studies constrained motion planning, the subsequent analysis jointly considers efficiency, error, and dynamic feasibility.
 
 \subsection{Main Comparative Results}
 
@@ -330,7 +330,7 @@ This subsection reports the comparative results of J-NNC and the NNC baseline on
 
 \begin{table}[H]
 \centering
-\caption{Comparison between J-NNC and the NNC baseline on representative best rollouts.}
+\caption{Comparison between J-NNC and the NNC baseline on representative evaluation trajectories.}
 \label{tab:main_results}
 \resizebox{0.92\textwidth}{!}{
 \begin{tabular}{llcc}
@@ -391,31 +391,31 @@ The corner region of the square path is compared in \figref{fig:square_corner_zo
 
 \figref{fig:square_corner_zoom}(a) shows that J-NNC begins to change the motion direction before approaching the corner and forms a continuous transition trajectory within the tolerance band. In contrast, \figref{fig:square_corner_zoom}(b) shows that the NNC baseline remains closer to the original polyline, with the direction change concentrated near the corner point. This observation is consistent with the jerk results reported in \tabref{tab:main_results}. When the policy outputs are executed directly, large dynamic variations tend to occur at the corners. After the KCM constraint is applied, J-NNC satisfies the jerk limit during turning.
 
-The normalized time histories of contour error, velocity, and linear jerk for J-NNC on a representative best rollout are shown in \figref{fig:kcm_analysis}.
+The normalized time histories of contour error, velocity, and linear jerk for J-NNC on a representative evaluation trajectory are shown in \figref{fig:kcm_analysis}.
 
 
 \begin{figure}[!htbp]
 \centering
 \includegraphics[width=0.9\linewidth]{Figure_6.pdf}
-\caption{Representative best-rollout behavior of J-NNC: (a) contour error; (b) velocity; (c) normalized linear jerk.}
+\caption{Representative evaluation behavior of J-NNC: (a) contour error; (b) velocity; (c) normalized linear jerk.}
 \label{fig:kcm_analysis}
 \end{figure}
 
 
-In \figref{fig:kcm_analysis}(a), the peak contour errors mainly occur during cornering, indicating that the policy uses the available spatial margin within the tolerance band. \figref{fig:kcm_analysis}(b) reflects the speed modulation process during corner entry, corner traversal, and corner exit. \figref{fig:kcm_analysis}(c) reports the windowed peak $|j|/J_{\max}$ curve obtained by rechecking the velocity records of the same best rollout against the KCM boundary. This curve remains no greater than 1. Together with \tabref{tab:main_results}, this result shows that the maximum relative exceedance of linear jerk is zero after KCM is enabled.
+In \figref{fig:kcm_analysis}(a), the peak contour errors mainly occur during cornering, indicating that the policy uses the available spatial margin within the tolerance band. \figref{fig:kcm_analysis}(b) reflects the speed modulation process during corner entry, corner traversal, and corner exit. \figref{fig:kcm_analysis}(c) reports the windowed peak $|j|/J_{\max}$ curve obtained by rechecking the velocity records of the same reported trajectory against the KCM boundary. This curve remains no greater than 1. Together with \tabref{tab:main_results}, this result shows that the maximum relative exceedance of linear jerk is zero after KCM is enabled.
 
 \Needspace{12\baselineskip}
 
-The combined results in \tabref{tab:main_results} and \figref{fig:qualitative_results}--\figref{fig:kcm_analysis} show that J-NNC completes the best rollout on all three types of paths and forms locally smooth trajectories within the tolerance band in both high-speed linear feeding segments and corner regions. For the sharp corners of the square path and the mixed-curvature regions of the butterfly-shaped path, J-NNC keeps the executed control quantities within the kinematic boundaries at corners or curvature-transition regions through appropriate trajectory smoothing and KCM constraints. The NNC baseline demonstrates path-advancement capability, while the absence of explicit constraint handling limits its dynamic feasibility.
+The combined results in \tabref{tab:main_results} and \figref{fig:qualitative_results}--\figref{fig:kcm_analysis} show that J-NNC completes the reported evaluation trajectory on all three types of paths and forms locally smooth trajectories within the tolerance band in both high-speed linear feeding segments and corner regions. For the sharp corners of the square path and the mixed-curvature regions of the butterfly-shaped path, J-NNC keeps the executed control quantities within the kinematic boundaries at corners or curvature-transition regions through appropriate trajectory smoothing and KCM constraints. The NNC baseline demonstrates path-advancement capability, while the absence of explicit constraint handling limits its dynamic feasibility.
 
 \subsection{Ablation Results}
 
-The ablation study removes or modifies the learnable look-ahead distance, KCM, look-ahead observation, and dual straight-line/corner reward modules. \tabref{tab:ablation} reports, for the best rollout on each path, the termination status, final progress, maximum contour error, maximum relative violation of the linear jerk limit, and termination time under each configuration.
+The ablation study removes or modifies the learnable look-ahead distance, KCM, look-ahead observation, and dual straight-line/corner reward modules. \tabref{tab:ablation} reports, for the reported evaluation trajectory on each path, the termination status, final progress, maximum contour error, maximum relative violation of the linear jerk limit, and termination time under each configuration.
 
 
 \begin{table}[H]
 \centering
-\caption{Path-level best-rollout results of the structured ablation study.}
+\caption{Path-level reported evaluation results of the structured ablation study.}
 \label{tab:ablation}
 \resizebox{0.98\textwidth}{!}{
 \begin{tabular}{llccccc}
@@ -448,7 +448,7 @@ Without straight-line/corner dual rewards & butterfly & success & 1.000 & 0.918 
 
 
 
-\tabref{tab:ablation} shows that all ablated configurations terminate successfully in the best rollouts on the three paths, although they differ in termination time, contour error, and jerk constraint satisfaction. The fixed look-ahead setting isolates the effect of online look-ahead distance adjustment. Removing look-ahead observation tests the contribution of multi-scale geometric information, while removing the dual straight-line/corner reward tests the effect of phase-dependent reward weights. The setting without KCM is used to examine the role of constraint projection at the execution layer. Since KCM is enabled in all other settings, the maximum relative violation of the linear jerk limit is zero for those settings.
+\tabref{tab:ablation} shows that all ablated configurations terminate successfully in the reported evaluation runs on the three paths, although they differ in termination time, contour error, and jerk constraint satisfaction. The fixed look-ahead setting isolates the effect of online look-ahead distance adjustment. Removing look-ahead observation tests the contribution of multi-scale geometric information, while removing the dual straight-line/corner reward tests the effect of phase-dependent reward weights. The setting without KCM is used to examine the role of constraint projection at the execution layer. Since KCM is enabled in all other settings, the maximum relative violation of the linear jerk limit is zero for those settings.
 
 \figref{fig:jerk_constraint_comparison} compares the linear jerk of J-NNC with that of the setting without KCM on the same representative path.
 

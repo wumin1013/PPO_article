@@ -114,4 +114,9 @@ S.~Sun, P.~Zhao, T.~Zhang, B.~Li, and D.~Yu.
 John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov.
 \newblock Proximal policy optimization algorithms, 2017.
 
+\bibitem{Sencer2014}
+Burak Sencer, Kosuke Ishizaki, and Eiji Shamoto.
+\newblock A curvature optimal sharp corner smoothing algorithm for high-speed feed motion generation of {NC} systems along linear tool paths.
+\newblock {\em The International Journal of Advanced Manufacturing Technology}, 76(9--12):1977--1992, 2015.
+
 \end{thebibliography}

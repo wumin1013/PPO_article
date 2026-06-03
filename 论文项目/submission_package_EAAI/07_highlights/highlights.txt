@@ -1,0 +1,4 @@
+* J-NNC enables closed-loop CNC motion inside a tolerance band.
+* Adaptive preview coordinates path shaping and feedrate control.
+* KCM projects policy actions under jerk and acceleration limits.
+* Tests show full path progress and zero linear-jerk violation.

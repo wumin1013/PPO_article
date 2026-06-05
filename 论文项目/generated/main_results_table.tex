@@ -1,29 +1,23 @@
 \begin{table}[H]
 \centering
-\caption{Comparison among J-NNC, the NNC baseline, and the traditional two-step baseline on representative evaluation trajectories.}
+\caption{Performance on representative test paths for the NNC baseline, the traditional two-step baseline, and J-NNC.}
 \label{tab:main_results}
 \resizebox{0.98\textwidth}{!}{
 \begin{tabular}{llccc}
 \toprule
-\textbf{Path} & \textbf{Metric} & \textbf{J-NNC} & \textbf{NNC baseline} & \textbf{Traditional two-step}\\
+\textbf{Path} & \textbf{Measure} & \textbf{NNC baseline} & \textbf{Traditional two-step} & \textbf{J-NNC}\\
 \midrule
-\multirow{5}{*}{square} & Termination status & success & success & success\\
-& Final progress & 1.000 & 1.000 & 1.000\\
-& Maximum contour error [mm] & 0.834 & 0.676 & 0.309\\
-& Maximum relative linear-jerk exceedance & 0.000 & 3199.000 & 0.000\\
-& Termination time [s] & 12.192 & 8.672 & 24.780\\
+\multirow{3}{*}{square} & Peak contour error [mm] & 0.676 & 0.309 & 0.834\\
+& Peak relative exceedance of the linear-jerk limit & 3199.000 & 0.000 & 0.000\\
+& Elapsed interpolation time [s] & 8.672 & 24.780 & 12.192\\
 \midrule
-\multirow{5}{*}{circle} & Termination status & success & max\_steps & success\\
-& Final progress & 1.000 & 0.990 & 1.000\\
-& Maximum contour error [mm] & 0.096 & 6.259 & 0.000\\
-& Maximum relative linear-jerk exceedance & 0.000 & 3199.000 & 0.000\\
-& Termination time [s] & 9.117 & 60.000 & 17.499\\
+\multirow{3}{*}{circle} & Peak contour error [mm] & 6.259 & 0.000 & 0.096\\
+& Peak relative exceedance of the linear-jerk limit & 3199.000 & 0.000 & 0.000\\
+& Elapsed interpolation time [s] & 60.000 & 17.499 & 9.117\\
 \midrule
-\multirow{5}{*}{butterfly} & Termination status & success & success & success\\
-& Final progress & 1.000 & 1.000 & 1.000\\
-& Maximum contour error [mm] & 0.745 & 0.207 & 0.012\\
-& Maximum relative linear-jerk exceedance & 0.000 & 3199.000 & 0.000\\
-& Termination time [s] & 10.480 & 5.807 & 15.360\\
+\multirow{3}{*}{butterfly} & Peak contour error [mm] & 0.207 & 0.012 & 0.745\\
+& Peak relative exceedance of the linear-jerk limit & 3199.000 & 0.000 & 0.000\\
+& Elapsed interpolation time [s] & 5.807 & 15.360 & 10.480\\
 \bottomrule
 \end{tabular}
 }

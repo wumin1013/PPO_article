@@ -178,7 +178,7 @@
     }
   },
   "two_step_baseline": {
-    "updated_at": "2026-06-03 06:27:34",
+    "updated_at": "2026-06-04 04:46:48",
     "summary_json": "论文项目/generated/two_step_baseline_summary.json",
     "paths": {
       "square": {
@@ -189,6 +189,8 @@
         "max_relative_linear_jerk_exceedance": 0.0,
         "termination_time_s": 24.78,
         "mean_feedrate_utilization": 0.16066277919784258,
+        "p95_acceleration_utilization": null,
+        "p95_linear_jerk_utilization": 0.0,
         "jerk_reach_rate_80_active": 0.0,
         "effective_path_speed_mm_s": 16.142050040354746,
         "max_smoothed_path_error_mm": 0.30935921676911454,
@@ -203,6 +205,8 @@
         "max_relative_linear_jerk_exceedance": 0.0,
         "termination_time_s": 17.499,
         "mean_feedrate_utilization": 0.1795296198482217,
+        "p95_acceleration_utilization": null,
+        "p95_linear_jerk_utilization": 0.0,
         "jerk_reach_rate_80_active": 0.0,
         "effective_path_speed_mm_s": 17.952951794761706,
         "max_smoothed_path_error_mm": 3.552713678800501e-15,
@@ -217,6 +221,8 @@
         "max_relative_linear_jerk_exceedance": 0.0,
         "termination_time_s": 15.36,
         "mean_feedrate_utilization": 0.1504722967366129,
+        "p95_acceleration_utilization": null,
+        "p95_linear_jerk_utilization": 0.25,
         "jerk_reach_rate_80_active": 0.0,
         "effective_path_speed_mm_s": 15.049119010073928,
         "max_smoothed_path_error_mm": 0.013076488854224522,

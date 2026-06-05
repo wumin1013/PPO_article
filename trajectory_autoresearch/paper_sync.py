@@ -1360,12 +1360,12 @@ def _build_main_results_tex(
     lines = [
         r"\begin{table}[H]",
         r"\centering",
-        r"\caption{Comparison between J-NNC and the NNC baseline on representative evaluation trajectories.}",
+        r"\caption{Performance on representative test paths for J-NNC and the NNC baseline.}",
         r"\label{tab:main_results}",
         r"\resizebox{0.92\textwidth}{!}{",
         r"\begin{tabular}{llcc}",
         r"\toprule",
-        rf"\textbf{{Path}} & \textbf{{Metric}} & \textbf{{J-NNC}} & \textbf{{{baseline_label}}}\\",
+        rf"\textbf{{Path}} & \textbf{{Measure}} & \textbf{{J-NNC}} & \textbf{{{baseline_label}}}\\",
         r"\midrule",
     ]
     for idx, (path_key, path_label) in enumerate(targets):
@@ -1383,15 +1383,15 @@ def _build_main_results_tex(
             rf" & {_fmt(baseline_stats.get('progress'))}\\"
         )
         lines.append(
-            rf"& Maximum contour error & {_fmt(full_stats.get('max_abs_contour_error'))}"
+            rf"& Peak contour error & {_fmt(full_stats.get('max_abs_contour_error'))}"
             rf" & {_fmt(baseline_stats.get('max_abs_contour_error'))}\\"
         )
         lines.append(
-            rf"& Maximum relative linear-jerk exceedance & {_fmt(full_stats.get('linear_jerk_overlimit'))}"
+            rf"& Peak relative exceedance of the linear-jerk limit & {_fmt(full_stats.get('linear_jerk_overlimit'))}"
             rf" & {_fmt(baseline_stats.get('linear_jerk_overlimit'))}\\"
         )
         lines.append(
-            rf"& Termination time (s) & {_fmt(full_stats.get('time_seconds'))}"
+            rf"& Elapsed interpolation time (s) & {_fmt(full_stats.get('time_seconds'))}"
             rf" & {_fmt(baseline_stats.get('time_seconds'))}\\"
         )
     lines.extend(
@@ -1410,12 +1410,12 @@ def _build_ablation_tex(rows: list[dict], trace_summaries: dict[str, dict[str, A
     lines = [
         r"\begin{table}[H]",
         r"\centering",
-        r"\caption{Path-level reported evaluation results of the structured ablation study.}",
+        r"\caption{Path-level results of the structured ablation study.}",
         r"\label{tab:ablation}",
         r"\resizebox{0.98\textwidth}{!}{",
         r"\begin{tabular}{llccccc}",
         r"\toprule",
-        r"\textbf{Model configuration} & \textbf{Path} & \textbf{Termination status} & \textbf{Final progress} & \textbf{Maximum contour error} & \textbf{Maximum relative linear-jerk violation} & \textbf{Termination time (s)}\\",
+        r"\textbf{Model configuration} & \textbf{Path} & \textbf{Outcome} & \textbf{Final progress} & \textbf{Peak contour error} & \textbf{Peak relative exceedance of the linear-jerk limit} & \textbf{Elapsed time (s)}\\",
         r"\midrule",
     ]
     for row_idx, row in enumerate(rows):

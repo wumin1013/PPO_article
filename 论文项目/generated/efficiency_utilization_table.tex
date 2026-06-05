@@ -1,20 +1,20 @@
 \begin{table}[H]
 \centering
-\caption{Efficiency and dynamic-constraint utilization metrics of J-NNC and the traditional two-step baseline.}
+\caption{Efficiency and dynamic-limit use for J-NNC and the traditional two-step baseline.}
 \label{tab:efficiency_utilization}
 \resizebox{0.98\textwidth}{!}{
-\begin{tabular}{llccc}
+\begin{tabular}{llcccc}
 \toprule
-\textbf{Path} & \textbf{Method} & \textbf{Mean feedrate utilization} & \textbf{P95 linear-jerk utilization} & \textbf{Active jerk reach rate}\\
+\textbf{Path} & \textbf{Method} & \textbf{Mean feedrate use} & \textbf{95th-percentile acceleration use} & \textbf{95th-percentile linear-jerk use} & \textbf{Active jerk-limit engagement rate}\\
 \midrule
-\multirow{2}{*}{square} & J-NNC & 0.328 & 1.000 & 0.991\\
-& Traditional two-step & 0.161 & 0.000 & 0.000\\
+\multirow{2}{*}{square} & Traditional two-step & 0.161 & 0.000 & 0.000 & 0.000\\
+& J-NNC & 0.328 & 0.562 & 1.000 & 0.991\\
 \midrule
-\multirow{2}{*}{circle} & J-NNC & 0.345 & 1.000 & 0.929\\
-& Traditional two-step & 0.180 & 0.000 & 0.000\\
+\multirow{2}{*}{circle} & Traditional two-step & 0.180 & 0.000 & 0.000 & 0.000\\
+& J-NNC & 0.345 & 0.562 & 1.000 & 0.999\\
 \midrule
-\multirow{2}{*}{butterfly} & J-NNC & 0.221 & 1.000 & 0.635\\
-& Traditional two-step & 0.150 & 0.250 & 0.000\\
+\multirow{2}{*}{butterfly} & Traditional two-step & 0.150 & 0.039 & 0.250 & 0.000\\
+& J-NNC & 0.221 & 0.531 & 1.000 & 0.988\\
 \bottomrule
 \end{tabular}
 }

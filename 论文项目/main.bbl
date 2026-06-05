@@ -2,112 +2,151 @@
 
 \bibitem{Sun2022}
 Yuwen Sun, Jinjie Jia, Jinting Xu, Mansen Chen, and Jinbo Niu.
-\newblock Path, feedrate and trajectory planning for free-form surface machining: A state-of-the-art review.
+\newblock Path, feedrate and trajectory planning for free-form surface
+  machining: A state-of-the-art review.
 \newblock {\em Chinese Journal of Aeronautics}, 35(8):12--29, 2022.
 
 \bibitem{Yan2023}
 Guangwen Yan, Desheng Zhang, Jinting Xu, and Yuwen Sun.
 \newblock Corner smoothing for {CNC} machining of linear tool path: A review.
-\newblock {\em Journal of Advanced Manufacturing Science and Technology}, 3(2):2023001, 2023.
+\newblock {\em Journal of Advanced Manufacturing Science and Technology},
+  3(2):2023001, 2023.
 
 \bibitem{Erkorkmaz2001}
 Kaan Erkorkmaz and Yusuf Altintas.
-\newblock High speed {CNC} system design. part {I}: jerk limited trajectory generation and quintic spline interpolation.
-\newblock {\em International Journal of Machine Tools and Manufacture}, 41(9):1323--1345, 2001.
+\newblock High speed {CNC} system design. part {I}: jerk limited trajectory
+  generation and quintic spline interpolation.
+\newblock {\em International Journal of Machine Tools and Manufacture},
+  41(9):1323--1345, 2001.
 
 \bibitem{Lee2011}
 A.~C. Lee, M.~T. Lin, Y.~R. Pan, and W.~Y. Lin.
-\newblock The feedrate scheduling of {NURBS} interpolator for {CNC} machine tools.
+\newblock The feedrate scheduling of {NURBS} interpolator for {CNC} machine
+  tools.
 \newblock {\em Computer-Aided Design}, 43(6):612--628, 2011.
 
 \bibitem{Sencer2015}
 Burak Sencer, Kazunori Ishizaki, and Eiji Shamoto.
-\newblock High speed cornering strategy with confined contour error and vibration suppression for {CNC} machine tools.
+\newblock High speed cornering strategy with confined contour error and
+  vibration suppression for {CNC} machine tools.
 \newblock {\em CIRP Annals}, 64(1):369--372, 2015.
 
 \bibitem{Tajima2016}
 S.~Tajima and B.~Sencer.
 \newblock Kinematic corner smoothing for high speed machine tools.
-\newblock {\em International Journal of Machine Tools and Manufacture}, 108:27--43, 2016.
+\newblock {\em International Journal of Machine Tools and Manufacture},
+  108:27--43, 2016.
 
 \bibitem{Zhang2021}
 Yong Zhang, Hui Zhang, Jiadong Shi, Jiali Jiang, and Mingyong Zhao.
-\newblock Development of an adaptive-feedrate planning and iterative interpolator for parametric toolpath with normal jerk constraint.
-\newblock {\em International Journal of Precision Engineering and Manufacturing}, 22:73--81, 2021.
+\newblock Development of an adaptive-feedrate planning and iterative
+  interpolator for parametric toolpath with normal jerk constraint.
+\newblock {\em International Journal of Precision Engineering and
+  Manufacturing}, 22:73--81, 2021.
 
 \bibitem{Hu2024}
-Yifei Hu, Xin Jiang, Guanying Huo, Cheng Su, Hexiong Li, Li-Yong Shen, and Zhiming Zheng.
-\newblock Enhancing five-axis {CNC} toolpath smoothing: Overlap elimination with asymmetrical {B}-splines.
-\newblock {\em CIRP Journal of Manufacturing Science and Technology}, 52:36--57, 2024.
+Yifei Hu, Xin Jiang, Guanying Huo, Cheng Su, Hexiong Li, Li-Yong Shen, and
+  Zhiming Zheng.
+\newblock Enhancing five-axis {CNC} toolpath smoothing: Overlap elimination
+  with asymmetrical {B}-splines.
+\newblock {\em CIRP Journal of Manufacturing Science and Technology},
+  52:36--57, 2024.
 
 \bibitem{Fan2015}
 W.~Fan, C.~Lee, and J.~Chen.
-\newblock A realtime curvature-smooth interpolation scheme and motion planning for {CNC} machining of short line segments.
-\newblock {\em International Journal of Machine Tools and Manufacture}, 96:27--46, 2015.
+\newblock A realtime curvature-smooth interpolation scheme and motion planning
+  for {CNC} machining of short line segments.
+\newblock {\em International Journal of Machine Tools and Manufacture},
+  96:27--46, 2015.
 
 \bibitem{Zhang2018}
 Y.~Zhang, P.~Ye, J.~Wu, and H.~Zhang.
-\newblock An optimal curvature-smooth transition algorithm with axis jerk limitations along linear segments.
-\newblock {\em The International Journal of Advanced Manufacturing Technology}, 95:875--888, 2018.
+\newblock An optimal curvature-smooth transition algorithm with axis jerk
+  limitations along linear segments.
+\newblock {\em The International Journal of Advanced Manufacturing Technology},
+  95:875--888, 2018.
 
 \bibitem{Li2020}
 Bingran Li, Hui Zhang, Peiqing Ye, and Jinsong Wang.
-\newblock Trajectory smoothing method using reinforcement learning for computer numerical control machine tools.
-\newblock {\em Robotics and Computer-Integrated Manufacturing}, 61:101847, 2020.
+\newblock Trajectory smoothing method using reinforcement learning for computer
+  numerical control machine tools.
+\newblock {\em Robotics and Computer-Integrated Manufacturing}, 61:101847,
+  2020.
 
 \bibitem{Song2021}
 De-Ning Song, Jian-Wei Ma, Yu-Guang Zhong, and Jian-Jun Yao.
-\newblock Global smoothing of short line segment toolpaths by control-point-assigning-based geometric smoothing and {FIR} filtering-based motion smoothing.
+\newblock Global smoothing of short line segment toolpaths by
+  control-point-assigning-based geometric smoothing and {FIR} filtering-based
+  motion smoothing.
 \newblock {\em Mechanical Systems and Signal Processing}, 160:107908, 2021.
 
 \bibitem{Yang2015}
 Z.~Yang, L.~Shen, C.~Yuan, and X.~Gao.
-\newblock Curve fitting and optimal interpolation for {CNC} machining under confined error using quadratic {B}-splines.
+\newblock Curve fitting and optimal interpolation for {CNC} machining under
+  confined error using quadratic {B}-splines.
 \newblock {\em Computer-Aided Design}, 66:62--72, 2015.
 
 \bibitem{Wu2022}
 Bingcai Wu, Junyan Ma, Lutao Wei, Xiaoping Liao, and Juan Lu.
-\newblock {NURBS} interpolator with scheduling scheme combining cubic and quartic {S}-shaped feedrate profiles under drive and chord error constraints.
+\newblock {NURBS} interpolator with scheduling scheme combining cubic and
+  quartic {S}-shaped feedrate profiles under drive and chord error constraints.
 \newblock {\em Computer-Aided Design}, 152:103380, 2022.
 
 \bibitem{Tsai2010}
 M.~Tsai, H.~Nien, and H.~Yau.
-\newblock Development of a real-time look-ahead interpolation methodology with spline-fitting technique for high-speed machining.
-\newblock {\em The International Journal of Advanced Manufacturing Technology}, 47:621--638, 2010.
+\newblock Development of a real-time look-ahead interpolation methodology with
+  spline-fitting technique for high-speed machining.
+\newblock {\em The International Journal of Advanced Manufacturing Technology},
+  47:621--638, 2010.
 
 \bibitem{Song2020}
 De-Ning Song, Yu-Guang Zhong, and Jian-Wei Ma.
-\newblock Look-ahead-window-based interval adaptive feedrate scheduling for long five-axis spline toolpaths under axial drive constraints.
-\newblock {\em Proceedings of the Institution of Mechanical Engineers, Part B: Journal of Engineering Manufacture}, 234(13):1656--1670, 2020.
+\newblock Look-ahead-window-based interval adaptive feedrate scheduling for
+  long five-axis spline toolpaths under axial drive constraints.
+\newblock {\em Proceedings of the Institution of Mechanical Engineers, Part B:
+  Journal of Engineering Manufacture}, 234(13):1656--1670, 2020.
 
 \bibitem{Zhao2013}
 Huan Zhao, Limin Zhu, and Han Ding.
-\newblock A real-time look-ahead interpolation methodology with curvature-continuous {B}-spline transition scheme for {CNC} machining of short line segments.
-\newblock {\em International Journal of Machine Tools and Manufacture}, 65:88--98, 2013.
+\newblock A real-time look-ahead interpolation methodology with
+  curvature-continuous {B}-spline transition scheme for {CNC} machining of
+  short line segments.
+\newblock {\em International Journal of Machine Tools and Manufacture},
+  65:88--98, 2013.
 
 \bibitem{Tsai2016}
 M.~Tsai and Y.~Huang.
-\newblock A novel integrated dynamic acceleration/deceleration interpolation algorithm for a {CNC} controller.
-\newblock {\em The International Journal of Advanced Manufacturing Technology}, 87:279--292, 2016.
+\newblock A novel integrated dynamic acceleration/deceleration interpolation
+  algorithm for a {CNC} controller.
+\newblock {\em The International Journal of Advanced Manufacturing Technology},
+  87:279--292, 2016.
 
 \bibitem{Duan2016}
 Molong Duan and Chinedum Okwudire.
-\newblock Minimum-time cornering for {CNC} machines using an optimal control method with {NURBS} parameterization.
-\newblock {\em The International Journal of Advanced Manufacturing Technology}, 85:1405--1418, 2016.
+\newblock Minimum-time cornering for {CNC} machines using an optimal control
+  method with {NURBS} parameterization.
+\newblock {\em The International Journal of Advanced Manufacturing Technology},
+  85:1405--1418, 2016.
 
 \bibitem{LiDriving2017}
 B.~Li, H.~Zhang, and P.~Ye.
-\newblock Driving force constraint corner smoothing method for high-speed machine tools.
-\newblock In {\em ASME 2017 International Design Engineering Technical Conferences and Computers and Information in Engineering Conference}, page V006T10A012, 2017.
+\newblock Driving force constraint corner smoothing method for high-speed
+  machine tools.
+\newblock In {\em ASME 2017 International Design Engineering Technical
+  Conferences and Computers and Information in Engineering Conference}, page
+  V006T10A012, 2017.
 
 \bibitem{Li2023}
-Hexiong Li, Xin Jiang, Guanying Huo, Cheng Su, Shiwei Zhou, Bolun Wang, Yifei Hu, and Zhiming Zheng.
-\newblock An integrated trajectory smoothing method for lines and arcs mixed toolpath based on motion overlapping strategy.
+Hexiong Li, Xin Jiang, Guanying Huo, Cheng Su, Shiwei Zhou, Bolun Wang, Yifei
+  Hu, and Zhiming Zheng.
+\newblock An integrated trajectory smoothing method for lines and arcs mixed
+  toolpath based on motion overlapping strategy.
 \newblock {\em Journal of Manufacturing Processes}, 95:242--265, 2023.
 
 \bibitem{Sun2024}
 S.~Sun, P.~Zhao, T.~Zhang, B.~Li, and D.~Yu.
-\newblock Smoothing interpolation of five-axis tool path with less feedrate fluctuation and higher computation efficiency.
+\newblock Smoothing interpolation of five-axis tool path with less feedrate
+  fluctuation and higher computation efficiency.
 \newblock {\em Journal of Manufacturing Processes}, 109:669--693, 2024.
 
 \bibitem{Schulman2017PPO}
@@ -116,7 +155,9 @@ John Schulman, Filip Wolski, Prafulla Dhariwal, Alec Radford, and Oleg Klimov.
 
 \bibitem{Sencer2014}
 Burak Sencer, Kosuke Ishizaki, and Eiji Shamoto.
-\newblock A curvature optimal sharp corner smoothing algorithm for high-speed feed motion generation of {NC} systems along linear tool paths.
-\newblock {\em The International Journal of Advanced Manufacturing Technology}, 76(9--12):1977--1992, 2015.
+\newblock A curvature optimal sharp corner smoothing algorithm for high-speed
+  feed motion generation of {NC} systems along linear tool paths.
+\newblock {\em The International Journal of Advanced Manufacturing Technology},
+  76(9--12):1977--1992, 2015.
 
 \end{thebibliography}

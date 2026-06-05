@@ -62,7 +62,7 @@
 }
 
 \begin{abstract}
-Computer numerical control (CNC) motion planning converts CAM-generated tool paths into executable interpolation trajectories that satisfy contour tolerance and kinematic limits. Conventional smooth-then-schedule pipelines determine the geometric path before regulating the feedrate. After the path has been fixed, the feedrate planner can no longer use the tolerance band to adjust motion at corners and curvature-transition regions. This separation reduces the coupling between geometric smoothing and dynamic feasibility. We propose J-NNC, a closed-loop reinforcement learning framework that treats tolerance-band trajectory shaping and feedrate regulation as one constrained decision problem. Rather than selecting a path and then assigning its timing, J-NNC learns local motion decisions within the tolerance band and projects them onto the kinematically feasible set, thereby linking geometric freedom with jerk-limited execution. Experiments on square, circular, and butterfly-shaped paths show that J-NNC completes all cases with full path progress and no linear-jerk limit exceedance. It removes the violations observed in the neural network controller (NNC) baseline and the no-KCM ablation. Compared with a traditional two-step baseline, J-NNC achieves a shorter execution time, a higher active jerk reach rate, and more effective tolerance-band utilization while preserving jerk feasibility.
+Computer numerical control (CNC) motion planning converts CAM-generated tool paths into executable interpolation trajectories that satisfy contour tolerance and kinematic limits. Conventional smooth-then-schedule pipelines determine the geometric path before regulating the feedrate. After the path has been fixed, the feedrate planner can no longer use the tolerance band to adjust motion at corners and curvature-transition regions. This separation reduces the coupling between geometric smoothing and dynamic feasibility. We propose J-NNC, a closed-loop reinforcement learning framework that treats tolerance-band trajectory shaping and feedrate regulation as one constrained decision problem. Rather than selecting a path and then assigning its timing, J-NNC learns local motion decisions within the tolerance band and projects them onto the kinematically feasible set, thereby linking geometric freedom with jerk-limited execution. Experiments on square, circular, and butterfly-shaped paths show that J-NNC completes all cases with full path progress and no linear-jerk limit exceedance. It removes the violations observed in the neural network controller (NNC) baseline and the no-KCM ablation. Compared with a traditional two-step baseline, J-NNC achieves a shorter execution time, a higher active jerk-limit engagement rate, and more effective use of the tolerance band while preserving jerk feasibility.
 \end{abstract}
 
 \begin{keyword}
@@ -334,7 +334,7 @@ The three test paths are selected to stress different parts of the planner. The 
 
 Unless otherwise stated, the J-NNC and ablation evaluations use a contour-tolerance band of $\varepsilon=2.5$ mm, an interpolation period of $\Delta t=0.001$ s, and a maximum episode length of $60000$ steps, corresponding to $60$ s. The linear kinematic limits are $V_{\max}=100$ mm/s, $A_{\max}=2000$ mm/s$^2$, and $J_{\max}=62500$ mm/s$^3$. The Adaptive Preview distance is selected within $[0.8,4.6]$ mm, and the multi-scale observation uses scales $(0.5,1.0,2.0)$ with $8$ forward points.
 
-The main comparison includes J-NNC and two baselines. The NNC baseline directly executes the learned policy output, following Li et al.~\cite{Li2020}. The traditional two-step baseline smooths the path first and then applies jerk-limited feedrate scheduling. We report path advancement, contour error, execution time, and satisfaction of the kinematic constraints.
+The main comparison includes J-NNC and two baselines. The NNC baseline directly executes the learned policy output, following Li et al.~\cite{Li2020}. The traditional two-step baseline smooths the path first and then applies jerk-limited feedrate scheduling. We report contour error, linear-jerk exceedance, elapsed interpolation time, and dynamic-limit use.
 
 Each ablation modifies one part of the proposed method. The fixed Adaptive Preview setting replaces the state-dependent Adaptive Preview action with a fixed Adaptive Preview distance. The no-KCM setting removes the execution-layer kinematic-constraint projection and directly applies the policy output in the environment. The setting without Adaptive Preview observation removes the multi-scale forward geometric input. The no-dual-reward setting disables the separate reward scheduling for straight and corner segments. These variants separate the effects of Adaptive Preview, execution-side constraints, forward geometric information, and reward structure.
 
@@ -342,18 +342,18 @@ Because the task is constrained CNC motion planning, a shorter execution time is
 
 \subsection{Main Comparative Results}
 
-The main comparison is designed to answer two questions. The comparison with NNC asks whether learned direct control is sufficient without an execution-layer projection. The comparison with the traditional two-step baseline asks whether closed-loop planning inside the tolerance band can use the dynamic limits more effectively than a serial smooth-then-schedule pipeline. The two-step baseline first generates a fixed corner-smoothed path and then applies conservative jerk-limited feedrate scheduling along that path, following the strategy used in local corner smoothing methods~\cite{Sencer2014}.
+This subsection reports the comparative results of J-NNC, the NNC baseline, and a traditional two-step baseline on three representative paths. The traditional two-step baseline follows the conventional serial pipeline: a fixed corner-smoothed path is first generated from the reference path, and conservative jerk-limited feedrate scheduling is then performed along that fixed path, following the smooth-then-schedule strategy used in local corner smoothing methods~\cite{Sencer2014}. The comparison between J-NNC and the NNC baseline mainly evaluates the role of explicit execution-layer kinematic projection for learned direct control, whereas the comparison between J-NNC and the traditional two-step baseline evaluates whether closed-loop one-step tolerance-band planning can improve efficiency and dynamic-limit use compared with a serial smooth-then-schedule pipeline.
 
 \IfFileExists{generated/main_results_table.tex}{
 \input{generated/main_results_table.tex}
 }{
 \begin{table}[H]
 \centering
-\caption{Comparison among J-NNC, the NNC baseline, and the traditional two-step baseline on representative evaluation trajectories.}
+\caption{Performance on representative test paths for the NNC baseline, the traditional two-step baseline, and J-NNC.}
 \label{tab:main_results}
 \begin{tabular}{llccc}
 \toprule
-Path & Metric & J-NNC & NNC baseline & Traditional two-step\\
+\textbf{Path} & \textbf{Measure} & \textbf{NNC baseline} & \textbf{Traditional two-step} & \textbf{J-NNC}\\
 \midrule
 All & Pending & N/A & N/A & N/A\\
 \bottomrule
@@ -366,41 +366,41 @@ All & Pending & N/A & N/A & N/A\\
 }{
 \begin{table}[H]
 \centering
-\caption{Efficiency and dynamic-constraint utilization metrics of J-NNC and the traditional two-step baseline.}
+\caption{Efficiency and dynamic-limit use for J-NNC and the traditional two-step baseline.}
 \label{tab:efficiency_utilization}
-\begin{tabular}{llccc}
+\begin{tabular}{llcccc}
 \toprule
-Path & Method & Mean feedrate utilization & P95 linear-jerk utilization & Active jerk reach rate\\
+\textbf{Path} & \textbf{Method} & \textbf{Mean feedrate use} & \textbf{95th-percentile acceleration use} & \textbf{95th-percentile linear-jerk use} & \textbf{Active jerk-limit engagement rate}\\
 \midrule
-All & Pending & N/A & N/A & N/A\\
+All & Pending & N/A & N/A & N/A & N/A\\
 \bottomrule
 \end{tabular}
 \end{table}
 }
 
-\tabref{tab:main_results} reports path advancement, contour error, violation of the linear jerk limit, and termination time for the three methods. \tabref{tab:efficiency_utilization} separates feedrate utilization from dynamic-constraint utilization for J-NNC and the traditional two-step baseline. The active jerk reach rate should be read together with the maximum relative violation of the linear jerk limit, since high utilization is meaningful only when the prescribed limit is not exceeded.
+\tabref{tab:main_results} reports the three core comparison measures: peak contour error, peak relative exceedance of the linear-jerk limit, and elapsed interpolation time. \tabref{tab:efficiency_utilization} then isolates how the traditional two-step baseline and J-NNC use the available feedrate, acceleration, and jerk-limit margins. Mean feedrate use reflects the average use of the commanded feedrate limit. The 95th-percentile acceleration use indicates whether the acceleration constraint is substantially invoked. The active jerk-limit engagement rate measures how often the trajectory operates near the jerk limit during active acceleration phases. This metric is meaningful only when the corresponding jerk exceedance remains zero.
 
-The comparison with NNC mainly highlights dynamic feasibility. The NNC baseline reaches full progress on the square and butterfly paths, but its maximum relative violation of the linear jerk limit is $3199.000$ on all three paths, and it fails to complete the circular path within the maximum step budget. The shorter NNC times on the square and butterfly paths therefore do not correspond to executable CNC motion under the prescribed jerk bound. J-NNC completes all three paths with no violation of the linear jerk limit and also reduces the contour error on the circular path substantially relative to NNC.
+The comparison with NNC mainly highlights dynamic feasibility. Although NNC gives shorter times on the square and butterfly paths, those times arise from unconstrained direct policy outputs with severe linear-jerk exceedance. The shorter NNC time is not physically meaningful because the executed command violates the prescribed jerk constraint. J-NNC instead keeps the peak relative exceedance of the linear-jerk limit at zero on all three paths and also reduces the circular-path peak contour error substantially relative to NNC.
 
-J-NNC is also faster than the traditional two-step baseline while keeping the jerk constraint active. Both methods satisfy the jerk bound, but J-NNC reduces the termination time from $24.780$ s to $12.192$ s on the square path, from $17.499$ s to $9.117$ s on the circular path, and from $15.360$ s to $10.480$ s on the butterfly path. The utilization metrics in \tabref{tab:efficiency_utilization} explain the difference: J-NNC reaches higher mean feedrate utilization on all three paths and operates near the active jerk bound more often, whereas the two-step baseline remains conservative after geometric smoothing. This result supports the motivation for treating trajectory shaping and feedrate regulation as one closed-loop decision problem.
+Compared with the traditional two-step baseline, J-NNC mainly improves efficiency under the same jerk-feasibility requirement. Both methods satisfy the jerk constraint, but J-NNC reduces the elapsed interpolation time from $24.780$ s to $12.192$ s on the square path, from $17.499$ s to $9.117$ s on the circular path, and from $15.360$ s to $10.480$ s on the butterfly path. The dynamic-limit use measures in \tabref{tab:efficiency_utilization} explain this difference: J-NNC has higher mean feedrate use and operates near the jerk limit more frequently during active acceleration phases, whereas the two-step baseline remains conservative after the geometric smoothing stage. This indicates that the proposed closed-loop planner uses the tolerance band and the kinematic limits jointly, instead of fixing the geometry first and then scheduling a cautious feedrate along that fixed curve.
 
 \IfFileExists{figures/generated/two_step_comparison.pdf}{
 \begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.96\linewidth]{figures/generated/two_step_comparison.pdf}
-\caption{Square-path comparison between J-NNC and the traditional two-step baseline: (a) trajectory within the tolerance band; (b) zoomed corner transition; (c) path-travel-aligned feedrate utilization $v/V_{\max}$; (d) path-travel-aligned signed linear-jerk utilization $j/J_{\max}$.}
+\includegraphics[width=0.98\linewidth]{figures/generated/two_step_comparison.pdf}
+\caption{Square-path comparison between J-NNC and the traditional two-step baseline: (a) square path trajectory; (b) corner-transition zoom; (c) path-travel-aligned feedrate use $v/V_{\max}$; (d) path-travel-aligned KCM-projected signed acceleration use $a/A_{\max}$; (e) path-travel-aligned KCM-projected signed linear-jerk use $j/J_{\max}$.}
 \label{fig:two_step_comparison}
 \end{figure}
 }{
 \begin{figure}[!htbp]
 \centering
 \fbox{\parbox{0.9\linewidth}{\centering \vspace{2.8cm} Placeholder for the square-path comparison between J-NNC and the traditional two-step baseline \vspace{2.8cm}}}
-\caption{Square-path comparison between J-NNC and the traditional two-step baseline: (a) trajectory within the tolerance band; (b) zoomed corner transition; (c) path-travel-aligned feedrate utilization $v/V_{\max}$; (d) path-travel-aligned signed linear-jerk utilization $j/J_{\max}$.}
+\caption{Square-path comparison between J-NNC and the traditional two-step baseline: (a) square path trajectory; (b) corner-transition zoom; (c) path-travel-aligned feedrate use $v/V_{\max}$; (d) path-travel-aligned KCM-projected signed acceleration use $a/A_{\max}$; (e) path-travel-aligned KCM-projected signed linear-jerk use $j/J_{\max}$.}
 \label{fig:two_step_comparison}
 \end{figure}
 }
 
-\figref{fig:two_step_comparison} gives a closer view of the square path. J-NNC begins the corner transition earlier within the tolerance band and maintains higher path-travel-aligned feedrate utilization. Its signed linear jerk remains within the prescribed $\pm J_{\max}$ bound throughout the run. The two-step baseline is also feasible, but its lower feedrate and jerk utilization lead to the longer termination time reported in \tabref{tab:main_results}.
+\figref{fig:two_step_comparison} illustrates this difference on the square path. J-NNC starts the corner transition earlier within the tolerance band and maintains higher path-travel-aligned feedrate use, while the KCM-projected signed acceleration and signed linear jerk remain within the prescribed bounds. The two-step baseline also stays feasible, but its feedrate, acceleration, and jerk-limit use are lower, which explains the longer elapsed interpolation time reported in \tabref{tab:main_results}.
 
 \figref{fig:qualitative_results} presents the trajectory comparisons on the three paths.
 
@@ -446,22 +446,23 @@ Taken together, these comparisons separate the two advantages of J-NNC. Relative
 
 \subsection{Ablation Results}
 
-The ablation study changes Adaptive Preview, KCM, Adaptive Preview observation, and the straight-line/corner dual-reward scheme. \tabref{tab:ablation} reports the termination status, final progress, maximum contour error, maximum relative violation of the linear jerk limit, and termination time for each path and configuration.
+The ablation study modifies Adaptive Preview, KCM, Adaptive Preview observation, and the straight-line/corner dual-reward scheme. \tabref{tab:ablation} reports the outcome, final progress, peak contour error, peak relative exceedance of the linear-jerk limit, and elapsed time for each path and configuration.
 
 \IfFileExists{generated/ablation_table.tex}{
 \input{generated/ablation_table.tex}
 }{
 \begin{table}[H]
 \centering
-\caption{Path-level reported evaluation results of the structured ablation study.}
+\caption{Path-level results of the structured ablation study.}
 \label{tab:ablation}
 \begingroup
 \small
 \setlength{\tabcolsep}{3pt}
 \renewcommand{\arraystretch}{1.16}
+\resizebox{0.98\textwidth}{!}{%
 \begin{tabular}{>{\raggedright\arraybackslash}p{0.23\textwidth}lccccc}
 \toprule
-Configuration & Path & Status & Progress & \begin{tabular}[c]{@{}c@{}}Max contour\\error [mm]\end{tabular} & \begin{tabular}[c]{@{}c@{}}Max jerk\\exceedance\end{tabular} & Time [s]\\
+Configuration & Path & Outcome & Final progress & \begin{tabular}[c]{@{}c@{}}Peak contour\\error [mm]\end{tabular} & \begin{tabular}[c]{@{}c@{}}Peak jerk-limit\\exceedance\end{tabular} & Elapsed time [s]\\
 \midrule
 \multirow{3}{0.23\textwidth}{J-NNC} & square & TBD & TBD & TBD & TBD & TBD\\
 & circle & TBD & TBD & TBD & TBD & TBD\\
@@ -484,11 +485,12 @@ Configuration & Path & Status & Progress & \begin{tabular}[c]{@{}c@{}}Max contou
 & butterfly & TBD & TBD & TBD & TBD & TBD\\
 \bottomrule
 \end{tabular}
+}
 \endgroup
 \end{table}
 }
 
-\tabref{tab:ablation} shows that all ablated configurations finish the reported evaluation runs, but they differ in termination time, contour error, and jerk feasibility. The no-KCM setting isolates the role of execution-layer projection. Without this projection, the controller still advances along the paths, but the jerk violation increases sharply. Because KCM is active in all other configurations, their maximum relative violation of the linear jerk limit remains zero.
+\tabref{tab:ablation} shows that all ablated configurations complete the evaluated trajectories, but they differ in elapsed time, contour error, and jerk feasibility. The no-KCM setting isolates the role of execution-layer projection. Without this projection, the controller still advances along the paths, but the jerk violation increases sharply. Because KCM is active in all other configurations, their peak relative exceedance of the linear-jerk limit remains zero.
 
 \figref{fig:jerk_constraint_comparison} compares the linear jerk of J-NNC with that of the configuration without KCM on the same representative path.
 

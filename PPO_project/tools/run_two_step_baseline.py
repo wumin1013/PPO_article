@@ -331,7 +331,12 @@ def run_all(args: argparse.Namespace) -> dict[str, Any]:
             ],
             jnnc_trace_rows=load_jnnc_square_trace_rows(),
             half_epsilon=half_epsilon,
-            constraints={"MAX_VEL": constraints.max_vel, "MAX_JERK": constraints.max_jerk, "DT": dt},
+            constraints={
+                "MAX_VEL": constraints.max_vel,
+                "MAX_ACC": constraints.max_acc,
+                "MAX_JERK": constraints.max_jerk,
+                "DT": dt,
+            },
         )
         generated_files.update(figure_files)
 
@@ -365,7 +370,7 @@ def print_summary(payload: dict[str, Any]) -> None:
         print(
             "  {path}: status={status}, progress={progress:.3f}, max_error={max_err:.3f}, "
             "mean_error={mean_err:.3f}, jerk_exceed={jerk_exceed:.3f}, time={time_s:.3f}, "
-            "mean_feed={mean_feed:.3f}, active_jerk_reach={jerk_reach}".format(
+            "mean_feed={mean_feed:.3f}, active_jerk_engagement={jerk_engagement}".format(
                 path=path_name,
                 status=metrics.get("termination_status", "unknown"),
                 progress=float(metrics.get("final_progress") or 0.0),
@@ -374,7 +379,7 @@ def print_summary(payload: dict[str, Any]) -> None:
                 jerk_exceed=float(metrics.get("max_relative_linear_jerk_exceedance") or 0.0),
                 time_s=float(metrics.get("termination_time_s") or 0.0),
                 mean_feed=float(metrics.get("mean_feedrate_utilization") or 0.0),
-                jerk_reach=(
+                jerk_engagement=(
                     "N/A"
                     if metrics.get("jerk_reach_rate_80_active") is None
                     or not math.isfinite(float(metrics.get("jerk_reach_rate_80_active")))

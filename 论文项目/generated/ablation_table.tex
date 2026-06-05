@@ -1,14 +1,15 @@
 \begin{table}[H]
 \centering
-\caption{Path-level reported evaluation results of the structured ablation study.}
+\caption{Path-level results of the structured ablation study.}
 \label{tab:ablation}
 \begingroup
 \small
 \setlength{\tabcolsep}{3pt}
 \renewcommand{\arraystretch}{1.16}
+\resizebox{0.98\textwidth}{!}{%
 \begin{tabular}{>{\raggedright\arraybackslash}p{0.23\textwidth}lccccc}
 \toprule
-\textbf{Configuration} & \textbf{Path} & \textbf{Status} & \textbf{Progress} & \begin{tabular}[c]{@{}c@{}}\textbf{Max contour}\\\textbf{error [mm]}\end{tabular} & \begin{tabular}[c]{@{}c@{}}\textbf{Max jerk}\\\textbf{exceedance}\end{tabular} & \textbf{Time [s]}\\
+\textbf{Configuration} & \textbf{Path} & \textbf{Outcome} & \textbf{Final progress} & \begin{tabular}[c]{@{}c@{}}\textbf{Peak contour}\\\textbf{error [mm]}\end{tabular} & \begin{tabular}[c]{@{}c@{}}\textbf{Peak jerk-limit}\\\textbf{exceedance}\end{tabular} & \textbf{Elapsed time [s]}\\
 \midrule
 \multirow{3}{0.23\textwidth}{J-NNC} & square & success & 1.000 & 0.834 & 0.000 & 12.192\\
 & circle & success & 1.000 & 0.096 & 0.000 & 9.117\\
@@ -31,5 +32,6 @@
 & butterfly & success & 1.000 & 0.918 & 0.000 & 9.623\\
 \bottomrule
 \end{tabular}
+}
 \endgroup
 \end{table}

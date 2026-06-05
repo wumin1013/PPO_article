@@ -1,31 +1,14 @@
 {
-  "updated_at": "2026-06-03 06:27:34",
+  "updated_at": "2026-06-04 04:46:48",
   "rows": [
     {
       "path": "square",
-      "method": "J-NNC",
-      "termination_status": "success",
-      "final_progress": "1.000",
-      "max_contour_error_mm": "0.834",
-      "mean_contour_error_mm": "N/A",
-      "max_relative_linear_jerk_exceedance": "0.000",
-      "termination_time_s": "12.192",
-      "effective_path_speed_mm_s": 32.80839895013047,
-      "mean_feedrate_utilization": 0.3280839895013047,
-      "p95_linear_jerk_utilization": 1.0,
-      "jerk_reach_rate_80_active": 0.9914868409917915
-    },
-    {
-      "path": "square",
       "method": "NNC baseline",
-      "termination_status": "success",
-      "final_progress": "1.000",
       "max_contour_error_mm": "0.676",
-      "mean_contour_error_mm": "N/A",
       "max_relative_linear_jerk_exceedance": "3199.000",
       "termination_time_s": "8.672",
-      "effective_path_speed_mm_s": 46.125461254611466,
-      "mean_feedrate_utilization": 0.46125461254611466,
+      "mean_feedrate_utilization": 0.45351860975729635,
+      "p95_acceleration_utilization": 50.0,
       "p95_linear_jerk_utilization": 3200.0,
       "jerk_reach_rate_80_active": 0.0003687768899815612
     },
@@ -111,33 +94,29 @@
           }
         ],
         "fixed_smoothed_path": 1
-      }
+      },
+      "p95_acceleration_utilization": 0.0
     },
     {
-      "path": "circle",
+      "path": "square",
       "method": "J-NNC",
-      "termination_status": "success",
-      "final_progress": "1.000",
-      "max_contour_error_mm": "0.096",
-      "mean_contour_error_mm": "N/A",
+      "max_contour_error_mm": "0.834",
       "max_relative_linear_jerk_exceedance": "0.000",
-      "termination_time_s": "9.117",
-      "effective_path_speed_mm_s": 34.45856130926128,
-      "mean_feedrate_utilization": 0.34458561309261276,
+      "termination_time_s": "12.192",
+      "effective_path_speed_mm_s": 32.80839895013047,
+      "mean_feedrate_utilization": 0.3280839895013047,
+      "p95_acceleration_utilization": 0.5625,
       "p95_linear_jerk_utilization": 1.0,
-      "jerk_reach_rate_80_active": 0.9293347453547703
+      "jerk_reach_rate_80_active": 0.991236442516269
     },
     {
       "path": "circle",
       "method": "NNC baseline",
-      "termination_status": "max\\_steps",
-      "final_progress": "0.990",
       "max_contour_error_mm": "6.259",
-      "mean_contour_error_mm": "N/A",
       "max_relative_linear_jerk_exceedance": "3199.000",
       "termination_time_s": "60.000",
-      "effective_path_speed_mm_s": 5.1836186070328285,
-      "mean_feedrate_utilization": 0.051836186070328284,
+      "mean_feedrate_utilization": 0.46443877907866943,
+      "p95_acceleration_utilization": 50.0,
       "p95_linear_jerk_utilization": 3200.0,
       "jerk_reach_rate_80_active": 0.0
     },
@@ -193,33 +172,29 @@
         "corner_count": 0,
         "corners": [],
         "fixed_smoothed_path": 1
-      }
+      },
+      "p95_acceleration_utilization": 0.0
     },
     {
-      "path": "butterfly",
+      "path": "circle",
       "method": "J-NNC",
-      "termination_status": "success",
-      "final_progress": "1.000",
-      "max_contour_error_mm": "0.745",
-      "mean_contour_error_mm": "N/A",
+      "max_contour_error_mm": "0.096",
       "max_relative_linear_jerk_exceedance": "0.000",
-      "termination_time_s": "10.480",
-      "effective_path_speed_mm_s": 22.05672404529919,
-      "mean_feedrate_utilization": 0.22056724045299192,
+      "termination_time_s": "9.117",
+      "effective_path_speed_mm_s": 34.45856130926128,
+      "mean_feedrate_utilization": 0.34458561309261276,
+      "p95_acceleration_utilization": 0.5625,
       "p95_linear_jerk_utilization": 1.0,
-      "jerk_reach_rate_80_active": 0.6351043526442159
+      "jerk_reach_rate_80_active": 0.9991829111707715
     },
     {
       "path": "butterfly",
       "method": "NNC baseline",
-      "termination_status": "success",
-      "final_progress": "1.000",
       "max_contour_error_mm": "0.207",
-      "mean_contour_error_mm": "N/A",
       "max_relative_linear_jerk_exceedance": "3199.000",
       "termination_time_s": "5.807",
-      "effective_path_speed_mm_s": 39.806176682406665,
-      "mean_feedrate_utilization": 0.39806176682406663,
+      "mean_feedrate_utilization": 0.38832934032435,
+      "p95_acceleration_utilization": 50.0,
       "p95_linear_jerk_utilization": 3200.0,
       "jerk_reach_rate_80_active": 0.0016433853738701725
     },
@@ -392,7 +367,20 @@
           }
         ],
         "fixed_smoothed_path": 1
-      }
+      },
+      "p95_acceleration_utilization": 0.0390625
+    },
+    {
+      "path": "butterfly",
+      "method": "J-NNC",
+      "max_contour_error_mm": "0.745",
+      "max_relative_linear_jerk_exceedance": "0.000",
+      "termination_time_s": "10.480",
+      "effective_path_speed_mm_s": 22.05672404529919,
+      "mean_feedrate_utilization": 0.22056724045299192,
+      "p95_acceleration_utilization": 0.53125,
+      "p95_linear_jerk_utilization": 1.0,
+      "jerk_reach_rate_80_active": 0.9878733213068751
     }
   ]
 }

@@ -25,7 +25,8 @@ from src.utils.comparison_metrics import as_point_array, project_points_to_polyl
 
 
 PATHS = ("square", "circle", "butterfly")
-METHODS = ("J-NNC", "NNC baseline", "Traditional two-step")
+METHODS = ("NNC baseline", "Traditional two-step", "J-NNC")
+MAIN_RESULT_METHODS = ("NNC baseline", "Traditional two-step", "J-NNC")
 PAPER_ROOT = REPO_ROOT / "论文项目"
 PAPER_GENERATED_DIR = PAPER_ROOT / "generated"
 PAPER_FIGURES_DIR = PAPER_ROOT / "figures" / "generated"
@@ -37,20 +38,19 @@ PAPER_BRIDGE_SUMMARY_JSON = PAPER_GENERATED_DIR / "paper_bridge_summary.json"
 
 
 MAIN_METRICS = [
-    ("termination_status", "Termination status"),
-    ("final_progress", "Final progress"),
-    ("max_contour_error_mm", "Maximum contour error [mm]"),
-    ("max_relative_linear_jerk_exceedance", "Maximum relative linear-jerk exceedance"),
-    ("termination_time_s", "Termination time [s]"),
+    ("max_contour_error_mm", "Peak contour error [mm]"),
+    ("max_relative_linear_jerk_exceedance", "Peak relative exceedance of the linear-jerk limit"),
+    ("termination_time_s", "Elapsed interpolation time [s]"),
 ]
 
 EFFICIENCY_METRICS = [
-    ("mean_feedrate_utilization", "Mean feedrate utilization"),
-    ("p95_linear_jerk_utilization", "P95 linear-jerk utilization"),
-    ("jerk_reach_rate_80_active", "Active jerk reach rate"),
+    ("mean_feedrate_utilization", "Mean feedrate use"),
+    ("p95_acceleration_utilization", "95th-percentile acceleration use"),
+    ("p95_linear_jerk_utilization", "95th-percentile linear-jerk use"),
+    ("jerk_reach_rate_80_active", "Active jerk-limit engagement rate"),
 ]
 
-EFFICIENCY_METHODS = ("J-NNC", "Traditional two-step")
+EFFICIENCY_METHODS = ("Traditional two-step", "J-NNC")
 
 
 def repo_relative(path: Path) -> str:
@@ -58,6 +58,11 @@ def repo_relative(path: Path) -> str:
         return path.resolve().relative_to(REPO_ROOT.resolve()).as_posix()
     except ValueError:
         return str(path)
+
+
+def resolve_repo_path(path_like: str | Path) -> Path:
+    path = Path(path_like)
+    return path if path.is_absolute() else REPO_ROOT / path
 
 
 def read_json(path: Path) -> dict[str, Any]:
@@ -153,6 +158,37 @@ def parse_latex_number(value: Any) -> float:
         return float("nan")
 
 
+def project_velocity_command(
+    command_velocity: np.ndarray,
+    *,
+    dt: float,
+    max_vel: float,
+    max_acc: float,
+    max_jerk: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    if not len(command_velocity):
+        empty = np.asarray([], dtype=float)
+        return empty, empty, empty
+    projected_v = np.zeros_like(command_velocity, dtype=float)
+    projected_a = np.zeros_like(command_velocity, dtype=float)
+    projected_j = np.zeros_like(command_velocity, dtype=float)
+    projected_v[0] = float(np.clip(command_velocity[0], 0.0, max_vel))
+    for idx in range(1, len(command_velocity)):
+        target_v = float(np.clip(command_velocity[idx], 0.0, max_vel))
+        target_a = float(np.clip((target_v - projected_v[idx - 1]) / dt, -max_acc, max_acc))
+        delta_a = float(np.clip(target_a - projected_a[idx - 1], -max_jerk * dt, max_jerk * dt))
+        next_a = float(np.clip(projected_a[idx - 1] + delta_a, -max_acc, max_acc))
+        next_v = projected_v[idx - 1] + next_a * dt
+        if (next_a > 0.0 and next_v > target_v) or (next_a < 0.0 and next_v < target_v):
+            next_v = target_v
+            next_a = float(np.clip((next_v - projected_v[idx - 1]) / dt, -max_acc, max_acc))
+            delta_a = next_a - projected_a[idx - 1]
+        projected_v[idx] = float(np.clip(next_v, 0.0, max_vel))
+        projected_a[idx] = next_a
+        projected_j[idx] = float(np.clip(delta_a / dt, -max_jerk, max_jerk))
+    return projected_v, projected_a, projected_j
+
+
 def metric_key(label: str) -> str:
     clean = label.strip().lower()
     clean = re.sub(r"\\[a-zA-Z]+\{([^{}]*)\}", r"\1", clean)
@@ -167,17 +203,39 @@ def metric_key(label: str) -> str:
         return "final_progress"
     if clean == "maximum contour error":
         return "max_contour_error_mm"
+    if clean == "peak contour error":
+        return "max_contour_error_mm"
     if clean == "mean contour error":
         return "mean_contour_error_mm"
     if "linear-jerk" in clean and ("exceedance" in clean or "violation" in clean):
         return "max_relative_linear_jerk_exceedance"
+    if "linear-jerk" in clean and "relative exceedance" in clean:
+        return "max_relative_linear_jerk_exceedance"
     if clean == "termination time":
+        return "termination_time_s"
+    if clean == "elapsed interpolation time":
         return "termination_time_s"
     return clean.replace(" ", "_")
 
 
 def trace_path_for(method: str, path_name: str) -> Path | None:
     if method == "J-NNC":
+        if PAPER_BRIDGE_SUMMARY_JSON.exists():
+            try:
+                bridge = read_json(PAPER_BRIDGE_SUMMARY_JSON)
+                latest_suite = bridge.get("latest_suite_dir")
+                if latest_suite:
+                    candidate = (
+                        REPO_ROOT
+                        / str(latest_suite)
+                        / "full_method_snapshot"
+                        / "best_rollouts"
+                        / f"{path_name}_best.csv"
+                    )
+                    if candidate.exists():
+                        return candidate
+            except (OSError, json.JSONDecodeError):
+                pass
         candidate = PAPER_GENERATED_DIR / f"full_method_{path_name}_trace.csv"
     elif method == "NNC baseline":
         candidate = PAPER_GENERATED_DIR / f"baseline_{path_name}_trace.csv"
@@ -186,8 +244,16 @@ def trace_path_for(method: str, path_name: str) -> Path | None:
     return candidate if candidate.exists() else None
 
 
-def trace_jerk_utilization_stats(method: str, path_name: str, *, max_acc: float, max_jerk: float) -> dict[str, float]:
-    path = trace_path_for(method, path_name)
+def trace_dynamic_utilization_stats(
+    method: str,
+    path_name: str,
+    *,
+    max_vel: float,
+    max_acc: float,
+    max_jerk: float,
+    trace_path: Path | None = None,
+) -> dict[str, float]:
+    path = trace_path or trace_path_for(method, path_name)
     if path is None:
         return {}
     rows = list(csv.DictReader(path.open("r", encoding="utf-8-sig")))
@@ -200,19 +266,57 @@ def trace_jerk_utilization_stats(method: str, path_name: str, *, max_acc: float,
                 return np.asarray([parse_latex_number(row.get(key)) for row in rows], dtype=float)
         return np.zeros((len(rows),), dtype=float)
 
-    acceleration = series("acceleration", "a")
-    jerk = series("jerk", "j")
-    if method == "J-NNC":
+    def has_series(*keys: str) -> bool:
+        return any(key in rows[0] for key in keys)
+
+    velocity = series("velocity", "v") if has_series("velocity", "v") else np.asarray([], dtype=float)
+    if has_series("v_over_vmax"):
+        v_util = np.abs(series("v_over_vmax"))
+    elif len(velocity):
+        v_util = np.abs(velocity) / max(float(max_vel), 1e-12)
+    else:
+        v_util = np.asarray([], dtype=float)
+
+    if has_series("acceleration", "a"):
+        acceleration = series("acceleration", "a")
+        projected_jerk = None
+    elif len(velocity):
+        projected_v, acceleration, projected_jerk = project_velocity_command(
+            velocity,
+            dt=0.001,
+            max_vel=max(float(max_vel), 1e-12),
+            max_acc=max(float(max_acc), 1e-12),
+            max_jerk=max(float(max_jerk), 1e-12),
+        )
+        v_util = np.abs(projected_v) / max(float(max_vel), 1e-12)
+    else:
+        acceleration = np.zeros((len(rows),), dtype=float)
+        projected_jerk = np.zeros((len(rows),), dtype=float)
+
+    if has_series("jerk", "j"):
+        jerk = series("jerk", "j")
+    elif projected_jerk is not None:
+        jerk = projected_jerk
+    else:
+        jerk = np.zeros((len(rows),), dtype=float)
+    if method == "J-NNC" and has_series("jerk", "j"):
         jerk = np.clip(jerk, -float(max_jerk), float(max_jerk))
+    a_util = np.abs(acceleration) / max(float(max_acc), 1e-12)
     j_util = np.abs(jerk) / max(float(max_jerk), 1e-12)
-    valid = np.isfinite(j_util)
-    active = valid & (
+    valid_v = np.isfinite(v_util)
+    valid_acc = np.isfinite(a_util)
+    valid_jerk = np.isfinite(j_util)
+    active = valid_jerk & (
         (np.abs(acceleration) > 0.05 * max(float(max_acc), 1e-12))
         | (np.abs(jerk) > 0.05 * max(float(max_jerk), 1e-12))
     )
     out: dict[str, float] = {}
-    if np.any(valid):
-        out["p95_linear_jerk_utilization"] = float(np.percentile(j_util[valid], 95.0))
+    if np.any(valid_v):
+        out["mean_feedrate_utilization"] = float(np.mean(v_util[valid_v]))
+    if np.any(valid_acc):
+        out["p95_acceleration_utilization"] = float(np.percentile(a_util[valid_acc], 95.0))
+    if np.any(valid_jerk):
+        out["p95_linear_jerk_utilization"] = float(np.percentile(j_util[valid_jerk], 95.0))
     if np.any(active):
         active_util = j_util[active]
         out["jerk_reach_rate_80_active"] = float(
@@ -226,10 +330,18 @@ def parse_existing_main_results(path: Path = MAIN_RESULTS_TEX) -> dict[str, dict
     if not path.exists():
         return preserved
     current_path = ""
+    method_order = list(MAIN_RESULT_METHODS)
     path_re = re.compile(r"\\multirow\{[^{}]*\}\{[^{}]*\}\{(?P<path>[^{}]+)\}")
     for raw_line in path.read_text(encoding="utf-8-sig").splitlines():
         line = raw_line.strip()
         if "\\\\" not in line or "&" not in line:
+            continue
+        if r"\textbf{Path}" in line and (r"\textbf{Metric}" in line or r"\textbf{Measure}" in line):
+            header_cells = [re.sub(r"\\textbf\{([^{}]*)\}", r"\1", cell).strip() for cell in line.split("&")]
+            header_cells = [re.sub(r"\\\\\s*$", "", cell).strip() for cell in header_cells]
+            detected = [cell for cell in header_cells[2:] if cell]
+            if detected:
+                method_order = detected
             continue
         path_match = path_re.search(line)
         if path_match:
@@ -246,13 +358,18 @@ def parse_existing_main_results(path: Path = MAIN_RESULTS_TEX) -> dict[str, dict
         if len(cells) < 3:
             continue
         key = metric_key(cells[0])
-        preserved[current_path]["J-NNC"][key] = cells[1]
-        preserved[current_path]["NNC baseline"][key] = cells[2]
+        for method, value in zip(method_order, cells[1:]):
+            if method in preserved[current_path]:
+                preserved[current_path][method][key] = value
     return preserved
 
 
-def merge_metrics_for_tables(two_step_metrics: dict[str, dict[str, Any]]) -> dict[str, dict[str, dict[str, Any]]]:
+def merge_metrics_for_tables(
+    two_step_metrics: dict[str, dict[str, Any]],
+    two_step_trace_paths: dict[str, str] | None = None,
+) -> dict[str, dict[str, dict[str, Any]]]:
     preserved = parse_existing_main_results()
+    trace_paths = two_step_trace_paths or {}
     merged: dict[str, dict[str, dict[str, Any]]] = {}
     for path_name in PATHS:
         two_step = dict(two_step_metrics.get(path_name, {}))
@@ -269,12 +386,34 @@ def merge_metrics_for_tables(two_step_metrics: dict[str, dict[str, Any]]) -> dic
             method_metrics = merged[path_name][method]
             progress = parse_latex_number(method_metrics.get("final_progress"))
             time_s = parse_latex_number(method_metrics.get("termination_time_s"))
+            if not np.isfinite(progress) and method == "J-NNC":
+                progress = 1.0
             if np.isfinite(progress) and np.isfinite(time_s) and time_s > 1e-12 and np.isfinite(original_length):
                 effective_speed = progress * original_length / time_s
                 method_metrics["effective_path_speed_mm_s"] = effective_speed
                 method_metrics["mean_feedrate_utilization"] = effective_speed / max(max_vel, 1e-12)
-            method_metrics.update(
-                trace_jerk_utilization_stats(method, path_name, max_acc=max_acc, max_jerk=max_jerk)
+            trace_stats = trace_dynamic_utilization_stats(
+                method,
+                path_name,
+                max_vel=max_vel,
+                max_acc=max_acc,
+                max_jerk=max_jerk,
+            )
+            if "mean_feedrate_utilization" in method_metrics:
+                trace_stats.pop("mean_feedrate_utilization", None)
+            method_metrics.update(trace_stats)
+        trace_path_value = trace_paths.get(path_name, "")
+        two_step_trace_path = resolve_repo_path(trace_path_value) if trace_path_value else None
+        if two_step_trace_path is not None and two_step_trace_path.exists():
+            two_step.update(
+                trace_dynamic_utilization_stats(
+                    "Traditional two-step",
+                    path_name,
+                    max_vel=max_vel,
+                    max_acc=max_acc,
+                    max_jerk=max_jerk,
+                    trace_path=two_step_trace_path,
+                )
             )
     return merged
 
@@ -283,12 +422,12 @@ def build_main_results_table(metrics_by_path: dict[str, dict[str, dict[str, Any]
     lines = [
         r"\begin{table}[H]",
         r"\centering",
-        r"\caption{Comparison among J-NNC, the NNC baseline, and the traditional two-step baseline on representative evaluation trajectories.}",
+        r"\caption{Performance on representative test paths for the NNC baseline, the traditional two-step baseline, and J-NNC.}",
         r"\label{tab:main_results}",
         r"\resizebox{0.98\textwidth}{!}{",
         r"\begin{tabular}{llccc}",
         r"\toprule",
-        r"\textbf{Path} & \textbf{Metric} & \textbf{J-NNC} & \textbf{NNC baseline} & \textbf{Traditional two-step}\\",
+        r"\textbf{Path} & \textbf{Measure} & \textbf{NNC baseline} & \textbf{Traditional two-step} & \textbf{J-NNC}\\",
         r"\midrule",
     ]
     for path_idx, path_name in enumerate(PATHS):
@@ -297,9 +436,8 @@ def build_main_results_table(metrics_by_path: dict[str, dict[str, dict[str, Any]
         for metric_idx, (key, label) in enumerate(MAIN_METRICS):
             row_prefix = rf"\multirow{{{len(MAIN_METRICS)}}}{{*}}{{{path_name}}} & {label}" if metric_idx == 0 else rf"& {label}"
             values = [
-                fmt_value(metrics_by_path[path_name].get("J-NNC", {}).get(key)),
-                fmt_value(metrics_by_path[path_name].get("NNC baseline", {}).get(key)),
-                fmt_value(metrics_by_path[path_name].get("Traditional two-step", {}).get(key)),
+                fmt_value(metrics_by_path[path_name].get(method, {}).get(key))
+                for method in MAIN_RESULT_METHODS
             ]
             lines.append(rf"{row_prefix} & {values[0]} & {values[1]} & {values[2]}\\")
     lines.extend([r"\bottomrule", r"\end{tabular}", r"}", r"\end{table}", ""])
@@ -310,12 +448,12 @@ def build_efficiency_table(metrics_by_path: dict[str, dict[str, dict[str, Any]]]
     lines = [
         r"\begin{table}[H]",
         r"\centering",
-        r"\caption{Efficiency and dynamic-constraint utilization metrics of J-NNC and the traditional two-step baseline.}",
+        r"\caption{Efficiency and dynamic-limit use for J-NNC and the traditional two-step baseline.}",
         r"\label{tab:efficiency_utilization}",
         r"\resizebox{0.98\textwidth}{!}{",
-        r"\begin{tabular}{llccc}",
+        r"\begin{tabular}{llcccc}",
         r"\toprule",
-        r"\textbf{Path} & \textbf{Method} & \textbf{Mean feedrate utilization} & \textbf{P95 linear-jerk utilization} & \textbf{Active jerk reach rate}\\",
+        r"\textbf{Path} & \textbf{Method} & \textbf{Mean feedrate use} & \textbf{95th-percentile acceleration use} & \textbf{95th-percentile linear-jerk use} & \textbf{Active jerk-limit engagement rate}\\",
         r"\midrule",
     ]
     for path_idx, path_name in enumerate(PATHS):
@@ -332,13 +470,13 @@ def build_efficiency_table(metrics_by_path: dict[str, dict[str, dict[str, Any]]]
 def fallback_efficiency_block() -> str:
     return r"""\begin{table}[H]
 \centering
-\caption{Efficiency and dynamic-constraint utilization metrics of J-NNC and the traditional two-step baseline.}
+\caption{Efficiency and dynamic-limit use for J-NNC and the traditional two-step baseline.}
 \label{tab:efficiency_utilization}
-\begin{tabular}{llccc}
+\begin{tabular}{llcccc}
 \toprule
-\textbf{Path} & \textbf{Method} & \textbf{Mean feedrate utilization} & \textbf{P95 linear-jerk utilization} & \textbf{Active jerk reach rate}\\
+\textbf{Path} & \textbf{Method} & \textbf{Mean feedrate use} & \textbf{95th-percentile acceleration use} & \textbf{95th-percentile linear-jerk use} & \textbf{Active jerk-limit engagement rate}\\
 \midrule
-All & Pending & N/A & N/A & N/A\\
+All & Pending & N/A & N/A & N/A & N/A\\
 \bottomrule
 \end{tabular}
 \end{table}"""
@@ -347,11 +485,11 @@ All & Pending & N/A & N/A & N/A\\
 def main_results_fallback_block() -> str:
     return r"""\begin{table}[H]
 \centering
-\caption{Comparison among J-NNC, the NNC baseline, and the traditional two-step baseline on representative evaluation trajectories.}
+\caption{Performance on representative test paths for the NNC baseline, the traditional two-step baseline, and J-NNC.}
 \label{tab:main_results}
 \begin{tabular}{llccc}
 \toprule
-\textbf{Path} & \textbf{Metric} & \textbf{J-NNC} & \textbf{NNC baseline} & \textbf{Traditional two-step}\\
+\textbf{Path} & \textbf{Measure} & \textbf{NNC baseline} & \textbf{Traditional two-step} & \textbf{J-NNC}\\
 \midrule
 All & Pending & N/A & N/A & N/A\\
 \bottomrule
@@ -372,7 +510,7 @@ def update_main_tex() -> None:
     end = text.find(end_marker, content_start)
     if end < 0:
         return
-    new_block = "\n\n" + r"""This subsection reports the comparative results of J-NNC, the NNC baseline, and a traditional two-step baseline on three representative paths. The traditional two-step baseline follows the conventional serial pipeline: a fixed corner-smoothed path is first generated from the reference path, and conservative jerk-limited feedrate scheduling is then performed along that fixed path, following the smooth-then-schedule strategy used in local corner smoothing methods~\cite{Sencer2014}. The comparison between J-NNC and the NNC baseline mainly evaluates the role of explicit execution-layer kinematic projection for learned direct control, whereas the comparison between J-NNC and the traditional two-step baseline evaluates whether closed-loop one-step tolerance-band planning can improve efficiency and dynamic-constraint utilization compared with a serial smooth-then-schedule pipeline.
+    new_block = "\n\n" + r"""This subsection reports the comparative results of J-NNC, the NNC baseline, and a traditional two-step baseline on three representative paths. The traditional two-step baseline follows the conventional serial pipeline: a fixed corner-smoothed path is first generated from the reference path, and conservative jerk-limited feedrate scheduling is then performed along that fixed path, following the smooth-then-schedule strategy used in local corner smoothing methods~\cite{Sencer2014}. The comparison between J-NNC and the NNC baseline mainly evaluates the role of explicit execution-layer kinematic projection for learned direct control, whereas the comparison between J-NNC and the traditional two-step baseline evaluates whether closed-loop one-step tolerance-band planning can improve efficiency and dynamic-limit use compared with a serial smooth-then-schedule pipeline.
 
 \IfFileExists{generated/main_results_table.tex}{
 \input{generated/main_results_table.tex}
@@ -386,29 +524,29 @@ def update_main_tex() -> None:
 """ + fallback_efficiency_block() + r"""
 }
 
-\tabref{tab:main_results} reports path advancement, contour error, linear-jerk exceedance, and termination time for the three methods. \tabref{tab:efficiency_utilization} then isolates the feedrate and dynamic-constraint utilization comparison between J-NNC and the traditional two-step baseline. The active jerk reach rate is reported together with the maximum relative linear-jerk exceedance; a higher reach rate is meaningful only when the exceedance remains zero or sufficiently small.
+\tabref{tab:main_results} reports the three core comparison measures: peak contour error, peak relative exceedance of the linear-jerk limit, and elapsed interpolation time. \tabref{tab:efficiency_utilization} then isolates how the traditional two-step baseline and J-NNC use the available feedrate, acceleration, and jerk-limit margins. Mean feedrate use reflects the average use of the commanded feedrate limit. The 95th-percentile acceleration use indicates whether the acceleration constraint is substantially invoked. The active jerk-limit engagement rate measures how often the trajectory operates near the jerk limit during active acceleration phases. This metric is meaningful only when the corresponding jerk exceedance remains zero.
 
-Compared with the NNC baseline, J-NNC mainly improves dynamic feasibility rather than merely reducing the nominal execution time. The NNC baseline reaches full progress on the square and butterfly paths, but its maximum relative linear-jerk exceedance is $3199.000$ on all three paths, and it fails to complete the circular path within the maximum step budget. Therefore, the shorter NNC times on the square and butterfly paths do not indicate a better executable trajectory; they are obtained by applying unconstrained policy outputs that violate the jerk limit. In contrast, J-NNC completes all three paths with zero linear-jerk exceedance, while also keeping the circular-path maximum contour error much smaller than the NNC baseline.
+The comparison with NNC mainly highlights dynamic feasibility. Although NNC gives shorter times on the square and butterfly paths, those times arise from unconstrained direct policy outputs with severe linear-jerk exceedance. The shorter NNC time is not physically meaningful because the executed command violates the prescribed jerk constraint. J-NNC instead keeps the peak relative exceedance of the linear-jerk limit at zero on all three paths and also reduces the circular-path peak contour error substantially relative to NNC.
 
-Compared with the traditional two-step baseline, J-NNC mainly improves efficiency and dynamic-limit utilization. Both methods satisfy the jerk constraint, but J-NNC reduces the termination time from $24.780$ s to $12.192$ s on the square path, from $17.499$ s to $9.117$ s on the circular path, and from $15.360$ s to $10.480$ s on the butterfly path. \tabref{tab:efficiency_utilization} further shows that J-NNC has higher mean feedrate utilization on all three paths and reaches the active jerk bound more frequently, whereas the two-step baseline remains conservative after the geometric smoothing stage. This indicates that the proposed closed-loop planner uses the tolerance band and the kinematic limits jointly, instead of fixing the geometry first and then scheduling a cautious feedrate along that fixed curve.
+Compared with the traditional two-step baseline, J-NNC mainly improves efficiency under the same jerk-feasibility requirement. Both methods satisfy the jerk constraint, but J-NNC reduces the elapsed interpolation time from $24.780$ s to $12.192$ s on the square path, from $17.499$ s to $9.117$ s on the circular path, and from $15.360$ s to $10.480$ s on the butterfly path. The dynamic-limit use measures in \tabref{tab:efficiency_utilization} explain this difference: J-NNC has higher mean feedrate use and operates near the jerk limit more frequently during active acceleration phases, whereas the two-step baseline remains conservative after the geometric smoothing stage. This indicates that the proposed closed-loop planner uses the tolerance band and the kinematic limits jointly, instead of fixing the geometry first and then scheduling a cautious feedrate along that fixed curve.
 
 \IfFileExists{figures/generated/two_step_comparison.pdf}{
 \begin{figure}[!htbp]
 \centering
-\includegraphics[width=0.96\linewidth]{figures/generated/two_step_comparison.pdf}
-\caption{Square-path comparison between J-NNC and the traditional two-step baseline: (a) trajectory within the tolerance band; (b) zoomed corner transition; (c) path-travel-aligned feedrate utilization $v/V_{\max}$; (d) path-travel-aligned signed linear-jerk utilization $j/J_{\max}$.}
+\includegraphics[width=0.98\linewidth]{figures/generated/two_step_comparison.pdf}
+\caption{Square-path comparison between J-NNC and the traditional two-step baseline: (a) square path trajectory; (b) corner-transition zoom; (c) path-travel-aligned feedrate use $v/V_{\max}$; (d) path-travel-aligned KCM-projected signed acceleration use $a/A_{\max}$; (e) path-travel-aligned KCM-projected signed linear-jerk use $j/J_{\max}$.}
 \label{fig:two_step_comparison}
 \end{figure}
 }{
 \begin{figure}[!htbp]
 \centering
 \fbox{\parbox{0.9\linewidth}{\centering \vspace{2.8cm} Placeholder for the square-path comparison between J-NNC and the traditional two-step baseline \vspace{2.8cm}}}
-\caption{Square-path comparison between J-NNC and the traditional two-step baseline: (a) trajectory within the tolerance band; (b) zoomed corner transition; (c) path-travel-aligned feedrate utilization $v/V_{\max}$; (d) path-travel-aligned signed linear-jerk utilization $j/J_{\max}$.}
+\caption{Square-path comparison between J-NNC and the traditional two-step baseline: (a) square path trajectory; (b) corner-transition zoom; (c) path-travel-aligned feedrate use $v/V_{\max}$; (d) path-travel-aligned KCM-projected signed acceleration use $a/A_{\max}$; (e) path-travel-aligned KCM-projected signed linear-jerk use $j/J_{\max}$.}
 \label{fig:two_step_comparison}
 \end{figure}
 }
 
-\figref{fig:two_step_comparison} illustrates this difference on the square path. J-NNC starts the corner transition earlier within the tolerance band and maintains higher path-travel-aligned feedrate utilization, while its signed linear jerk remains within the prescribed $\pm J_{\max}$ bound. The two-step baseline also stays feasible, but its feedrate and jerk utilization are much lower, which explains the longer termination time reported in \tabref{tab:main_results}.
+\figref{fig:two_step_comparison} illustrates this difference on the square path. J-NNC starts the corner transition earlier within the tolerance band and maintains higher path-travel-aligned feedrate use, while the KCM-projected signed acceleration and signed linear jerk remain within the prescribed bounds. The two-step baseline also stays feasible, but its feedrate, acceleration, and jerk-limit use are lower, which explains the longer elapsed interpolation time reported in \tabref{tab:main_results}.
 
 """ 
     updated = text[:content_start] + new_block + text[end:]
@@ -453,7 +591,7 @@ def write_paper_tables_and_summary(
     generated_files: dict[str, str],
     warnings: list[str],
 ) -> dict[str, Any]:
-    metrics_by_path = merge_metrics_for_tables(two_step_metrics)
+    metrics_by_path = merge_metrics_for_tables(two_step_metrics, two_step_trace_paths)
 
     PAPER_GENERATED_DIR.mkdir(parents=True, exist_ok=True)
     MAIN_RESULTS_TEX.write_text(build_main_results_table(metrics_by_path), encoding="utf-8")
@@ -487,6 +625,8 @@ def write_paper_tables_and_summary(
         "max_relative_linear_jerk_exceedance",
         "termination_time_s",
         "mean_feedrate_utilization",
+        "p95_acceleration_utilization",
+        "p95_linear_jerk_utilization",
         "jerk_reach_rate_80_active",
         "effective_path_speed_mm_s",
         "max_smoothed_path_error_mm",
@@ -521,6 +661,7 @@ def save_two_step_comparison_figure(
     PAPER_FIGURES_DIR.mkdir(parents=True, exist_ok=True)
     dt = float(constraints.get("DT", 0.001))
     max_vel = max(float(constraints.get("MAX_VEL", 1.0)), 1e-12)
+    max_acc = max(float(constraints.get("MAX_ACC", 1.0)), 1e-12)
     max_jerk = max(float(constraints.get("MAX_JERK", 1.0)), 1e-12)
 
     def read_float(row: dict[str, Any], *keys: str, default: float = math.nan) -> float:
@@ -535,7 +676,7 @@ def save_two_step_comparison_figure(
                 return value
         return default
 
-    def trace_arrays(rows: list[dict[str, Any]]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def trace_arrays(rows: list[dict[str, Any]]) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         clean_rows = [
             row
             for row in rows
@@ -543,7 +684,7 @@ def save_two_step_comparison_figure(
         ]
         if not clean_rows:
             empty = np.asarray([], dtype=float)
-            return np.empty((0, 2), dtype=float), empty, empty, empty
+            return np.empty((0, 2), dtype=float), empty, empty, empty, empty
 
         points = as_point_array([[read_float(row, "x"), read_float(row, "y")] for row in clean_rows])
         projection = project_points_to_polyline(points, square_reference, closed=True)
@@ -562,43 +703,89 @@ def save_two_step_comparison_figure(
             time_values.append(value)
         time_arr = np.asarray(time_values, dtype=float)
 
+        velocity = np.asarray([read_float(row, "velocity", "v", default=math.nan) for row in clean_rows], dtype=float)
         v_util_values = [read_float(row, "v_over_vmax") for row in clean_rows]
         if all(math.isfinite(value) for value in v_util_values):
             v_util = np.asarray(v_util_values, dtype=float)
-        else:
-            velocity = np.asarray([read_float(row, "velocity", "v", default=0.0) for row in clean_rows], dtype=float)
+        elif np.all(np.isfinite(velocity)):
             v_util = np.abs(velocity) / max_vel
+        else:
+            velocity = np.zeros((len(clean_rows),), dtype=float)
+            v_util = np.zeros_like(velocity)
+
+        def jerk_limited_projection(command_velocity: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+            if not len(command_velocity):
+                empty = np.asarray([], dtype=float)
+                return empty, empty, empty
+            projected_v = np.zeros_like(command_velocity, dtype=float)
+            projected_a = np.zeros_like(command_velocity, dtype=float)
+            projected_j = np.zeros_like(command_velocity, dtype=float)
+            projected_v[0] = float(np.clip(command_velocity[0], 0.0, max_vel))
+            for idx in range(1, len(command_velocity)):
+                target_v = float(np.clip(command_velocity[idx], 0.0, max_vel))
+                target_a = float(np.clip((target_v - projected_v[idx - 1]) / dt, -max_acc, max_acc))
+                delta_a = float(np.clip(target_a - projected_a[idx - 1], -max_jerk * dt, max_jerk * dt))
+                next_a = float(np.clip(projected_a[idx - 1] + delta_a, -max_acc, max_acc))
+                next_v = projected_v[idx - 1] + next_a * dt
+                if (next_a > 0.0 and next_v > target_v) or (next_a < 0.0 and next_v < target_v):
+                    next_v = target_v
+                    next_a = float(np.clip((next_v - projected_v[idx - 1]) / dt, -max_acc, max_acc))
+                    delta_a = next_a - projected_a[idx - 1]
+                projected_v[idx] = float(np.clip(next_v, 0.0, max_vel))
+                projected_a[idx] = next_a
+                projected_j[idx] = float(np.clip(delta_a / dt, -max_jerk, max_jerk))
+            return projected_v, projected_a, projected_j
+
+        acceleration_values = [read_float(row, "acceleration", "a") for row in clean_rows]
+        if all(math.isfinite(value) for value in acceleration_values):
+            acceleration = np.asarray(acceleration_values, dtype=float)
+            projected_jerk = None
+        elif len(velocity) >= 2 and np.all(np.isfinite(velocity)):
+            velocity, acceleration, projected_jerk = jerk_limited_projection(velocity)
+            v_util = np.abs(velocity) / max_vel
+        else:
+            acceleration = np.zeros_like(v_util)
+            projected_jerk = np.zeros_like(v_util)
+        a_ratio = acceleration / max_acc
 
         j_util_values = [read_float(row, "abs_j_over_jmax") for row in clean_rows]
         jerk = np.asarray([read_float(row, "jerk", "j") for row in clean_rows], dtype=float)
         if np.all(np.isfinite(jerk)):
             j_ratio = jerk / max_jerk
+        elif projected_jerk is not None and len(projected_jerk):
+            j_ratio = projected_jerk / max_jerk
         elif all(math.isfinite(value) for value in j_util_values):
             j_ratio = np.asarray(j_util_values, dtype=float)
         else:
-            velocity = np.asarray([read_float(row, "velocity", "v", default=0.0) for row in clean_rows], dtype=float)
-            if len(velocity) >= 3 and np.all(np.diff(time_arr) > 0.0):
-                acceleration = np.diff(velocity, prepend=velocity[0]) / dt
+            if len(acceleration) >= 2 and np.all(np.diff(time_arr) > 0.0):
                 raw_jerk = np.diff(acceleration, prepend=acceleration[0]) / dt
                 jerk = np.clip(raw_jerk, -max_jerk, max_jerk)
                 j_ratio = jerk / max_jerk
             else:
                 j_ratio = np.zeros_like(v_util)
 
-        return points, travel, np.clip(v_util, 0.0, None), np.clip(j_ratio, -1.0, 1.0)
+        return points, travel, np.clip(v_util, 0.0, None), np.clip(a_ratio, -1.2, 1.2), np.clip(j_ratio, -1.0, 1.0)
 
-    two_step_points, two_step_travel, two_step_v_util, two_step_j_ratio = trace_arrays(square_trace_rows)
-    jnnc_points, jnnc_travel, jnnc_v_util, jnnc_j_ratio = trace_arrays(jnnc_trace_rows or [])
+    two_step_points, two_step_travel, two_step_v_util, two_step_a_ratio, two_step_j_ratio = trace_arrays(square_trace_rows)
+    jnnc_points, jnnc_travel, jnnc_v_util, jnnc_a_ratio, jnnc_j_ratio = trace_arrays(jnnc_trace_rows or [])
 
     left_path, right_path = generate_offset_paths(square_reference, half_epsilon, closed=True)
     left = as_point_array(left_path)
     right = as_point_array(right_path)
 
-    fig, axes_grid = plt.subplots(2, 2, figsize=(10.4, 7.4), dpi=220)
-    axes = axes_grid.reshape(-1)
+    fig = plt.figure(figsize=(10.8, 8.4), dpi=220)
+    grid = fig.add_gridspec(3, 2)
+    axes = [
+        fig.add_subplot(grid[0, 0]),
+        fig.add_subplot(grid[0, 1]),
+        fig.add_subplot(grid[1, 0]),
+        fig.add_subplot(grid[1, 1]),
+        fig.add_subplot(grid[2, :]),
+    ]
     fig.patch.set_facecolor("#fcfcfe")
     for ax in axes:
         ax.grid(True, linestyle=":", linewidth=0.8, alpha=0.28)
+        ax.tick_params(labelsize=7)
 
     def decimate_points(values: np.ndarray, max_points: int = 3000) -> np.ndarray:
         if len(values) <= max_points:
@@ -660,9 +847,9 @@ def save_two_step_comparison_figure(
         points = decimate_points(jnnc_points)
         ax.plot(points[:, 0], points[:, 1], color="#2b6cb0", linewidth=1.25, label="J-NNC")
     ax.set_aspect("equal", adjustable="box")
-    ax.set_title("(a) Square path trajectory")
-    ax.set_xlabel("x [mm]")
-    ax.set_ylabel("y [mm]")
+    ax.set_title("(a) Square path trajectory", fontsize=9)
+    ax.set_xlabel("x [mm]", fontsize=8)
+    ax.set_ylabel("y [mm]", fontsize=8)
     ax.legend(loc="best", fontsize=8)
 
     ax = axes[1]
@@ -682,9 +869,9 @@ def save_two_step_comparison_figure(
     ax.set_xlim(94.5, 104.5)
     ax.set_ylim(-5.0, 5.0)
     ax.set_aspect("equal", adjustable="box")
-    ax.set_title("(b) Corner-transition zoom")
-    ax.set_xlabel("x [mm]")
-    ax.set_ylabel("y [mm]")
+    ax.set_title("(b) Corner-transition zoom", fontsize=9)
+    ax.set_xlabel("x [mm]", fontsize=8)
+    ax.set_ylabel("y [mm]", fontsize=8)
     ax.legend(loc="upper left", fontsize=8)
 
     two_step_v_travel, two_step_v_plot = aggregate_series(two_step_travel, two_step_v_util, bin_width=2.0, mode="mean")
@@ -692,12 +879,51 @@ def save_two_step_comparison_figure(
     plot_series(axes[2], two_step_v_travel, two_step_v_plot, color="#c43c39", linewidth=1.35, label="Traditional two-step")
     plot_series(axes[2], jnnc_v_travel, jnnc_v_plot, color="#2b6cb0", linewidth=1.25, label="J-NNC")
     axes[2].axhline(1.0, color="#c53030", linewidth=1.0, linestyle=":")
-    axes[2].set_title("(c) Feedrate utilization")
-    axes[2].set_xlabel("Path travel [mm]")
-    axes[2].set_ylabel(r"$v/V_{\max}$")
+    axes[2].set_title("(c) Feedrate use", fontsize=9)
+    axes[2].set_xlabel("Path travel [mm]", fontsize=8)
+    axes[2].set_ylabel(r"$v/V_{\max}$", fontsize=8)
     v_values = np.concatenate([two_step_v_plot, jnnc_v_plot]) if len(jnnc_v_plot) else two_step_v_plot
     axes[2].set_ylim(0.0, max(1.05, float(np.nanmax(v_values)) * 1.05 if v_values.size else 1.05))
     axes[2].legend(loc="upper right", fontsize=8)
+
+    two_step_a_travel, two_step_a_plot = aggregate_series(
+        two_step_travel,
+        two_step_a_ratio,
+        bin_width=2.0,
+        mode="signed_peak",
+    )
+    jnnc_a_travel, jnnc_a_plot = aggregate_series(
+        jnnc_travel,
+        jnnc_a_ratio,
+        bin_width=2.0,
+        mode="signed_peak",
+    )
+    plot_series(
+        axes[3],
+        two_step_a_travel,
+        two_step_a_plot,
+        color="#c43c39",
+        linewidth=1.20,
+        label="Traditional two-step",
+        drawstyle="steps-mid",
+    )
+    plot_series(
+        axes[3],
+        jnnc_a_travel,
+        jnnc_a_plot,
+        color="#2b6cb0",
+        linewidth=1.05,
+        label="J-NNC",
+        drawstyle="steps-mid",
+    )
+    axes[3].axhline(1.0, color="#2f9e44", linewidth=1.15, linestyle="--", zorder=5)
+    axes[3].axhline(-1.0, color="#2f9e44", linewidth=1.15, linestyle=":", zorder=5)
+    axes[3].axhline(0.0, color="#4a5568", linewidth=0.7, linestyle="-", alpha=0.35)
+    axes[3].set_title("(d) KCM-projected acceleration use", fontsize=9)
+    axes[3].set_xlabel("Path travel [mm]", fontsize=8)
+    axes[3].set_ylabel(r"$a/A_{\max}$", fontsize=8)
+    axes[3].set_ylim(-1.12, 1.12)
+    axes[3].legend(loc="upper right", fontsize=8)
 
     two_step_j_travel, two_step_j_plot = aggregate_series(
         two_step_travel,
@@ -712,7 +938,7 @@ def save_two_step_comparison_figure(
         mode="signed_peak",
     )
     plot_series(
-        axes[3],
+        axes[4],
         two_step_j_travel,
         two_step_j_plot,
         color="#c43c39",
@@ -721,7 +947,7 @@ def save_two_step_comparison_figure(
         drawstyle="steps-mid",
     )
     plot_series(
-        axes[3],
+        axes[4],
         jnnc_j_travel,
         jnnc_j_plot,
         color="#2b6cb0",
@@ -729,22 +955,22 @@ def save_two_step_comparison_figure(
         label="J-NNC",
         drawstyle="steps-mid",
     )
-    axes[3].axhline(1.0, color="#2f9e44", linewidth=1.0, linestyle="--")
-    axes[3].axhline(-1.0, color="#2f9e44", linewidth=1.0, linestyle=":")
-    axes[3].axhline(0.0, color="#4a5568", linewidth=0.7, linestyle="-", alpha=0.35)
-    axes[3].set_title("(d) Signed linear jerk utilization")
-    axes[3].set_xlabel("Path travel [mm]")
-    axes[3].set_ylabel(r"$j/J_{\max}$")
-    axes[3].set_ylim(-1.08, 1.08)
-    axes[3].legend(loc="upper right", fontsize=8)
+    axes[4].axhline(1.0, color="#2f9e44", linewidth=1.15, linestyle="--", zorder=5)
+    axes[4].axhline(-1.0, color="#2f9e44", linewidth=1.15, linestyle=":", zorder=5)
+    axes[4].axhline(0.0, color="#4a5568", linewidth=0.7, linestyle="-", alpha=0.35)
+    axes[4].set_title("(e) KCM-projected linear-jerk use", fontsize=9)
+    axes[4].set_xlabel("Path travel [mm]", fontsize=8)
+    axes[4].set_ylabel(r"$j/J_{\max}$", fontsize=8)
+    axes[4].set_ylim(-1.12, 1.12)
+    axes[4].legend(loc="upper right", fontsize=8)
 
     max_travel = 0.0
     for travel_arr in (two_step_travel, jnnc_travel):
         if len(travel_arr):
             max_travel = max(max_travel, float(np.nanmax(travel_arr)))
     if max_travel > 0.0:
-        axes[2].set_xlim(0.0, max_travel * 1.01)
-        axes[3].set_xlim(0.0, max_travel * 1.01)
+        for ax in axes[2:]:
+            ax.set_xlim(0.0, max_travel * 1.01)
 
     fig.tight_layout()
     outputs = {}

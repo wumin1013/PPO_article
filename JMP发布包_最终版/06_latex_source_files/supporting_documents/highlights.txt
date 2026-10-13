@@ -1,0 +1,3 @@
+Joint steering, feedrate and preview decisions generate CNC command trajectories.
+Planar kinematic projection enforces velocity, acceleration and jerk limits.
+Startup and braking are refined with complete-trajectory feasibility checks.

@@ -1,0 +1,830 @@
+\begin{thebibliography}{}
+
+\bibitem [\protect \citeauthoryear {%
+Duan%
+\ \BBA {} Okwudire%
+}{%
+Duan%
+\ \BBA {} Okwudire%
+}{%
+{\protect \APACyear {2016}}%
+}]{%
+Duan2016}
+\APACinsertmetastar {%
+Duan2016}%
+\begin{APACrefauthors}%
+Duan, M.%
+\BCBT {}\ \BBA {} Okwudire, C.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2016}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Minimum-time cornering for {CNC} machines using an
+  optimal control method with {NURBS} parameterization} {Minimum-time cornering
+  for {CNC} machines using an optimal control method with {NURBS}
+  parameterization}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{The International Journal of Advanced Manufacturing
+  Technology}{85}{5--8}{1405--1418}.
+\newblock
+\begin{APACrefDOI} \doi{10.1007/s00170-015-7969-2} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Erkorkmaz%
+\ \BBA {} Altintas%
+}{%
+Erkorkmaz%
+\ \BBA {} Altintas%
+}{%
+{\protect \APACyear {2001}}%
+}]{%
+Erkorkmaz2001}
+\APACinsertmetastar {%
+Erkorkmaz2001}%
+\begin{APACrefauthors}%
+Erkorkmaz, K.%
+\BCBT {}\ \BBA {} Altintas, Y.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2001}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {High speed {CNC} system design. Part {I}: jerk limited
+  trajectory generation and quintic spline interpolation} {High speed {CNC}
+  system design. part {I}: jerk limited trajectory generation and quintic
+  spline interpolation}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{International Journal of Machine Tools and
+  Manufacture}{41}{9}{1323--1345}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/S0890-6955(01)00002-5} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Fan%
+, Lee%
+\BCBL {}\ \BBA {} Chen%
+}{%
+Fan%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2015}}%
+}]{%
+Fan2015}
+\APACinsertmetastar {%
+Fan2015}%
+\begin{APACrefauthors}%
+Fan, W.%
+, Lee, C\BHBI H.%
+\BCBL {}\ \BBA {} Chen, J\BHBI H.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2015}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {A realtime curvature-smooth interpolation scheme and
+  motion planning for {CNC} machining of short line segments} {A realtime
+  curvature-smooth interpolation scheme and motion planning for {CNC} machining
+  of short line segments}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{International Journal of Machine Tools and
+  Manufacture}{96}{}{27--46}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.ijmachtools.2015.04.009} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Hu%
+\ \protect \BOthers {.}}{%
+Hu%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2024}}%
+}]{%
+Hu2024}
+\APACinsertmetastar {%
+Hu2024}%
+\begin{APACrefauthors}%
+Hu, Y.%
+, Jiang, X.%
+, Huo, G.%
+, Su, C.%
+, Li, H.%
+, Shen, L\BHBI Y.%
+\BCBL {}\ \BBA {} Zheng, Z.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2024}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Enhancing five-axis {CNC} toolpath smoothing: Overlap
+  elimination with asymmetrical {B}-splines} {Enhancing five-axis {CNC}
+  toolpath smoothing: Overlap elimination with asymmetrical
+  {B}-splines}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{CIRP Journal of Manufacturing Science and
+  Technology}{52}{}{36--57}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.cirpj.2024.05.013} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Lee%
+, Lin%
+, Pan%
+\BCBL {}\ \BBA {} Lin%
+}{%
+Lee%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2011}}%
+}]{%
+Lee2011}
+\APACinsertmetastar {%
+Lee2011}%
+\begin{APACrefauthors}%
+Lee, A\BHBI C.%
+, Lin, M\BHBI T.%
+, Pan, Y\BHBI R.%
+\BCBL {}\ \BBA {} Lin, W\BHBI Y.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2011}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {The feedrate scheduling of {NURBS} interpolator for
+  {CNC} machine tools} {The feedrate scheduling of {NURBS} interpolator for
+  {CNC} machine tools}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Computer-Aided Design}{43}{6}{612--628}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.cad.2011.02.014} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+B.~Li%
+, Zhang%
+\BCBL {}\ \BBA {} Ye%
+}{%
+B.~Li%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2017}}%
+}]{%
+LiDriving2017}
+\APACinsertmetastar {%
+LiDriving2017}%
+\begin{APACrefauthors}%
+Li, B.%
+, Zhang, H.%
+\BCBL {}\ \BBA {} Ye, P.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2017}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Driving force constraint corner smoothing method for
+  high-speed machine tools} {Driving force constraint corner smoothing method
+  for high-speed machine tools}.{\BBCQ}
+\newblock
+\BIn{} \APACrefbtitle {{Proceedings of the ASME 2017 International Design
+  Engineering Technical Conferences and Computers and Information in
+  Engineering Conference}} {{Proceedings of the ASME 2017 International Design
+  Engineering Technical Conferences and Computers and Information in
+  Engineering Conference}}\ (\BVOL~6, \BPG~V006T10A012).
+\newblock
+\APACaddressPublisher{}{American Society of Mechanical Engineers}.
+\newblock
+\begin{APACrefDOI} \doi{10.1115/DETC2017-67466} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+B.~Li%
+, Zhang%
+, Ye%
+\BCBL {}\ \BBA {} Wang%
+}{%
+B.~Li%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2020}}%
+}]{%
+Li2020}
+\APACinsertmetastar {%
+Li2020}%
+\begin{APACrefauthors}%
+Li, B.%
+, Zhang, H.%
+, Ye, P.%
+\BCBL {}\ \BBA {} Wang, J.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2020}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Trajectory smoothing method using reinforcement learning
+  for computer numerical control machine tools} {Trajectory smoothing method
+  using reinforcement learning for computer numerical control machine
+  tools}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Robotics and Computer-Integrated
+  Manufacturing}{61}{}{101847}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.rcim.2019.101847} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+H.~Li%
+\ \protect \BOthers {.}}{%
+H.~Li%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2023}}%
+}]{%
+Li2023}
+\APACinsertmetastar {%
+Li2023}%
+\begin{APACrefauthors}%
+Li, H.%
+, Jiang, X.%
+, Huo, G.%
+, Su, C.%
+, Zhou, S.%
+, Wang, B.%
+\BDBL {}Zheng, Z.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2023}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {An integrated trajectory smoothing method for lines and
+  arcs mixed toolpath based on motion overlapping strategy} {An integrated
+  trajectory smoothing method for lines and arcs mixed toolpath based on motion
+  overlapping strategy}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Journal of Manufacturing Processes}{95}{}{242--265}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.jmapro.2023.04.017} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Pham%
+, De~Magistris%
+\BCBL {}\ \BBA {} Tachibana%
+}{%
+Pham%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2018}}%
+}]{%
+Pham2018}
+\APACinsertmetastar {%
+Pham2018}%
+\begin{APACrefauthors}%
+Pham, T\BHBI H.%
+, De~Magistris, G.%
+\BCBL {}\ \BBA {} Tachibana, R.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2018}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {{OptLayer} -- Practical Constrained Optimization for
+  Deep Reinforcement Learning in the Real World} {{OptLayer} -- practical
+  constrained optimization for deep reinforcement learning in the real
+  world}.{\BBCQ}
+\newblock
+\BIn{} \APACrefbtitle {{2018 IEEE International Conference on Robotics and
+  Automation (ICRA)}} {{2018 IEEE International Conference on Robotics and
+  Automation (ICRA)}}\ (\BPGS\ 6236--6243).
+\newblock
+\APACaddressPublisher{}{IEEE}.
+\newblock
+\begin{APACrefDOI} \doi{10.1109/ICRA.2018.8460547} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Schulman%
+, Wolski%
+, Dhariwal%
+, Radford%
+\BCBL {}\ \BBA {} Klimov%
+}{%
+Schulman%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2017}}%
+}]{%
+Schulman2017PPO}
+\APACinsertmetastar {%
+Schulman2017PPO}%
+\begin{APACrefauthors}%
+Schulman, J.%
+, Wolski, F.%
+, Dhariwal, P.%
+, Radford, A.%
+\BCBL {}\ \BBA {} Klimov, O.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2017}{}{}.
+\newblock
+\APACrefbtitle {Proximal Policy Optimization Algorithms.} {Proximal policy
+  optimization algorithms.}
+\newblock
+\begin{APACrefURL} \url{https://arxiv.org/abs/1707.06347} \end{APACrefURL}
+\newblock
+\APACrefnote{arXiv preprint arXiv:1707.06347}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Sencer%
+, Ishizaki%
+\BCBL {}\ \BBA {} Shamoto%
+}{%
+Sencer%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2015}}%
+{\protect \APACexlab {{\protect \BCnt {1}}}}}]{%
+Sencer2014}
+\APACinsertmetastar {%
+Sencer2014}%
+\begin{APACrefauthors}%
+Sencer, B.%
+, Ishizaki, K.%
+\BCBL {}\ \BBA {} Shamoto, E.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2015{\protect \BCnt {1}}}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {A curvature optimal sharp corner smoothing algorithm for
+  high-speed feed motion generation of {NC} systems along linear tool paths} {A
+  curvature optimal sharp corner smoothing algorithm for high-speed feed motion
+  generation of {NC} systems along linear tool paths}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{The International Journal of Advanced Manufacturing
+  Technology}{76}{9--12}{1977--1992}.
+\newblock
+\begin{APACrefDOI} \doi{10.1007/s00170-014-6386-2} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Sencer%
+, Ishizaki%
+\BCBL {}\ \BBA {} Shamoto%
+}{%
+Sencer%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2015}}%
+{\protect \APACexlab {{\protect \BCnt {2}}}}}]{%
+Sencer2015}
+\APACinsertmetastar {%
+Sencer2015}%
+\begin{APACrefauthors}%
+Sencer, B.%
+, Ishizaki, K.%
+\BCBL {}\ \BBA {} Shamoto, E.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2015{\protect \BCnt {2}}}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {High speed cornering strategy with confined contour
+  error and vibration suppression for {CNC} machine tools} {High speed
+  cornering strategy with confined contour error and vibration suppression for
+  {CNC} machine tools}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{CIRP Annals}{64}{1}{369--372}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.cirp.2015.04.102} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Song%
+, Ma%
+, Zhong%
+\BCBL {}\ \BBA {} Yao%
+}{%
+Song%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2021}}%
+}]{%
+Song2021}
+\APACinsertmetastar {%
+Song2021}%
+\begin{APACrefauthors}%
+Song, D\BHBI N.%
+, Ma, J\BHBI W.%
+, Zhong, Y\BHBI G.%
+\BCBL {}\ \BBA {} Yao, J\BHBI J.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2021}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Global smoothing of short line segment toolpaths by
+  control-point-assigning-based geometric smoothing and {FIR} filtering-based
+  motion smoothing} {Global smoothing of short line segment toolpaths by
+  control-point-assigning-based geometric smoothing and {FIR} filtering-based
+  motion smoothing}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Mechanical Systems and Signal
+  Processing}{160}{}{107908}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.ymssp.2021.107908} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Song%
+, Zhong%
+\BCBL {}\ \BBA {} Ma%
+}{%
+Song%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2020}}%
+}]{%
+Song2020}
+\APACinsertmetastar {%
+Song2020}%
+\begin{APACrefauthors}%
+Song, D\BHBI N.%
+, Zhong, Y\BHBI G.%
+\BCBL {}\ \BBA {} Ma, J\BHBI W.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2020}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Look-ahead-window-based interval adaptive feedrate
+  scheduling for long five-axis spline toolpaths under axial drive constraints}
+  {Look-ahead-window-based interval adaptive feedrate scheduling for long
+  five-axis spline toolpaths under axial drive constraints}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Proceedings of the Institution of Mechanical Engineers,
+  Part B: Journal of Engineering Manufacture}{234}{13}{1656--1670}.
+\newblock
+\begin{APACrefDOI} \doi{10.1177/0954405420937538} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+S.~Sun%
+, Zhao%
+, Zhang%
+, Li%
+\BCBL {}\ \BBA {} Yu%
+}{%
+S.~Sun%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2024}}%
+}]{%
+Sun2024}
+\APACinsertmetastar {%
+Sun2024}%
+\begin{APACrefauthors}%
+Sun, S.%
+, Zhao, P.%
+, Zhang, T.%
+, Li, B.%
+\BCBL {}\ \BBA {} Yu, D.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2024}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Smoothing interpolation of five-axis tool path with less
+  feedrate fluctuation and higher computation efficiency} {Smoothing
+  interpolation of five-axis tool path with less feedrate fluctuation and
+  higher computation efficiency}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Journal of Manufacturing Processes}{109}{}{669--693}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.jmapro.2023.12.012} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Y.~Sun%
+, Jia%
+, Xu%
+, Chen%
+\BCBL {}\ \BBA {} Niu%
+}{%
+Y.~Sun%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2022}}%
+}]{%
+Sun2022}
+\APACinsertmetastar {%
+Sun2022}%
+\begin{APACrefauthors}%
+Sun, Y.%
+, Jia, J.%
+, Xu, J.%
+, Chen, M.%
+\BCBL {}\ \BBA {} Niu, J.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2022}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Path, feedrate and trajectory planning for free-form
+  surface machining: A state-of-the-art review} {Path, feedrate and trajectory
+  planning for free-form surface machining: A state-of-the-art review}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Chinese Journal of Aeronautics}{35}{8}{12--29}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.cja.2021.06.011} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Tajima%
+\ \BBA {} Sencer%
+}{%
+Tajima%
+\ \BBA {} Sencer%
+}{%
+{\protect \APACyear {2016}}%
+}]{%
+Tajima2016}
+\APACinsertmetastar {%
+Tajima2016}%
+\begin{APACrefauthors}%
+Tajima, S.%
+\BCBT {}\ \BBA {} Sencer, B.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2016}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Kinematic corner smoothing for high speed machine tools}
+  {Kinematic corner smoothing for high speed machine tools}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{International Journal of Machine Tools and
+  Manufacture}{108}{}{27--43}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.ijmachtools.2016.05.009} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Tsai%
+\ \BBA {} Huang%
+}{%
+Tsai%
+\ \BBA {} Huang%
+}{%
+{\protect \APACyear {2016}}%
+}]{%
+Tsai2016}
+\APACinsertmetastar {%
+Tsai2016}%
+\begin{APACrefauthors}%
+Tsai, M\BHBI S.%
+\BCBT {}\ \BBA {} Huang, Y\BHBI C.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2016}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {A novel integrated dynamic acceleration/deceleration
+  interpolation algorithm for a {CNC} controller} {A novel integrated dynamic
+  acceleration/deceleration interpolation algorithm for a {CNC}
+  controller}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{The International Journal of Advanced Manufacturing
+  Technology}{87}{1--4}{279--292}.
+\newblock
+\begin{APACrefDOI} \doi{10.1007/s00170-016-8444-4} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Tsai%
+, Nien%
+\BCBL {}\ \BBA {} Yau%
+}{%
+Tsai%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2010}}%
+}]{%
+Tsai2010}
+\APACinsertmetastar {%
+Tsai2010}%
+\begin{APACrefauthors}%
+Tsai, M\BHBI S.%
+, Nien, H\BHBI W.%
+\BCBL {}\ \BBA {} Yau, H\BHBI T.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2010}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Development of a real-time look-ahead interpolation
+  methodology with spline-fitting technique for high-speed machining}
+  {Development of a real-time look-ahead interpolation methodology with
+  spline-fitting technique for high-speed machining}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{The International Journal of Advanced Manufacturing
+  Technology}{47}{5--8}{621--638}.
+\newblock
+\begin{APACrefDOI} \doi{10.1007/s00170-009-2220-7} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Wu%
+, Ma%
+, Wei%
+, Liao%
+\BCBL {}\ \BBA {} Lu%
+}{%
+Wu%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2022}}%
+}]{%
+Wu2022}
+\APACinsertmetastar {%
+Wu2022}%
+\begin{APACrefauthors}%
+Wu, B.%
+, Ma, J.%
+, Wei, L.%
+, Liao, X.%
+\BCBL {}\ \BBA {} Lu, J.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2022}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {{NURBS} interpolator with scheduling scheme combining
+  cubic and quartic {S}-shaped feedrate profiles under drive and chord error
+  constraints} {{NURBS} interpolator with scheduling scheme combining cubic and
+  quartic {S}-shaped feedrate profiles under drive and chord error
+  constraints}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Computer-Aided Design}{152}{}{103380}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.cad.2022.103380} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Yan%
+, Zhang%
+, Xu%
+\BCBL {}\ \BBA {} Sun%
+}{%
+Yan%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2023}}%
+}]{%
+Yan2023}
+\APACinsertmetastar {%
+Yan2023}%
+\begin{APACrefauthors}%
+Yan, G.%
+, Zhang, D.%
+, Xu, J.%
+\BCBL {}\ \BBA {} Sun, Y.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2023}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Corner smoothing for {CNC} machining of linear tool
+  path: A review} {Corner smoothing for {CNC} machining of linear tool path: A
+  review}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Journal of Advanced Manufacturing Science and
+  Technology}{3}{2}{2023001}.
+\newblock
+\begin{APACrefDOI} \doi{10.51393/j.jamst.2023001} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Yang%
+, Shen%
+, Yuan%
+\BCBL {}\ \BBA {} Gao%
+}{%
+Yang%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2015}}%
+}]{%
+Yang2015}
+\APACinsertmetastar {%
+Yang2015}%
+\begin{APACrefauthors}%
+Yang, Z.%
+, Shen, L\BHBI Y.%
+, Yuan, C\BHBI M.%
+\BCBL {}\ \BBA {} Gao, X\BHBI S.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2015}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Curve fitting and optimal interpolation for {CNC}
+  machining under confined error using quadratic {B}-splines} {Curve fitting
+  and optimal interpolation for {CNC} machining under confined error using
+  quadratic {B}-splines}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Computer-Aided Design}{66}{}{62--72}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.cad.2015.04.010} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Zhang%
+, Ye%
+, Wu%
+\BCBL {}\ \BBA {} Zhang%
+}{%
+Zhang%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2018}}%
+}]{%
+Zhang2018}
+\APACinsertmetastar {%
+Zhang2018}%
+\begin{APACrefauthors}%
+Zhang, Y.%
+, Ye, P.%
+, Wu, J.%
+\BCBL {}\ \BBA {} Zhang, H.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2018}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {An optimal curvature-smooth transition algorithm with
+  axis jerk limitations along linear segments} {An optimal curvature-smooth
+  transition algorithm with axis jerk limitations along linear
+  segments}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{The International Journal of Advanced Manufacturing
+  Technology}{95}{1--4}{875--888}.
+\newblock
+\begin{APACrefDOI} \doi{10.1007/s00170-017-1274-1} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Zhang%
+, Zhang%
+, Shi%
+, Jiang%
+\BCBL {}\ \BBA {} Zhao%
+}{%
+Zhang%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2021}}%
+}]{%
+Zhang2021}
+\APACinsertmetastar {%
+Zhang2021}%
+\begin{APACrefauthors}%
+Zhang, Y.%
+, Zhang, H.%
+, Shi, J.%
+, Jiang, J.%
+\BCBL {}\ \BBA {} Zhao, M.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2021}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Development of an adaptive-feedrate planning and
+  iterative interpolator for parametric toolpath with normal jerk constraint}
+  {Development of an adaptive-feedrate planning and iterative interpolator for
+  parametric toolpath with normal jerk constraint}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{International Journal of Precision Engineering and
+  Manufacturing}{22}{1}{73--81}.
+\newblock
+\begin{APACrefDOI} \doi{10.1007/s12541-020-00440-7} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Zhao%
+, Zhu%
+\BCBL {}\ \BBA {} Ding%
+}{%
+Zhao%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2013}}%
+}]{%
+Zhao2013}
+\APACinsertmetastar {%
+Zhao2013}%
+\begin{APACrefauthors}%
+Zhao, H.%
+, Zhu, L.%
+\BCBL {}\ \BBA {} Ding, H.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2013}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {A real-time look-ahead interpolation methodology with
+  curvature-continuous {B}-spline transition scheme for {CNC} machining of
+  short line segments} {A real-time look-ahead interpolation methodology with
+  curvature-continuous {B}-spline transition scheme for {CNC} machining of
+  short line segments}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{International Journal of Machine Tools and
+  Manufacture}{65}{}{88--98}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.ijmachtools.2012.10.005} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\end{thebibliography}

@@ -1,0 +1,28 @@
+{
+  "steps": [
+    {
+      "name": "kinematics_v10",
+      "script": "v10/src/plot_kinematics_clarity_v10.py",
+      "arguments": [
+        "--root",
+        "{v9}",
+        "--base",
+        "{workspace}",
+        "--output",
+        "{figures}"
+      ]
+    }
+  ],
+  "reference_directory": "v10/presentation_reference",
+  "compare_files": [
+    "kinematics_dense.pdf",
+    "kinematics_dense.png",
+    "kinematics_dense_source.json",
+    "kinematics_dense_source.npz",
+    "kinematics_original.pdf",
+    "kinematics_original.png",
+    "kinematics_original_source.json",
+    "kinematics_original_source.npz",
+    "kinematics_v10_receipt.json"
+  ]
+}

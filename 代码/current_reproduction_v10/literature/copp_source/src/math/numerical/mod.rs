@@ -1,0 +1,11 @@
+//! Numerical kernels: LP and scalar helper utilities.
+//!
+//! # Method identity
+//! - `general`: vector products.
+//! - `lp`: incremental LP solvers in 1D/2D and warm-start helpers.
+
+mod general;
+mod lp;
+
+pub(crate) use general::*;
+pub(crate) use lp::*;

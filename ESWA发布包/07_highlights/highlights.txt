@@ -1,0 +1,5 @@
+Joint steering, feedrate and preview shape motion within a tolerance band.
+Planar action projection enforces velocity, acceleration and jerk limits.
+Long-path speed deficit is no greater than either baseline at all 34 corners.
+Dense-path time falls by 25.65% versus two-step planning.
+Dense-path time is 6.07% shorter than the fastest valid two-action result.

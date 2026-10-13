@@ -1,0 +1,168 @@
+\begin{thebibliography}{}
+
+\bibitem [\protect \citeauthoryear {%
+B.~Li%
+, Zhang%
+, Ye%
+\BCBL {}\ \BBA {} Wang%
+}{%
+B.~Li%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2020}}%
+}]{%
+Li2020}
+\APACinsertmetastar {%
+Li2020}%
+\begin{APACrefauthors}%
+Li, B.%
+, Zhang, H.%
+, Ye, P.%
+\BCBL {}\ \BBA {} Wang, J.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2020}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {Trajectory smoothing method using reinforcement learning
+  for computer numerical control machine tools} {Trajectory smoothing method
+  using reinforcement learning for computer numerical control machine
+  tools}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Robotics and Computer-Integrated
+  Manufacturing}{61}{}{101847}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.rcim.2019.101847} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+H.~Li%
+\ \protect \BOthers {.}}{%
+H.~Li%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2023}}%
+}]{%
+Li2023}
+\APACinsertmetastar {%
+Li2023}%
+\begin{APACrefauthors}%
+Li, H.%
+, Jiang, X.%
+, Huo, G.%
+, Su, C.%
+, Zhou, S.%
+, Wang, B.%
+\BDBL {}Zheng, Z.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2023}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {An integrated trajectory smoothing method for lines and
+  arcs mixed toolpath based on motion overlapping strategy} {An integrated
+  trajectory smoothing method for lines and arcs mixed toolpath based on motion
+  overlapping strategy}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{Journal of Manufacturing Processes}{95}{}{242--265}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.jmapro.2023.04.017} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Pham%
+, De~Magistris%
+\BCBL {}\ \BBA {} Tachibana%
+}{%
+Pham%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2018}}%
+}]{%
+Pham2018}
+\APACinsertmetastar {%
+Pham2018}%
+\begin{APACrefauthors}%
+Pham, T\BHBI H.%
+, De~Magistris, G.%
+\BCBL {}\ \BBA {} Tachibana, R.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2018}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {{OptLayer} -- Practical Constrained Optimization for
+  Deep Reinforcement Learning in the Real World} {{OptLayer} -- practical
+  constrained optimization for deep reinforcement learning in the real
+  world}.{\BBCQ}
+\newblock
+\BIn{} \APACrefbtitle {{2018 IEEE International Conference on Robotics and
+  Automation (ICRA)}} {{2018 IEEE International Conference on Robotics and
+  Automation (ICRA)}}\ (\BPGS\ 6236--6243).
+\newblock
+\APACaddressPublisher{}{IEEE}.
+\newblock
+\begin{APACrefDOI} \doi{10.1109/ICRA.2018.8460547} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Sencer%
+, Ishizaki%
+\BCBL {}\ \BBA {} Shamoto%
+}{%
+Sencer%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2015}}%
+{\protect \APACexlab {{\protect \BCnt {1}}}}}]{%
+Sencer2014}
+\APACinsertmetastar {%
+Sencer2014}%
+\begin{APACrefauthors}%
+Sencer, B.%
+, Ishizaki, K.%
+\BCBL {}\ \BBA {} Shamoto, E.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2015{\protect \BCnt {1}}}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {A curvature optimal sharp corner smoothing algorithm for
+  high-speed feed motion generation of {NC} systems along linear tool paths} {A
+  curvature optimal sharp corner smoothing algorithm for high-speed feed motion
+  generation of {NC} systems along linear tool paths}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{The International Journal of Advanced Manufacturing
+  Technology}{76}{9--12}{1977--1992}.
+\newblock
+\begin{APACrefDOI} \doi{10.1007/s00170-014-6386-2} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\bibitem [\protect \citeauthoryear {%
+Sencer%
+, Ishizaki%
+\BCBL {}\ \BBA {} Shamoto%
+}{%
+Sencer%
+\ \protect \BOthers {.}}{%
+{\protect \APACyear {2015}}%
+{\protect \APACexlab {{\protect \BCnt {2}}}}}]{%
+Sencer2015}
+\APACinsertmetastar {%
+Sencer2015}%
+\begin{APACrefauthors}%
+Sencer, B.%
+, Ishizaki, K.%
+\BCBL {}\ \BBA {} Shamoto, E.%
+\end{APACrefauthors}%
+\unskip\
+\newblock
+\APACrefYearMonthDay{2015{\protect \BCnt {2}}}{}{}.
+\newblock
+{\BBOQ}\APACrefatitle {High speed cornering strategy with confined contour
+  error and vibration suppression for {CNC} machine tools} {High speed
+  cornering strategy with confined contour error and vibration suppression for
+  {CNC} machine tools}.{\BBCQ}
+\newblock
+\APACjournalVolNumPages{CIRP Annals}{64}{1}{369--372}.
+\newblock
+\begin{APACrefDOI} \doi{10.1016/j.cirp.2015.04.102} \end{APACrefDOI}
+\PrintBackRefs{\CurrentBib}
+
+\end{thebibliography}

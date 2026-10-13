@@ -1,0 +1,6 @@
+# Keep the exact source and manuscript bytes; preserve release checksums.
+* -text
+
+# Only model weights are stored in Git LFS; research data remain local.
+*.pt filter=lfs diff=lfs merge=lfs -text
+*.pth filter=lfs diff=lfs merge=lfs -text

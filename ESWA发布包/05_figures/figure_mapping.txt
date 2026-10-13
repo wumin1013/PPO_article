@@ -1,0 +1,11 @@
+Figure_1: architecture comparison
+Figure_2: reference path and tolerance corridor
+Figure_3: closed-loop framework
+Figure_4: long-route geometry and angle coverage
+Figure_5: NNC constraint violations
+Figure_6: aligned local V/A/J and speed deficit
+Figure_7: representative local trajectories
+Figure_8: all-corner loss and complete-route cruising
+Figure_9: dense case and two-action comparison
+Figure_B1: compact action-motion correspondence
+Figure_C1: complete V/A/J and terminal braking

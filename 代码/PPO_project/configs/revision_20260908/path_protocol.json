@@ -1,0 +1,19 @@
+{
+  "schema_version": "revision-path-protocol-v1",
+  "frozen_date": "2026-09-08",
+  "reference_manifest": "PPO_project/data/revision_20260908/manifest.json",
+  "data_source": "synthetic; no industrial CAM data has been supplied",
+  "training_paths": ["mixed_lengths_train", "dense_corners_train", "line_curve_train"],
+  "validation_paths": ["mixed_lengths_validation", "dense_corners_validation", "line_curve_validation"],
+  "held_out_test_paths": ["mixed_lengths_test", "dense_corners_test", "line_curve_test"],
+  "historical_regression_only": ["square", "circle", "butterfly"],
+  "split_design": "Distinct corner sequences, notch layout, segment counts and line/curve primitive composition. No rotation or uniform scaling copies across splits.",
+  "test_policy": "Algorithm performance on the held-out split is evaluated only after final model/configuration freeze. Any use for model selection converts those data into development data.",
+  "coordinates": "XY positions in mm; timestamps in seconds; angles in radians",
+  "cam_discretization_error": "Zero for defining polylines; at most 0.005 mm analytic-curve-to-polyline deviation for sampled cubic Bezier primitives; independent of planner tolerance.",
+  "planner_tolerance": "environment.epsilon is full band width. Independent one-sided geometric tolerance is epsilon/2, without silently adding CAM discretization error.",
+  "ordered_coverage": "Reference witnesses retain all vertices; default spacing min(0.25mm, one-sided tolerance/2). Match within one-sided tolerance minus spacing/2, in monotonic execution order. This conservative order certificate is not an exact continuous Frechet solver.",
+  "kinematics": "Compute backward differences from timestamps and position commands aligned at the interval endpoint. Initial derivatives must be explicitly supplied or excluded as unknown. Scalar feed, heading and Cartesian-axis derivatives are reported separately.",
+  "failure_policy": "Retain all incomplete, timeout, stall, geometry and motion-constraint failures. Timing statistics identify successful seed/path pairs explicitly.",
+  "statistical_unit": "Independent training seed and path, never interpolation points. Main claims require at least five independent training seeds per selected learning configuration."
+}

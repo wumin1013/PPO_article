@@ -1,0 +1,312 @@
+"""
+PPO算法实现模块
+包含策略网络、价值网络和PPO训练算法
+"""
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
+import numpy as np
+from src.utils import rl_utils
+from typing import Optional
+
+
+class ValueNet(nn.Module):
+    """价值网络 - 估计状态价值"""
+    
+    def __init__(self, state_dim: int, hidden_dim: int):
+        super(ValueNet, self).__init__()
+        self.fc1 = nn.Linear(state_dim, hidden_dim)
+        self.fc2 = nn.Linear(hidden_dim, hidden_dim//2)
+        self.fc3 = nn.Linear(hidden_dim//2, hidden_dim//4)
+        self.fc4 = nn.Linear(hidden_dim//4, 1)
+        
+        # 层归一化
+        self.ln1 = nn.LayerNorm(hidden_dim)
+        self.ln2 = nn.LayerNorm(hidden_dim//2)
+        self.ln3 = nn.LayerNorm(hidden_dim//4)
+        
+        self.dropout = nn.Dropout(0.1)
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+
+    def forward(self, x):
+        x = F.elu(self.fc1(x))
+        x = self.ln1(x)
+        x = self.dropout(x)
+        
+        x = F.elu(self.fc2(x))
+        x = self.ln2(x)
+        x = self.dropout(x)
+        
+        x = F.elu(self.fc3(x))
+        x = self.ln3(x)
+        
+        return self.fc4(x)
+
+
+class PolicyNetContinuous(nn.Module):
+    """策略网络 - 输出连续动作的均值和标准差"""
+    
+    def __init__(self, state_dim: int, hidden_dim: int, action_dim: int):
+        super().__init__()
+        if action_dim <= 0:
+            raise ValueError(f"action_dim must be positive, got {action_dim}")
+        self.action_dim = int(action_dim)
+        self._legacy_two_dim = self.action_dim == 2
+        if self._legacy_two_dim:
+            # 兼容历史 2D checkpoint 的结构与参数命名
+            self.shared_fc1 = nn.Linear(state_dim, hidden_dim)
+            self.shared_fc2 = nn.Linear(hidden_dim, hidden_dim//2)
+
+            # 角速度控制分支
+            self.angle_fc = nn.Linear(hidden_dim//2, hidden_dim//4)
+            self.angle_mu = nn.Linear(hidden_dim//4, 1)
+            self.angle_std = nn.Linear(hidden_dim//4, 1)
+
+            # 线速度控制分支
+            self.speed_fc = nn.Linear(hidden_dim//2, hidden_dim//4)
+            self.speed_mu = nn.Linear(hidden_dim//4, 1)
+            self.speed_std = nn.Linear(hidden_dim//4, 1)
+
+            # 层归一化
+            self.ln1 = nn.LayerNorm(hidden_dim)
+            self.ln2 = nn.LayerNorm(hidden_dim//2)
+        else:
+            # 可变动作维度网络（用于 3D: 角速度+线速度+前瞻控制）
+            self.shared_fc1 = nn.Linear(state_dim, hidden_dim)
+            self.shared_fc2 = nn.Linear(hidden_dim, hidden_dim // 2)
+            self.shared_fc3 = nn.Linear(hidden_dim // 2, hidden_dim // 4)
+            self.mu_head = nn.Linear(hidden_dim // 4, self.action_dim)
+            self.std_head = nn.Linear(hidden_dim // 4, self.action_dim)
+
+            # 层归一化
+            self.ln1 = nn.LayerNorm(hidden_dim)
+            self.ln2 = nn.LayerNorm(hidden_dim // 2)
+            self.ln3 = nn.LayerNorm(hidden_dim // 4)
+        
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        if self._legacy_two_dim:
+            nn.init.xavier_uniform_(self.angle_mu.weight)
+            nn.init.xavier_uniform_(self.speed_mu.weight)
+            nn.init.constant_(self.angle_std.bias, 0.3)
+            nn.init.constant_(self.speed_std.bias, 0.3)
+        else:
+            nn.init.xavier_uniform_(self.mu_head.weight)
+            nn.init.xavier_uniform_(self.std_head.weight)
+            if self.mu_head.bias is not None:
+                nn.init.constant_(self.mu_head.bias, 0.0)
+            if self.std_head.bias is not None:
+                nn.init.constant_(self.std_head.bias, 0.3)
+
+    def forward(self, x):
+        if self._legacy_two_dim:
+            x = F.elu(self.shared_fc1(x))
+            x = self.ln1(x)
+            x = F.elu(self.shared_fc2(x))
+            x = self.ln2(x)
+
+            # 角速度分支
+            angle_feat = F.selu(self.angle_fc(x))
+            angle_mu = torch.tanh(self.angle_mu(angle_feat))
+            angle_std = F.softplus(self.angle_std(angle_feat)) + 1e-3
+
+            # 线速度分支
+            speed_feat = F.selu(self.speed_fc(x))
+            speed_mu = torch.sigmoid(self.speed_mu(speed_feat))
+            speed_std = F.softplus(self.speed_std(speed_feat)) + 1e-3
+
+            mu = torch.cat([angle_mu, speed_mu], dim=1)
+            std = torch.cat([angle_std, speed_std], dim=1)
+            return mu, torch.clamp(std, min=0.01, max=2.0)
+
+        x = F.elu(self.shared_fc1(x))
+        x = self.ln1(x)
+        x = F.elu(self.shared_fc2(x))
+        x = self.ln2(x)
+        x = F.elu(self.shared_fc3(x))
+        x = self.ln3(x)
+
+        raw_mu = self.mu_head(x)
+        std = F.softplus(self.std_head(x)) + 1e-3
+
+        # 维度语义：
+        #   dim0: 角速度归一化动作，范围 [-1, 1]
+        #   dim1..: 线速度/其他门控动作，范围 [0, 1]
+        mu = torch.zeros_like(raw_mu)
+        mu[:, 0:1] = torch.tanh(raw_mu[:, 0:1])
+        if self.action_dim > 1:
+            mu[:, 1:] = torch.sigmoid(raw_mu[:, 1:])
+        # Sampling and both sides of the PPO ratio must use the same scale.
+        return mu, torch.clamp(std, min=0.01, max=2.0)
+
+
+class PPOContinuous:
+    """PPO算法 - 处理连续动作空间"""
+    
+    def __init__(self, 
+                 state_dim: Optional[int],
+                 hidden_dim: int,
+                 action_dim: Optional[int],
+                 actor_lr: float,
+                 critic_lr: float,
+                 lmbda: float,
+                 epochs: int,
+                 eps: float,
+                 gamma: float,
+                 device: torch.device,
+                 ent_coef: float = 0.0,
+                 observation_space=None,
+                 action_space=None,
+                 active_action_dims=None):
+        """
+        初始化PPO算法
+        
+        Args:
+            state_dim: 状态空间维度（可为None，优先从observation_space推断）
+            hidden_dim: 隐藏层维度
+            action_dim: 动作空间维度（可为None，优先从action_space推断）
+            actor_lr: Actor学习率
+            critic_lr: Critic学习率
+            lmbda: GAE参数
+            epochs: 每次更新的epoch数
+            eps: PPO clip参数
+            gamma: 折扣因子
+            ent_coef: 熵权重系数
+            device: 计算设备
+            observation_space: 可选的观测空间，用于自动推断输入维度
+            action_space: 可选的动作空间，用于自动推断输出维度
+        """
+        resolved_state_dim = state_dim
+        if observation_space is not None and hasattr(observation_space, "shape"):
+            resolved_state_dim = int(np.prod(observation_space.shape))
+        resolved_action_dim = action_dim
+        if action_space is not None and hasattr(action_space, "shape"):
+            resolved_action_dim = int(np.prod(action_space.shape))
+        if resolved_state_dim is None:
+            raise ValueError("state_dim must be provided or inferable from observation_space")
+        if resolved_action_dim is None:
+            raise ValueError("action_dim must be provided or inferable from action_space")
+
+        self.state_dim = resolved_state_dim
+        self.action_dim = resolved_action_dim
+        self.active_action_dims = tuple(range(resolved_action_dim)) if active_action_dims is None else tuple(active_action_dims)
+        if not self.active_action_dims or len(set(self.active_action_dims)) != len(self.active_action_dims) or any(i < 0 or i >= resolved_action_dim for i in self.active_action_dims):
+            raise ValueError('active_action_dims must be distinct valid action indices')
+        self.actor = PolicyNetContinuous(resolved_state_dim, hidden_dim, resolved_action_dim).to(device)
+        self.critic = ValueNet(resolved_state_dim, hidden_dim).to(device)
+        
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=actor_lr)
+        self.critic_optimizer = optim.Adam(self.critic.parameters(), lr=critic_lr)
+        
+        self.gamma = gamma
+        self.lmbda = lmbda
+        self.epochs = epochs
+        self.eps = eps
+        self.device = device
+        self.max_grad_norm = 0.5
+        self.ent_coef = ent_coef
+        
+        # 学习率调度器已移除：ReduceLROnPlateau 在 RL 训练中会过早
+        # 将学习率降到极低值，导致策略在前几个 episode 后即固化。
+        # PPO 的 clip 机制本身已对更新幅度做了限制，无需额外衰减。
+    
+    @torch.no_grad()
+    def take_action(self, state):
+        """Sample the latent Gaussian action; retain it before execution clipping.
+
+        The environment executes clip(z). PPO scores z, not clip(z): the
+        latter has point masses at the bounds and is not Gaussian distributed.
+        """
+        if not hasattr(self, 'state_tensor'):
+            self.state_tensor = torch.empty((1, len(state)), dtype=torch.float, device=self.device)
+        
+        self.state_tensor[0] = torch.as_tensor(state, dtype=torch.float, device=self.device)
+        mu, sigma = self.actor(self.state_tensor)
+        action_dist = torch.distributions.Normal(mu, sigma)
+        action = action_dist.sample()
+        
+        return action.squeeze().cpu().numpy().tolist()
+    
+    def update(self, transition_dict):
+        """更新策略和价值网络"""
+        # 转换为Tensor
+        states = torch.tensor(np.array(transition_dict['states']), 
+                             dtype=torch.float).to(self.device)
+        actions = torch.tensor(np.array(transition_dict['actions']), 
+                              dtype=torch.float).to(self.device)
+        rewards = torch.tensor(transition_dict['rewards'], 
+                              dtype=torch.float).view(-1, 1).to(self.device)
+        next_states = torch.tensor(np.array(transition_dict['next_states']), 
+                                  dtype=torch.float).to(self.device)
+        dones = torch.tensor(transition_dict['dones'], 
+                            dtype=torch.float).view(-1, 1).to(self.device)
+        
+        # 计算TD目标和优势函数
+        # Episode timeout can bootstrap a value; GAE still stops at resets.
+        bootstrap_dones = torch.tensor(
+            transition_dict.get('terminated', transition_dict['dones']),
+            dtype=torch.float, device=self.device).view(-1, 1)
+        td_target = rewards + self.gamma * self.critic(next_states) * (1 - bootstrap_dones)
+        td_delta = td_target - self.critic(states)
+        advantage = rl_utils.compute_advantage(self.gamma, self.lmbda,
+                                               td_delta.cpu(), dones.cpu()).to(self.device)
+        
+        # 优势函数标准化
+        if advantage.std(unbiased=False) > 1e-6:
+            normalized_advantage = (advantage - advantage.mean()) / (advantage.std(unbiased=False) + 1e-8)
+            advantage = torch.clamp(normalized_advantage, min=-10.0, max=10.0)
+        
+        # 计算旧策略的log概率
+        mu, std = self.actor(states)
+        action_dists = torch.distributions.Normal(mu.detach(), std.detach())
+        old_log_probs = action_dists.log_prob(actions)[:, self.active_action_dims]
+
+        # 多轮更新
+        for _ in range(self.epochs):
+            mu, std = self.actor(states)
+            action_dists = torch.distributions.Normal(mu, std)
+            log_probs = action_dists.log_prob(actions)[:, self.active_action_dims]
+            
+            # 熵正则化（系数由配置控制，默认压制探索）
+            entropy_bonus = action_dists.entropy()[:, self.active_action_dims].sum(dim=1).mean() * self.ent_coef
+            
+            # 计算概率比
+            log_ratio = log_probs.sum(dim=1, keepdim=True) - old_log_probs.sum(dim=1, keepdim=True)
+            log_ratio = torch.clamp(log_ratio, min=-5, max=5)
+            ratio = torch.exp(log_ratio)
+            
+            # PPO裁剪目标
+            surr1 = ratio * advantage
+            surr2 = torch.clamp(ratio, 1 - self.eps, 1 + self.eps) * advantage
+            
+            # Actor损失
+            policy_loss = -torch.min(surr1, surr2).mean()
+            actor_loss = policy_loss - entropy_bonus
+            
+            # Critic损失
+            critic_loss = F.smooth_l1_loss(self.critic(states), td_target.detach())
+            
+            # 反向传播
+            self.actor_optimizer.zero_grad()
+            self.critic_optimizer.zero_grad()
+            actor_loss.backward()
+            critic_loss.backward()
+
+            # 梯度裁剪
+            torch.nn.utils.clip_grad_norm_(self.actor.parameters(), max_norm=self.max_grad_norm)
+            torch.nn.utils.clip_grad_norm_(self.critic.parameters(), max_norm=self.max_grad_norm)
+            self.actor_optimizer.step()
+            self.critic_optimizer.step()
+
+        
+        return actor_loss.item(), critic_loss.item()

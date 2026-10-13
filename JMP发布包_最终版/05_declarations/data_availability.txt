@@ -1,0 +1,1 @@
+The retained simulation inputs, evaluation code, model weights, complete command trajectories and analysis scripts supporting the reported results are available from the corresponding author on reasonable request.

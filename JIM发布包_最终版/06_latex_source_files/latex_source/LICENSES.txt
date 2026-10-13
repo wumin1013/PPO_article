@@ -1,0 +1,3 @@
+Springer Nature sn-jnl.cls and sn-apacite.bst: official December 2024 template.
+Original licence notices are retained in those files.
+Original ZIP SHA256: 812e76dcaa9c28dc1bff1fb6065d51729b67d4ea140552a05088317414a3ecae

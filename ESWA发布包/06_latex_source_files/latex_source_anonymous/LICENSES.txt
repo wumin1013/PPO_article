@@ -1,0 +1,1 @@
+elsarticle.cls, apacite.sty, apacite.bst and english.apc are unmodified TeX Live 2025 files distributed under the LaTeX Project Public License. Original copyright and license notices remain in each file. Standard TeX Live packages and fonts must be provided by the build environment; no local font files are bundled.

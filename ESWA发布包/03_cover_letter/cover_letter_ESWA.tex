@@ -1,0 +1,55 @@
+\documentclass[10pt,a4paper]{article}
+\usepackage[margin=19mm]{geometry}
+\usepackage{fontspec,booktabs,array,tabularx,enumitem}
+\usepackage[natbibapa]{apacite}
+\usepackage[hidelinks]{hyperref}
+\hypersetup{pdfauthor={},pdfcreator={LaTeX},pdfsubject={}}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{7pt}
+\emergencystretch=2em
+\pagestyle{plain}
+\begin{document}
+\shortcites{Sencer2014,Sencer2015,Li2020,Li2023,Pham2018}
+\textbf{October 6, 2026}\hfill Expert Systems with Applications
+
+Dear Editor-in-Chief,
+
+Please consider our revised manuscript, ``Reinforcement Learning-Based Computer Numerical Control Motion Planning with Adaptive Preview and Jerk-Constrained Action Projection'', for publication in Expert Systems with Applications. This submission has been revised in response to the editorial comments on manuscript ESWA-D-26-40941.
+
+The revised Introduction compares closely related geometric, integrated and learning-based methods and explains how J-NNC differs from them. We have condensed repeated background and adopted APA sixth-edition author-year citations, with an unnumbered reference list sorted by author. A separate title page lists all authors, affiliations and institutional email addresses. The table on the next page summarizes the mechanisms compared in the Introduction.
+
+The Jerk-constrained Neural Numerical Controller (J-NNC) jointly selects steering, feedrate and Adaptive Preview, then passes these requests to a kinematic constraint module (KCM). The KCM projects the requested velocity onto a planar feasible set and checks whether acceleration can then decrease within the limits. Geometric tolerance and ordered path coverage are assessed separately. Learning combines proximal policy optimization with fitting to recorded feasible actions.
+
+The numerical simulations measure complete execution, including startup, ordered traversal, braking and terminal rest. On the long closed path, J-NNC takes 444.177 s, compared with 445.185 s for the two-step planner. On the dense path, J-NNC takes 14.839 s, compared with 19.957 s for two-step planning and 15.798 s for the fastest valid two-action controller. These differences correspond to reductions of 25.65\% and 6.07\%, respectively. These comparisons use the final controllers, whose training budgets differ. The separate comparison with equal PPO budgets yielded time differences within the numerical sensitivity margin. The existing experiments, results and appendices have been retained in this revision.
+
+All authors have approved this manuscript and agree to its submission. The manuscript is not under consideration for publication elsewhere. Thank you for considering this submission.
+
+Sincerely,
+
+Zifang Hu | Corresponding author
+
+School of Mechanical Science and Engineering, Huazhong University of Science and Technology
+
+Wuhan 430074, China | huzifang@hust.edu.cn
+\newpage\textbf{Comparison with closely related work}
+
+The table compares published mechanisms. It does not claim numerical reproduction of every study. The original NNC, the adapted NNC baseline and the two-action controller with KCM are distinct controllers.
+
+\begingroup\fontsize{9}{10.8}\selectfont\setlength{\tabcolsep}{4pt}\renewcommand{\arraystretch}{1.13}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{0.15\linewidth}*{3}{>{\raggedright\arraybackslash}X}@{}}\toprule
+\textbf{Representative study} & \textbf{Planning / decision mechanism} & \textbf{Constraint handling} & \textbf{Specific distinction of J-NNC}\\\midrule
+\citet{Sencer2014} & Curvature-optimized quintic Bezier corner blends followed by S-curve feed transitions. & Analytical corner-error control; drive acceleration and tangential jerk limits in feed scheduling. & Jointly selects steering, feedrate and guide-target distance instead of prescribing the corner blend before feed scheduling.\\\addlinespace[4pt]
+\citet{Li2020} & Learned direction-angle and step-length rates generate position commands; nine forward rays use a maximum range of three times the error-constraint parameter. & Contour-error-based learning; the study reports per-axis velocity, acceleration and jerk settings. & Learns the guide-target distance while keeping geometric observation distances fixed; adds an explicit planar KCM. Its actions differ from the original NNC outputs.\\\addlinespace[4pt]
+\citet{Li2023} & Overlaps line and arc motions and searches kinematic parameters using variable jerk-limited feed profiles. & Controls corner error and constrains resultant acceleration and jerk, including during motion overlap. & Learns a local three-action rule and projects each next-velocity request instead of searching segment-overlap parameters.\\\addlinespace[4pt]
+\citet{Pham2018} & OptLayer corrects neural actions through differentiable quadratic optimization. & State-dependent linear equality and inequality constraints; minimizes squared distance to the predicted action. & Uses intersecting planar velocity disks and checks whether acceleration can decrease within the limits; geometry and ordered coverage are checked separately.\\\addlinespace[4pt]
+This work: J-NNC & Joint steering, feedrate and Adaptive Preview, learned by PPO and recorded-action fitting. & Planar vector velocity, acceleration and jerk limits via KCM; separate contour and coverage checks. & Complete path execution with braking and rest; final controller results and comparisons with equal PPO budgets are reported separately.\\\addlinespace[4pt]
+\bottomrule\end{tabularx}\endgroup
+
+{\fontsize{8.4}{9.8}\selectfont
+\setlength{\bibsep}{2pt}
+\renewcommand{\refname}{Sources}
+\nocite{Sencer2015}
+\bibliographystyle{apacite}
+\bibliography{cover_references}
+}
+\end{document}

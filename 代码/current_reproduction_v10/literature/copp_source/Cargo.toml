@@ -1,0 +1,76 @@
+[package]
+name = "copp"
+version = "0.2.3"
+edition = "2024"
+rust-version = "1.89"
+description = "Convex-objective path parameterization for robotic trajectory planning."
+license = "MIT"
+repository = "https://github.com/TOPP-THU/copp"
+homepage = "https://copp.pro"
+documentation = "https://docs.rs/copp"
+readme = "README.md"
+categories = ["science::robotics", "algorithms", "mathematics", "simulation"]
+keywords = [
+    "trajectory-planning",
+    "jerk-limited",
+    "motion-planning",
+    "convex-optimization",
+    "time-optimal",
+]
+include = [
+    "/src/**",
+    "/build.rs",
+    "/examples/**",
+    # examples/path_smoothing.rs reuses the path cases from this test file.
+    "/tests/test_path_smoothing.rs",
+    "/bindings/cpp/src/**",
+    "/bindings/cpp/include/**",
+    "/mathjax-config.html",
+    "/README.md",
+    "/LICENSE",
+    "/CHANGELOG.md",
+]
+
+[lib]
+name = "copp"
+crate-type = ["rlib", "cdylib", "staticlib"]
+
+[features]
+default = []
+c = []
+cpp = ["dep:cxx", "dep:cxx-build"]
+matlab = ["c"]
+python = ["dep:numpy", "dep:pyo3"]
+
+
+[dependencies]
+nalgebra = "0.35.0"
+clarabel = "0.11.1"
+thiserror = "2.0.20"
+itertools = "0.15.0"
+chrono = "0.4.45"
+rayon = "1.12.0"
+log = "0.4.34"
+cxx = { version = "1.0.202", optional = true }
+numpy = { version = "0.29.0", optional = true, features = ["nalgebra"] }
+pyo3 = { version = "0.29.2", optional = true }
+
+[build-dependencies]
+cxx-build = { version = "1.0", optional = true }
+
+[dev-dependencies]
+rand = "0.10.2"
+roots = "0.0.8"
+plotters = "0.3.7"
+csv = "1.4.0"
+env_logger = "0.11.11"
+
+# Only use for the final release.
+# [profile.release]
+# opt-level = 3
+# codegen-units = 1
+# lto = "fat"
+
+[package.metadata.docs.rs]
+# The following line adds MathJax support for rendering mathematical equations in documentation.
+rustdoc-args = ["--html-in-header", "mathjax-config.html"]

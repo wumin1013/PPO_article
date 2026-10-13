@@ -1,0 +1,705 @@
+# COPP C Bindings
+
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](../../LICENSE) [![Website](https://img.shields.io/badge/website-copp.pro-2ff0d8)](https://copp.pro/) [![Docs](https://img.shields.io/badge/docs-docs.copp.pro-1f6feb)](https://docs.copp.pro/) [![C](https://img.shields.io/badge/C-ABI-a8b9cc)](#copp-c-bindings)
+
+## Convex-Objective Path Parameterization
+
+This directory contains the public C ABI for the open-source COPP library. It focuses on using COPP from C through stable headers, ordinary C data types, and explicit ownership rules.
+
+The C ABI is in its feedback and stabilization phase. It is intended to be usable today, but function names, problem descriptors, result structs, and packaging details may still evolve before the first stable C release. Feedback from downstream bindings, robotics applications, and packaging workflows is welcome. For C ABI questions, packaging feedback, compatibility requests, COPP PRO licensing, or commercial collaboration, please contact us at [hello@copp.pro](mailto:hello@copp.pro).
+
+> **Open-source / PRO note:** this README documents the open-source C ABI. For the full project overview, open-source vs PRO algorithm matrix, solver-selection guidance, benchmark comparisons, citation information, and collaboration contact details, see the [COPP repository README](https://github.com/TOPP-THU/copp#readme).
+
+The C API follows a deliberately small set of rules:
+
+- include `copp/copp.h` for the full API, or a narrower header such as `copp/robot.h`, `copp/topp2.h`, or `copp/copp3.h`;
+- most functions return `enum CoppStatus`;
+- borrowed slices and matrix views are used only during the call;
+- COPP-owned outputs are released with the matching `copp_*_free` function;
+- matrices support column-major, row-major, and strided views, with contiguous column-major as the zero-copy fast path.
+
+The algorithmic background, open-source algorithm availability, benchmark tables, and citation information live in the [COPP repository README](https://github.com/TOPP-THU/copp#readme). This page focuses on building, linking, installing, and using the C ABI.
+
+## API Availability
+
+| Problem class  | Public C API                                                                                                        |
+| -------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Core utilities | status, last error, slices, matrix views, owned vectors/matrices                                                    |
+| Path           | waypoint interpolating, waypoint fitting, Jet3 parametric, evaluator paths, 2nd/3rd derivative evaluation           |
+| Robot          | station grids, path sampling, velocity/acceleration/jerk/torque limits, raw constraints, inverse dynamics callback, constraint-violation checks |
+| TOPP2          | TOPP2-RA, ReachSet2, 2nd-order interpolation                                                                        |
+| COPP2          | COPP2-SOCP                                                                                                          |
+| TOPP3          | TOPP3-LP, TOPP3-SOCP, 3rd-order interpolation                                                                       |
+| COPP3          | COPP3-SOCP                                                                                                          |
+
+Runnable examples are in [examples](examples/). They are built as CMake targets named `example_*`.
+
+## Quick Start
+
+Prebuilt C ABI SDK packages for the latest tagged release are attached to the repository's GitHub Releases. If you want to build COPP from source instead, follow the steps below. The C ABI is behind Cargo's `c` feature, so source builds must enable it explicitly.
+
+### Prerequisites
+
+You need:
+
+- Cargo
+- CMake
+- a C compiler toolchain
+- `cbindgen` if you need to refresh generated headers
+
+Install `cbindgen` once:
+
+```sh
+cargo install cbindgen
+```
+
+### Build the Native Library
+
+Run from the repository root:
+
+```sh
+cargo build --release --lib --features c
+```
+
+Cargo produces the C ABI libraries under:
+
+```text
+target/release/
+```
+
+Typical artifact names are:
+
+| Platform | Dynamic                     | Static      |
+| -------- | --------------------------- | ----------- |
+| Windows  | `copp.dll` + `copp.dll.lib` | `copp.lib`  |
+| Linux    | `libcopp.so`                | `libcopp.a` |
+| macOS    | `libcopp.dylib`             | `libcopp.a` |
+
+The public C symbols and headers use the `copp` prefix.
+
+### Refresh Headers
+
+Headers are generated from the feature-gated `src/ffi/c` declarations and split into:
+
+```text
+bindings/c/include/copp/
+```
+
+Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File bindings/c/scripts/generate_headers.ps1
+```
+
+Linux / macOS:
+
+```sh
+pwsh -File bindings/c/scripts/generate_headers.ps1
+```
+
+The checked-in headers can be used directly when you do not need to regenerate them.
+
+### Build Examples and Smoke Tests
+
+Dynamic linking:
+
+```sh
+cmake -S bindings/c -B bindings/c/build
+cmake --build bindings/c/build --config Release
+```
+
+Static linking:
+
+```sh
+cmake -S bindings/c -B bindings/c/build -DCOPP_LINK_STATIC=ON
+cmake --build bindings/c/build --config Release
+```
+
+Run C tests:
+
+```sh
+ctest --test-dir bindings/c/build --output-on-failure -C Release
+```
+
+Register examples as CTest tests:
+
+```sh
+cmake -S bindings/c -B bindings/c/build -DCOPP_TEST_EXAMPLES=ON
+cmake --build bindings/c/build --config Release
+ctest --test-dir bindings/c/build --output-on-failure -C Release
+```
+
+Build one example target:
+
+```sh
+cmake --build bindings/c/build --config Release --target example_topp2_ra
+```
+
+Disable tests or examples when configuring:
+
+```sh
+cmake -S bindings/c -B bindings/c/build -DCOPP_BUILD_TESTS=OFF
+cmake -S bindings/c -B bindings/c/build -DCOPP_BUILD_EXAMPLES=OFF
+```
+
+### TOPP2-RA Quick Example
+
+The fastest way to run a C solver example from a source checkout is:
+
+```sh
+cargo build --release --lib --features c
+cmake -S bindings/c -B bindings/c/build -DCOPP_BUILD_TESTS=OFF
+cmake --build bindings/c/build --config Release --target example_topp2_ra
+```
+
+Run the built executable. For Windows multi-config generators:
+
+```powershell
+bindings\c\build\Release\example_topp2_ra.exe
+```
+
+For Windows single-config generators:
+
+```powershell
+bindings\c\build\example_topp2_ra.exe
+```
+
+For Linux or macOS:
+
+```sh
+./bindings/c/build/example_topp2_ra
+```
+
+Typical output:
+
+```text
+TOPP2-RA done.
+dim = 3, N = 1001
+t_final = ... s
+a_profile.len() = 1001
+s(t) samples = ...
+```
+
+The example target is backed by [`examples/topp2_ra.c`](examples/topp2_ra.c). The standalone version below spells out the same TOPP2-RA flow without helper wrappers. The path is written with `CoppJet3`, so COPP obtains `q`, `dq/ds`, and `d2q/ds2` through automatic differentiation instead of requiring hand-written derivative callbacks:
+
+```c
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdio.h>
+
+#include "copp/copp.h"
+
+enum
+{
+    DIM = 3,
+    N = 1001
+};
+
+static int check(enum CoppStatus status, const char *call)
+{
+    if (status == COPP_STATUS_OK)
+    {
+        return 0;
+    }
+
+    fprintf(stderr, "%s failed: %s\n", call, copp_status_message(status));
+    fprintf(stderr, "%s\n", copp_last_error_message());
+    return 1;
+}
+
+static enum CoppStatus eval_lissajous_path(
+    void *user_data,
+    size_t dim,
+    struct CoppJet3 s,
+    struct CoppJet3 *q)
+{
+    (void)user_data;
+    if (dim != DIM || q == NULL)
+    {
+        return COPP_STATUS_INVALID_ARGUMENT;
+    }
+
+    const double pi = 3.14159265358979323846;
+    const double freq[DIM] = {2.0 * pi, 3.0 * pi, 5.0 * pi};
+    const double phase[DIM] = {0.0, 0.3, 0.7};
+
+    for (size_t axis = 0; axis < DIM; ++axis)
+    {
+        struct CoppJet3 x = copp_add_f64(copp_mul_f64(s, freq[axis]), phase[axis]);
+        q[axis] = copp_sin(x);
+    }
+
+    return COPP_STATUS_OK;
+}
+
+int main(void)
+{
+    /*
+     * 1) Deterministic 3-axis Lissajous path q(s), s in [0, 1].
+     * `copp_path_from_parametric` seeds `s` as a `CoppJet3`; the callback only
+     * writes q(s), and COPP propagates derivatives up to third order.
+     */
+    double s[N];
+    struct CoppPath *path = NULL;
+    struct CoppRobot *robot = NULL;
+    struct CoppVecF64 a_ra = {NULL, 0, 0};
+    struct CoppVecF64 t_s = {NULL, 0, 0};
+    struct CoppVecF64 s_t = {NULL, 0, 0};
+    int rc = 1;
+
+    for (size_t k = 0; k < N; ++k)
+    {
+        s[k] = (double)k / (double)(N - 1);
+    }
+
+    if (check(
+            copp_path_from_parametric(DIM, 0.0, 1.0, eval_lissajous_path, NULL, &path),
+            "copp_path_from_parametric"))
+    {
+        goto cleanup;
+    }
+
+    /*
+     * 2) Build robot constraints (3-axis), then apply symmetric limits
+     * velocity/acceleration = [-1, 1].
+     */
+    if (check(copp_robot_create(DIM, N, &robot), "copp_robot_create"))
+    {
+        goto cleanup;
+    }
+    if (check(copp_robot_append_s(robot, (struct CoppSliceF64){s, N}), "copp_robot_append_s"))
+    {
+        goto cleanup;
+    }
+    if (check(copp_robot_sample_path_2nd(robot, path, 0, N), "copp_robot_sample_path_2nd"))
+    {
+        goto cleanup;
+    }
+
+    double upper[DIM] = {1.0, 1.0, 1.0};
+    double lower[DIM] = {-1.0, -1.0, -1.0};
+    if (check(
+            copp_add_axial_velocity_limits(
+                robot,
+                0,
+                N,
+                (struct CoppSliceF64){upper, DIM},
+                (struct CoppSliceF64){lower, DIM}),
+            "copp_add_axial_velocity_limits"))
+    {
+        goto cleanup;
+    }
+    if (check(
+            copp_add_axial_acceleration_limits(
+                robot,
+                0,
+                N,
+                (struct CoppSliceF64){upper, DIM},
+                (struct CoppSliceF64){lower, DIM}),
+            "copp_add_axial_acceleration_limits"))
+    {
+        goto cleanup;
+    }
+
+    /*
+     * 3) Solve TOPP2-RA with boundary values a(0) = 0 and a(1) = 0.
+     * The output profile stores a[k] = (ds/dt)^2 at each station.
+     */
+    struct Topp2RaOptions options;
+    if (check(topp2_ra_default_options(&options), "topp2_ra_default_options"))
+    {
+        goto cleanup;
+    }
+
+    struct Topp2Problem problem = {robot, 0, N - 1, 0.0, 0.0};
+    if (check(topp2_ra(problem, options, &a_ra), "topp2_ra"))
+    {
+        goto cleanup;
+    }
+
+    /*
+     * 4) Post-process TOPP2-RA results: a(s) -> t(s) -> s(t).
+     * `t_s[k]` is the time when station s[k] is reached. `s_t` uses a
+     * uniform time grid with dt = 1e-3 s, which is useful for plotting and
+     * downstream control.
+     */
+    double t_final = 0.0;
+    if (check(
+            copp_s_to_t_2nd(
+                (struct CoppSliceF64){s, N},
+                (struct CoppSliceF64){a_ra.data, a_ra.len},
+                0.0,
+                &t_final,
+                &t_s),
+            "copp_s_to_t_2nd"))
+    {
+        goto cleanup;
+    }
+    if (check(
+            copp_t_to_s_uniform_2nd(
+                (struct CoppSliceF64){s, N},
+                (struct CoppSliceF64){a_ra.data, a_ra.len},
+                (struct CoppSliceF64){t_s.data, t_s.len},
+                0.0,
+                1.0e-3,
+                true,
+                &s_t),
+            "copp_t_to_s_uniform_2nd"))
+    {
+        goto cleanup;
+    }
+
+    /*
+     * 5) Print the tutorial summary.
+     */
+    printf("TOPP2-RA done.\n");
+    printf("dim = %d, N = %d\n", DIM, N);
+    printf("t_final = %.6f s\n", t_final);
+    printf("a_profile.len() = %zu\n", a_ra.len);
+    printf("s(t) samples = %zu\n", s_t.len);
+    rc = 0;
+
+cleanup:
+    copp_vec_f64_free(s_t);
+    copp_vec_f64_free(t_s);
+    copp_vec_f64_free(a_ra);
+    copp_robot_free(robot);
+    copp_path_free(path);
+    return rc;
+}
+```
+
+## Install and Link
+
+The CMake install step copies public headers, the native library, and a package config. Build the native library first with:
+
+```sh
+cargo build --release --lib --features c
+```
+
+The installed layout is:
+
+```text
+<prefix>/
+  include/copp/*.h
+  lib/...
+  bin/...                 # Windows dynamic DLL only
+  lib/cmake/copp/...
+```
+
+Dynamic install:
+
+```sh
+cmake -S bindings/c -B bindings/c/build
+cmake --build bindings/c/build --config Release
+cmake --install bindings/c/build --config Release --prefix <install-prefix>
+```
+
+Static install:
+
+```sh
+cmake -S bindings/c -B bindings/c/build -DCOPP_LINK_STATIC=ON
+cmake --build bindings/c/build --config Release
+cmake --install bindings/c/build --config Release --prefix <install-prefix>
+```
+
+Example prefixes:
+
+```powershell
+cmake --install bindings/c/build --config Release --prefix C:/libs/copp
+```
+
+```sh
+cmake --install bindings/c/build --config Release --prefix "$HOME/.local"
+```
+
+Downstream projects can then use:
+
+```cmake
+find_package(copp CONFIG REQUIRED)
+
+add_executable(app main.c)
+target_link_libraries(app PRIVATE copp::copp)
+```
+
+Configure the downstream project with:
+
+```sh
+cmake -S app -B app/build -DCMAKE_PREFIX_PATH=<install-prefix>
+cmake --build app/build --config Release
+```
+
+On Windows with dynamic linking, the package target records both the import library and the runtime DLL. The DLL still needs to be next to the executable or visible through `PATH` at run time.
+
+For static packages, the exported `copp::copp` target includes common platform native libraries. If a platform or toolchain needs extra native libraries, configure COPP with:
+
+```sh
+cmake -S bindings/c -B bindings/c/build -DCOPP_LINK_STATIC=ON -DCOPP_STATIC_LINK_LIBRARIES="lib1;lib2"
+```
+
+### Package Smoke Test
+
+The optional install test installs COPP into a temporary prefix, configures a tiny downstream project with `find_package(copp CONFIG REQUIRED)`, builds it, and runs it.
+
+Dynamic package test:
+
+```sh
+cmake -S bindings/c -B bindings/c/build -DCOPP_BUILD_INSTALL_TESTS=ON
+cmake --build bindings/c/build --config Release
+ctest --test-dir bindings/c/build --output-on-failure -C Release -R "test_install_copp_package|test_find_package_copp"
+```
+
+Static package test:
+
+```sh
+cmake -S bindings/c -B bindings/c/build -DCOPP_LINK_STATIC=ON -DCOPP_BUILD_INSTALL_TESTS=ON
+cmake --build bindings/c/build --config Release
+ctest --test-dir bindings/c/build --output-on-failure -C Release -R "test_install_copp_package|test_find_package_copp"
+```
+
+## General Workflow
+
+Most C examples follow the same shape:
+
+1. Build a path from waypoints, a Jet3 parametric callback, or evaluator callbacks.
+2. Build a station grid.
+3. Create a `CoppRobot`.
+4. Append stations and sample path derivatives into the robot.
+5. Add velocity, acceleration, jerk, torque, or raw constraints.
+6. Build a borrowed `Topp*Problem` or `Copp*Problem` descriptor.
+7. Call a solver.
+8. Convert solver output to timing data with interpolation helpers.
+9. Release COPP-owned outputs with the matching free function.
+
+The C API intentionally avoids implementation-specific lifetimes, generics, closures, and builders. Problem structs are borrowed descriptors used only during the solver call.
+
+### Deprecated Robot Symbols
+
+The supported names for writing joint samples into a robot are `copp_robot_set_q_2nd` and `copp_robot_set_q_3rd`, so that every robot-mutating function shares the `copp_robot_*` prefix. The older names `copp_set_q_2nd` and `copp_set_q_3rd` remain exported from the shared and static libraries as forwarding aliases, so binaries built against an earlier release keep linking. They are not declared in the shipped headers under `include/copp`, so reaching them from new code requires declaring them by hand. They may be removed in a future release; port such code to the `copp_robot_*` names.
+
+## Parametric Paths
+
+Use `copp_path_from_parametric` when you have a scalar formula for `q(s)` and
+want COPP to propagate derivatives up to third order. The callback receives a
+seeded `struct CoppJet3 s` and writes one `CoppJet3` per path dimension.
+`copp/path.h` provides inline helpers such as `copp_add`, `copp_mul_f64`, and
+`copp_sin`.
+
+```c
+static enum CoppStatus eval_path(
+    void *user_data,
+    size_t dim,
+    struct CoppJet3 s,
+    struct CoppJet3 *q)
+{
+    (void)user_data;
+    if (dim != 1 || q == NULL) {
+        return COPP_STATUS_INVALID_ARGUMENT;
+    }
+
+    q[0] = copp_sin(copp_mul_f64(s, 6.28318530717958647692));
+    return COPP_STATUS_OK;
+}
+
+struct CoppPath *path = NULL;
+copp_path_from_parametric(1, 0.0, 1.0, eval_path, NULL, &path);
+```
+
+The resulting path works with the same `copp_path_evaluate_up_to_2nd`,
+`copp_path_evaluate_up_to_3rd`, `copp_robot_sample_path_2nd`, and
+`copp_robot_sample_path_3rd` calls as waypoint and evaluator paths.
+
+## Waypoint Paths
+
+`copp_path_from_waypoints_interpolating` builds a spline through every
+waypoint column; `copp_path_from_waypoints` is an equivalent alias.
+`copp_path_from_waypoints_fitting` instead fits the selected axes within
+per-axis absolute tolerances using an adaptive `C4` quintic B-spline: interior
+waypoints are not interpolated, the first and last waypoints are kept, and
+`copp_path_smoothing_report` returns the audited error bounds. Both waypoint
+constructors, `CoppSmoothingOptions`, and `CoppSmoothingReport` are currently
+unstable and may change as more waypoint algorithms are added.
+
+```c
+struct CoppSmoothingOptions options;
+struct CoppPath *path = NULL;
+copp_smoothing_default_options(&options);
+options.tolerance = 1e-3;
+copp_path_from_waypoints_fitting(
+    COPP_MATRIX_VIEW_F64_COLUMN_MAJOR(waypoints, dim, num_waypoints),
+    options,
+    &path);
+```
+
+## Minimal Program
+
+```c
+#include <stdio.h>
+
+#include "copp/copp.h"
+
+int main(void) {
+    printf("COPP version: %s\n", copp_version());
+    printf("OK means: %s\n", copp_status_message(COPP_STATUS_OK));
+    return 0;
+}
+```
+
+## Error Handling
+
+Most C ABI functions return `enum CoppStatus`. `COPP_STATUS_OK` means success; other values are stable machine-readable failure classes.
+
+Use `copp_status_message(status)` for a short static description. For detailed call-specific diagnostics, use the thread-local last-error API:
+
+```c
+size_t len = 0;
+enum CoppStatus status = copp_robot_len(NULL, &len);
+if (status != COPP_STATUS_OK) {
+    fprintf(stderr, "%s\n", copp_last_error_message());
+}
+```
+
+Successful C ABI calls clear the thread-local last-error slot. Failed calls set it to a UTF-8 message capped at 64 KiB. The pointer returned by `copp_last_error_message()` is owned by COPP and remains valid until the next COPP C ABI call on the same thread updates or clears it.
+
+Wrappers that need ownership should copy the message:
+
+```c
+size_t msg_len = 0;
+copp_last_error_message_copy(NULL, 0, &msg_len);
+
+char *buffer = malloc(msg_len + 1);
+copp_last_error_message_copy(buffer, msg_len + 1, NULL);
+```
+
+Callbacks can attach details before returning an error:
+
+```c
+copp_set_last_error_message(
+    COPP_STATUS_ROBOT_DYNAMICS_ERROR,
+    "inverse dynamics failed at station 42");
+return COPP_STATUS_ROBOT_DYNAMICS_ERROR;
+```
+
+## Documentation
+
+The C API reference is generated from the public headers under:
+
+```text
+bindings/c/include/copp/
+```
+
+Install Doxygen:
+
+Windows:
+
+```powershell
+winget install -e --id DimitriVanHeesch.Doxygen
+winget install -e --id Graphviz.Graphviz
+```
+
+Ubuntu / Debian:
+
+```sh
+sudo apt update
+sudo apt install doxygen graphviz
+```
+
+macOS:
+
+```sh
+brew install doxygen graphviz
+```
+
+Generate docs:
+
+Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File bindings/c/scripts/generate_docs.ps1
+```
+
+Linux / macOS:
+
+```sh
+sh bindings/c/scripts/generate_docs.sh
+```
+
+Open:
+
+```text
+bindings/c/docs/html/index.html
+```
+
+The generated `bindings/c/docs/` directory is ignored by Git.
+
+## Header Layout
+
+| Header                 | Contents                                                |
+| ---------------------- | ------------------------------------------------------- |
+| `copp/copp.h`          | Umbrella header                                         |
+| `copp/core.h`          | status, last error, matrices, vectors, Clarabel options |
+| `copp/path.h`          | path handles, Jet3 helpers, and path evaluation         |
+| `copp/robot.h`         | robot handles, sampling, constraints, callbacks         |
+| `copp/formulation.h`   | problem descriptors, objectives, profiles               |
+| `copp/interpolation.h` | 2nd/3rd-order interpolation utilities                   |
+| `copp/topp2.h`         | TOPP2-RA and ReachSet2                                  |
+| `copp/copp2.h`         | COPP2-SOCP                                              |
+| `copp/topp3.h`         | TOPP3-LP and TOPP3-SOCP                                 |
+| `copp/copp3.h`         | COPP3-SOCP                                              |
+
+## Examples
+
+Example sources:
+
+```text
+bindings/c/examples/
+```
+
+Available example targets:
+
+```text
+example_topp2_ra
+example_reach_set2
+example_copp2_socp
+example_topp3_lp
+example_topp3_socp
+example_copp3_socp
+```
+
+Algorithms not listed in the open-source availability table in the [COPP repository README](https://github.com/TOPP-THU/copp#readme) are not documented as part of the open-source C ABI.
+
+## Troubleshooting
+
+### Header Generation Fails
+
+Install `cbindgen`, then run the header generation command from the repository root. If you do not need to change the ABI, use the checked-in headers.
+
+### CMake Cannot Find the COPP Library
+
+Run:
+
+```sh
+cargo build --release --lib --features c
+```
+
+The source-tree CMake flow expects the native library artifact under `target/release/`.
+
+### Downstream `find_package` Fails
+
+Make sure the downstream project sees the install prefix:
+
+```sh
+cmake -S app -B app/build -DCMAKE_PREFIX_PATH=<install-prefix>
+```
+
+### Runtime DLL Is Missing on Windows
+
+For dynamic linking, ensure `copp.dll` is next to your executable or visible through `PATH`.
+
+### Static Linking Fails With Missing Native Symbols
+
+Pass additional native libraries through:
+
+```sh
+cmake -S bindings/c -B bindings/c/build -DCOPP_LINK_STATIC=ON -DCOPP_STATIC_LINK_LIBRARIES="lib1;lib2"
+```

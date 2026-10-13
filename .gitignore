@@ -10,3 +10,37 @@ save_models/
 saved_models/
 artifacts/
 trajectory_autoresearch/_local_results/
+
+# Remote scope (2026-10-14): manuscripts, source code and trained models only.
+# Keep raw data, internal experiment records and full local bundles on disk.
+*.npz
+*.npy
+*.csv
+*.parquet
+*.h5
+*.hdf5
+*.zip
+!/*发布包*/06_latex_source_files/*source*.zip
+/*发布包*/08_supplementary_reproduction/
+/*发布包*/09_preparation_checks/
+/*发布包*/*release*.zip.sha256
+/*发布包*/FILES_SHA256.json
+/*发布包*/FILES_SHA256.json.sha256
+/论文用到的数据和模型/数据/
+/论文用到的数据和模型/来源与整理路径.json
+/论文用到的数据和模型/核验与配置/**
+!/论文用到的数据和模型/核验与配置/**/
+!/论文用到的数据和模型/核验与配置/**/*.py
+!/论文用到的数据和模型/核验与配置/**/*.yaml
+!/论文用到的数据和模型/核验与配置/**/*.yml
+/论文用到的数据和模型/图源/*.json
+**/_build/
+**/__pycache__/
+*.pyc
+*.aux
+*.blg
+*.fls
+*.log
+*.out
+*.spl
+*.synctex.gz

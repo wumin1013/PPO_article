@@ -1,0 +1,186 @@
+/**
+ * @file test_headers.c
+ * @brief Compile-only smoke test for split COPP C headers.
+ */
+
+#include <stddef.h>
+
+#include "copp/core.h"
+#include "copp/path.h"
+#include "copp/robot.h"
+#include "copp/formulation.h"
+#include "copp/interpolation.h"
+#include "copp/topp2.h"
+#include "copp/copp2.h"
+#include "copp/topp3.h"
+#include "copp/copp3.h"
+#include "copp/copp.h"
+
+int main(void)
+{
+    enum CoppStatus status = COPP_STATUS_OK;
+    enum CoppVerbosity verbosity = COPP_VERBOSITY_SILENT;
+    struct CoppMatrixViewF64 view = COPP_MATRIX_VIEW_F64_COLUMN_MAJOR(NULL, 0, 0);
+    struct CoppSliceF64 slice = {NULL, 0};
+    struct CoppSliceMutF64 mut_slice = {NULL, 0};
+    struct CoppVecF64 vec = {NULL, 0, 0};
+    struct CoppVecUsize usize_vec = {NULL, 0, 0};
+    struct CoppMatrixF64 matrix = {NULL, 0, 0, 0};
+    struct CoppPathOptions path_options = {
+        5,
+        0.0,
+        1.0,
+        COPP_PATH_OUT_OF_RANGE_MODE_ERROR,
+        COPP_PATH_PARAMETRIZATION_UNIFORM,
+        view,
+        view,
+    };
+    struct CoppSliceUsize usize_slice = {NULL, 0};
+    struct CoppSmoothingOptions smoothing_options = {
+        1e-3,
+        slice,
+        usize_slice,
+        slice,
+        20,
+        20000,
+        COPP_PATH_OUT_OF_RANGE_MODE_ERROR,
+    };
+    struct CoppSmoothingReport smoothing_report = {{NULL, 0, 0}, 0, 0, 0, 0, 0, {NULL, 0, 0}};
+    enum CoppStatus smoothing_status = COPP_STATUS_PATH_SMOOTHING;
+    struct Topp2Problem problem = {NULL, 0, 0, 0.0, 0.0};
+    struct Topp2RaOptions ra_options = {1e-8, 1e-8, 1e-8, COPP_VERBOSITY_SILENT};
+    struct CoppReachSet2Result reach_set = {{NULL, 0, 0}, {NULL, 0, 0}};
+    struct CoppObjective objective = {
+        COPP_OBJECTIVE_KIND_TIME,
+        1.0,
+        slice,
+        slice,
+        slice,
+    };
+    struct Copp2Problem copp2_problem = {NULL, 0, 0, 0.0, 0.0, &objective, 1};
+    struct CoppProfile3rd profile3 = {{NULL, 0, 0}, {NULL, 0, 0}, 0, 0};
+    struct Topp3Problem topp3_problem = {
+        NULL,
+        0,
+        slice,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1,
+        1,
+        1e-10,
+        slice,
+    };
+    struct Copp3Problem copp3_problem = {
+        NULL,
+        0,
+        slice,
+        0.0,
+        0.0,
+        0.0,
+        0.0,
+        1,
+        1,
+        1e-10,
+        &objective,
+        1,
+        slice,
+    };
+    enum CoppClarabelSolverStatus solver_status = COPP_CLARABEL_SOLVER_STATUS_UNSOLVED;
+    struct CoppClarabelLinearSolverInfo linsolver_info;
+    struct CoppClarabelSettings clarabel_settings;
+    struct CoppClarabelOptions socp_options;
+    struct Copp2SocpResult socp_result;
+    struct Copp3SocpResult copp3_socp_result;
+
+    (void)status;
+    (void)verbosity;
+    (void)slice;
+    (void)mut_slice;
+    (void)vec;
+    (void)usize_vec;
+    (void)matrix;
+    (void)path_options;
+    (void)usize_slice;
+    (void)smoothing_options;
+    (void)smoothing_report;
+    (void)smoothing_status;
+    (void)COPP_VERSION_MAJOR;
+    (void)COPP_VERSION_MINOR;
+    (void)COPP_VERSION_PATCH;
+    (void)COPP_VERSION_STRING;
+    (void)copp_path_from_waypoints_interpolating;
+    (void)copp_path_from_waypoints;
+    (void)copp_smoothing_default_options;
+    (void)copp_path_from_waypoints_fitting;
+    (void)copp_path_smoothing_report;
+    (void)copp_smoothing_report_free;
+    (void)copp_robot_exceed_topp2;
+    (void)copp_robot_exceed_topp3;
+    (void)problem;
+    (void)ra_options;
+    (void)reach_set;
+    (void)copp2_problem;
+    (void)profile3;
+    (void)topp3_problem;
+    (void)copp3_problem;
+    (void)objective;
+    (void)solver_status;
+    (void)linsolver_info;
+    (void)clarabel_settings;
+    (void)socp_options;
+    (void)socp_result;
+    (void)copp3_socp_result;
+    (void)copp_version;
+    (void)copp_status_message;
+    (void)copp_last_error_code;
+    (void)copp_last_error_message;
+    (void)copp_last_error_message_len;
+    (void)copp_last_error_message_copy;
+    (void)copp_clear_last_error;
+    (void)copp_set_last_error_message;
+    (void)copp_set_last_error_message_n;
+    (void)copp_vec_usize_free;
+    (void)copp_profile_3rd_free;
+    (void)copp_clarabel_default_options;
+    (void)copp_clarabel_solution_to_profile_2nd;
+    (void)copp_clarabel_solution_to_profile_3rd;
+    (void)copp_a_to_b_2nd;
+    (void)copp_s_to_t_3rd;
+    (void)copp_t_to_s_uniform_3rd;
+    (void)copp_t_to_s_non_uniform_3rd;
+    (void)copp_force_positive_a_3rd;
+    (void)copp_robot_amax_substitute;
+    (void)copp_robot_dim;
+    (void)copp_robot_len;
+    (void)copp_robot_capacity;
+    (void)copp_robot_is_empty;
+    (void)copp_robot_idx_s_start;
+    (void)copp_robot_idx_s_end;
+    (void)copp_robot_constraint_rows;
+    (void)copp_robot_get_s;
+    (void)copp_robot_get_amax;
+    (void)copp_robot_s_vec;
+    (void)copp_robot_amax_vec;
+    (void)copp_robot_acc_constraints_at;
+    (void)copp_robot_jerk_constraints_at;
+    (void)copp_robot_jerk_linear_constraints_at;
+    (void)copp_robot_clear_constraints;
+    (void)copp_robot_pop_front_n;
+    (void)copp_robot_pop_back_n;
+    (void)copp_robot_pop_front_until;
+    (void)copp_robot_pop_back_until;
+    (void)copp_robot_set_q_2nd;
+    (void)copp_robot_set_q_3rd;
+    (void)copp_add_axial_torque_limits;
+    (void)copp_robot_clear_inverse_dynamics;
+    (void)topp3_lp;
+    (void)topp3_lp_expert;
+    (void)topp3_socp;
+    (void)topp3_socp_expert;
+    (void)copp3_socp;
+    (void)copp3_socp_expert;
+    (void)copp3_socp_result_free;
+    return 0;
+}

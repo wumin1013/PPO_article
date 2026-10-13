@@ -1,0 +1,3 @@
+Data availability
+
+The simulation data, evaluation code, trained models and command trajectories supporting the results of this study are available from the corresponding author upon reasonable request.

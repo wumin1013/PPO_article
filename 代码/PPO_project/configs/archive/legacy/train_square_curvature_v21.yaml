@@ -1,0 +1,78 @@
+# v2.1 配置文件：曲率感知基线训练
+seed: 42
+
+environment:
+  epsilon: 1.5
+  interpolation_period: 0.001
+  max_steps: 4000
+  lookahead_points: 0
+  
+  # v2.1: 曲率观测（必须启用）
+  curvature_observation:
+    enabled: true
+    kappa_max: 1.33     # 1 / (ε/2)
+    dkappa_max: 1.78    # kappa_max / (ε/2)
+
+kinematic_constraints:
+  MAX_VEL: 100.0
+  MAX_ACC: 2000.0
+  MAX_JERK: 20000.0
+  MAX_ANG_VEL: 6.283185307179586
+  MAX_ANG_ACC: 100.0
+  MAX_ANG_JERK: 1000.0
+
+reward_weights:
+  # v2.1 极简奖励（与 v2.0 相同）
+  minimal_mode: true
+  w_s: 20.0
+  w_e: 0.0
+  w_tau: 0.0
+  w_smooth: 0.0
+  
+  boundary:
+    enabled: true
+    penalty: -100.0
+  
+  completion:
+    enabled: true
+    reward: 50.0
+  
+  corridor:
+    enabled: false
+  
+  p4:
+    time_penalty: -0.02
+    stall_enabled: true
+    stall_steps: 300
+    stall_penalty: -8.0
+  
+  p6_1:
+    du_enabled: false
+
+ppo:
+  actor_lr: 2.0e-05
+  critic_lr: 0.0001
+  hidden_dim: 256
+  gamma: 0.99
+  lmbda: 0.95
+  epochs: 10
+  eps: 0.1
+  ent_coef: 0.01
+
+training:
+  use_obs_normalizer: false
+  num_episodes: 500  # 增加训练量以充分学习
+  smoothing_factor: 0.9
+  save_interval: 100
+  log_interval: 50
+
+path:
+  type: square
+  closed: true
+  scale: 10.0
+  num_points: 200
+
+experiment:
+  mode: train
+  name: curvature_v21
+  enable_kcm: true
